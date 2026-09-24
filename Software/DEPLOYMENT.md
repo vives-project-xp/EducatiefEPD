@@ -1,40 +1,90 @@
-# Productiedeployment
+# MySQL-deployment
 
-## Vereisten
+Het platform gebruikt uitsluitend MySQL 8.4. De database is alleen bereikbaar op het interne Docker-netwerk en publiceert geen hostpoort.
 
-- Docker Engine met Compose
-- Een DNS-naam en TLS-terminatie
-- Beveiligde opslag voor `.env` en back-ups
+## Eerste installatie
 
-Gebruik `.env.example` als configuratiesjabloon. Demo-inhoud mag in productie nooit worden geactiveerd.
-
-## Installatie en update
+1. Kopieer `.env.example` naar `.env`.
+2. Vervang alle secrets en configureer de publieke hostnamen.
+3. Laat `DJANGO_DEBUG=0` en `SEED_DEMO=0` staan.
+4. Start het platform:
 
 ```sh
-docker compose pull
-docker compose build web
-docker compose up -d
+docker compose up --build -d
 docker compose ps
 ```
 
-De healthcheck is beschikbaar op `/health/`. Een update voert database-migraties automatisch vóór de applicatiestart uit.
+5. Maak de eerste beheerder:
+
+```sh
+docker compose exec web python manage.py createsuperuser
+```
+
+De webcontainer wacht op MySQL, voert migraties uit, initialiseert de vaste dossierstructuur en start Gunicorn.
+
+Controleer de effectieve applicatieverbinding:
+
+```sh
+docker compose exec web python manage.py check_database
+```
+
+## Databasebeheer
+
+Open een MySQL-console zonder poort 3306 publiek te maken:
+
+```sh
+docker compose exec db mysql -u root -p educatief_epd
+```
+
+Een gewone `docker compose down` bewaart het volume. Gebruik nooit `docker compose down -v` op een omgeving waarvan de gegevens behouden moeten blijven.
 
 ## Back-up
 
+Maak vóór elke update een map buiten het Docker-volume en voer uit:
+
 ```sh
-docker compose exec -T db pg_dump -U epd educatief_epd > educatief_epd.sql
+mkdir -p backups
+docker compose exec -T db sh -c \
+  'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --default-character-set=utf8mb4 "$MYSQL_DATABASE"' \
+  > backups/educatief_epd.sql
 ```
 
-Bewaar back-ups versleuteld en test periodiek een herstelactie in een afzonderlijke omgeving.
+Op PowerShell:
 
-## Centrale aanmelding
+```powershell
+New-Item -ItemType Directory -Force backups | Out-Null
+docker compose exec -T db sh -c 'exec mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --default-character-set=utf8mb4 "$MYSQL_DATABASE"' > backups\educatief_epd.sql
+```
 
-Zet `OIDC_ENABLED=1` en configureer de issuer-endpoints en clientgegevens uit `.env.example`. Groepsclaims worden gemapt op student, docent en beheerder. Lokale Django-aanmelding blijft als noodtoegang beschikbaar.
+Bewaar productiebestanden versleuteld buiten de applicatieserver.
 
-## Operationele aandachtspunten
+## Hersteltest
 
-- Gebruik unieke secrets per omgeving.
-- Beperk directe toegang tot PostgreSQL.
-- Bewaak containerlogs en `/health/`.
-- Controleer de auditlog via `/admin/`.
-- Schakel demo-accounts uit en koppel de echte identity provider vóór ingebruikname.
+Herstel een back-up eerst naar een afzonderlijke database:
+
+```sh
+printf '%s\n' 'CREATE DATABASE educatief_epd_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;' | \
+  docker compose exec -T db sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
+docker compose exec -T db sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" educatief_epd_restore' \
+  < backups/educatief_epd.sql
+printf '%s\n' 'SELECT COUNT(*) FROM educatief_epd_restore.dossier_case;' | \
+  docker compose exec -T db sh -c 'exec mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD"'
+```
+
+Verwijder de hersteldatabase pas nadat recordaantallen en steekproeven zijn gecontroleerd.
+
+## Updates en monitoring
+
+```sh
+docker compose build web
+docker compose up -d
+docker compose ps
+docker compose exec web python manage.py check_database
+```
+
+Controleer `/health/`, containerlogs, beschikbare opslag en MySQL-back-ups. De MySQL-initialisatie verleent de applicatiegebruiker alleen binnen `test_educatief_epd` extra rechten. Daardoor maken Django-tests een aparte tijdelijke database en wijzigen ze de applicatiedatabase niet.
+
+```sh
+docker compose run --rm web python manage.py test
+docker compose run --rm -e DJANGO_DEBUG=0 web python manage.py check --deploy
+```

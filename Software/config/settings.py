@@ -66,22 +66,32 @@ TEMPLATES = [{
 }]
 WSGI_APPLICATION = "config.wsgi.application"
 
-if os.getenv("POSTGRES_DB"):
-    DATABASES = {"default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ["POSTGRES_DB"],
-        "USER": os.environ["POSTGRES_USER"],
-        "PASSWORD": os.environ["POSTGRES_PASSWORD"],
-        "HOST": os.getenv("POSTGRES_HOST", "db"),
-        "PORT": os.getenv("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
-        "OPTIONS": {"connect_timeout": 10},
-    }}
-else:
-    DATABASES = {"default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }}
+MYSQL_REQUIRED_SETTINGS = ["MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST"]
+missing_mysql_settings = [name for name in MYSQL_REQUIRED_SETTINGS if not os.getenv(name)]
+if missing_mysql_settings:
+    raise ImproperlyConfigured(
+        "Ontbrekende MySQL-configuratie: " + ", ".join(missing_mysql_settings)
+    )
+
+DATABASES = {"default": {
+    "ENGINE": "django.db.backends.mysql",
+    "NAME": os.environ["MYSQL_DATABASE"],
+    "USER": os.environ["MYSQL_USER"],
+    "PASSWORD": os.environ["MYSQL_PASSWORD"],
+    "HOST": os.environ["MYSQL_HOST"],
+    "PORT": os.getenv("MYSQL_PORT", "3306"),
+    "CONN_MAX_AGE": 60,
+    "CONN_HEALTH_CHECKS": True,
+    "OPTIONS": {
+        "charset": "utf8mb4",
+        "connect_timeout": 10,
+        "init_command": (
+            "SET sql_mode='STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,"
+            "NO_ENGINE_SUBSTITUTION'"
+        ),
+        "isolation_level": "read committed",
+    },
+}}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

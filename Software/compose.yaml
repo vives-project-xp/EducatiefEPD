@@ -1,18 +1,24 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: mysql:8.4
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-educatief_epd}
-      POSTGRES_USER: ${POSTGRES_USER:-epd}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init-test-database.sh:/docker-entrypoint-initdb.d/10-test-database.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-epd} -d ${POSTGRES_DB:-educatief_epd}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 20s
 
   web:
     build: .
@@ -20,14 +26,16 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
-      SECRET_KEY: ${SECRET_KEY:-local-development-secret-change-me}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
-      POSTGRES_DB: ${POSTGRES_DB:-educatief_epd}
-      POSTGRES_USER: ${POSTGRES_USER:-epd}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-password}
-      POSTGRES_HOST: db
-      SEED_DEMO: ${SEED_DEMO:-1}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      SEED_DEMO: ${SEED_DEMO:-0}
     depends_on:
       db:
         condition: service_healthy
@@ -36,6 +44,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
 volumes:
-  postgres_data:
+  mysql_data:
