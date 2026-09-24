@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}{{ module.title }} | Basisdossier{% endblock %}
+{% block content %}
+<main class="teacher-shell narrow"><header class="page-bar"><div><p class="eyebrow">Basisdossier · {{ case.patient.name }}</p><h1>{{ module.title }}</h1></div><a class="back" href="{% url 'dossier:teacher_case' case.id %}">← Casus</a></header>
+  {% if module.instructions %}<div class="module-instructions">{{ module.instructions|linebreaks }}</div>{% endif %}
+  <form method="post" class="module-form base-dossier-form">{% csrf_token %}{% include 'dossier/_dynamic_fields.html' with locked=False %}{% if module.kind != 'information' %}<button class="primary button" type="submit" name="action" value="save">Basisdossier bewaren</button>{% endif %}</form>
+</main>
+{% endblock %}

@@ -1,7 +1,41 @@
 services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-educatief_epd}
+      POSTGRES_USER: ${POSTGRES_USER:-epd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-epd} -d ${POSTGRES_DB:-educatief_epd}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   web:
     build: .
+    restart: unless-stopped
     ports:
       - "8001:8001"
-    volumes:
-      - .:/app
+    environment:
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-1}
+      SECRET_KEY: ${SECRET_KEY:-local-development-secret-change-me}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB:-educatief_epd}
+      POSTGRES_USER: ${POSTGRES_USER:-epd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-password}
+      POSTGRES_HOST: db
+      SEED_DEMO: ${SEED_DEMO:-1}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), 3).close()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

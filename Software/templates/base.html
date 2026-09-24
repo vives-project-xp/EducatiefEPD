@@ -1,1 +1,18 @@
-{% load static %}<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{% block title %}Educatief EPD{% endblock %}</title><link rel="stylesheet" href="{% static 'epd.css' %}"></head><body>{% block content %}{% endblock %}</body></html>
+{% load static %}
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Educatief EPD{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'epd.css' %}">
+</head>
+<body>
+  {% if messages %}
+    <div class="messages" aria-live="polite">
+      {% for message in messages %}<p class="message {{ message.tags }}">{{ message }}</p>{% endfor %}
+    </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</body>
+</html>

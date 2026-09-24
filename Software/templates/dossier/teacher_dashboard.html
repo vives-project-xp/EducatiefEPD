@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block title %}Docentdashboard | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell">
+  <header class="page-bar"><div><p class="eyebrow">Docentomgeving</p><h1>Patiëntcasussen</h1></div><div class="header-actions"><a class="outline" href="{% url 'dossier:library_list' %}">Dossierstructuur</a><a class="primary" href="{% url 'dossier:teacher_case_create' %}">Nieuwe patiënt en casus</a><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="text-button">Afmelden</button></form></div></header>
+  <form class="filter-bar" method="get"><input name="q" value="{{ query }}" placeholder="Zoek patiënt of casus"><select name="status"><option value="">Alle statussen</option><option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>Concept ({{ counts.draft }})</option><option value="published" {% if status_filter == 'published' %}selected{% endif %}>Gepubliceerd ({{ counts.published }})</option><option value="archived" {% if status_filter == 'archived' %}selected{% endif %}>Gearchiveerd ({{ counts.archived }})</option></select><button class="outline button">Filteren</button></form>
+  <div class="teacher-list">{% for case in cases %}<a class="teacher-row" href="{% url 'dossier:teacher_case' case.id %}"><div><strong>{{ case.title }}</strong><span>{{ case.patient.name }} · {{ case.course }}</span></div><div><span class="state status-{{ case.status }}">{{ case.get_status_display }}</span><span>{{ case.student_cases.count }} studenten · {{ case.modules.count }} vaste onderdelen</span></div></a>{% empty %}<p class="empty-state">Geen casussen gevonden.</p>{% endfor %}</div>
+</main>
+{% endblock %}

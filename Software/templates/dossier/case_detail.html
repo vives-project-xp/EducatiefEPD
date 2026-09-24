@@ -1,35 +1,28 @@
 {% extends 'base.html' %}
-{% block title %}{{ case.title }} | Educatief EPD{% endblock %}
+{% block title %}{{ student_case.case_title }} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="case-viewer">
-	<header class="viewer-header"><h1>{{ case.title }}</h1><a href="{% url 'dossier:home' %}" aria-label="Terug naar casussen">↗</a></header>
-	<div class="viewer-grid">
-		<section class="reading-pane">
-			<div class="case-banner"><span class="menu-square">≡</span><strong>VRK B - {{ case.patient.name }}</strong></div>
-			{% if selected %}
-				<h2>{{ selected.phase }}: {{ selected.title|cut:'Diagnostische fase: '|cut:'Planningsfase: '|cut:'Evaluatiefase: ' }}</h2>
-				<div class="assignment-content">{{ selected.content|linebreaks }}</div>
-			{% else %}
-				<h2>Inleiding</h2>
-				<p class="intro-copy">In deze casus maak je kennis met Mia Vanbelle. Mia meldt zich aan op de verlosafdeling met spontane arbeid. Ze gedraagt zich heel ongerust en geeft aan dat de contracties hevig en pijnlijk zijn. Ze denkt bovendien dat ze al vruchtwater verliest. Haar partner, Vinck Stefaan, is aanwezig.</p>
-				<h2>Leerdoelen</h2>
-				<p class="intro-copy">De student maakt een zorgplan op volgens het klinisch redeneerplan.</p>
-			{% endif %}
-			<div class="pager">
-				{% if previous_assignment %}
-					<a href="{% url 'dossier:case_detail' case.id %}?assignment={{ previous_assignment.id }}" aria-label="Vorige opdracht">‹</a>
-				{% elif selected and first_assignment and selected.id == first_assignment.id %}
-					<a href="{% url 'dossier:case_detail' case.id %}" aria-label="Terug naar inleiding">‹</a>
-				{% endif %}
-				{% if next_assignment %}
-					<a href="{% url 'dossier:case_detail' case.id %}?assignment={{ next_assignment.id }}" aria-label="Volgende opdracht">›</a>
-				{% endif %}
-			</div>
-		</section>
-		<aside class="case-panel">
-			<section class="patient-card"><img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}"><div><strong>{{ case.patient.name }}</strong><p>{{ case.patient.context }}</p></div></section>
-			<section class="assignment-panel"><h2>Opdrachten</h2><p class="course-label">{{ case.course }}</p>{% for assignment in assignments %}<a class="assignment-row {% if selected and selected.id == assignment.id %}active-row{% endif %}" href="{% url 'dossier:case_detail' case.id %}?assignment={{ assignment.id }}"><span class="assignment-icon">↗</span><span><small>{{ assignment.phase }}:</small><strong>{{ assignment.title }}</strong></span><b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b><span class="arrow">⌄</span></a>{% endfor %}</section>
-		</aside>
-	</div>
+  <header class="viewer-header"><div><p class="eyebrow">{{ student_case.get_status_display }}</p><h1>{{ student_case.case_title }}</h1></div><a href="{% url 'dossier:home' %}" aria-label="Terug naar casussen">×</a></header>
+  <div class="viewer-grid">
+    <section class="reading-pane">
+      <div class="case-banner"><span class="menu-square">≡</span><strong>{{ student_case.patient_name }}</strong></div>
+      {% if selected %}
+        <h2>{{ selected.phase }}: {{ selected.title }}</h2><div class="assignment-content">{{ selected.content|linebreaks }}</div>
+        <form method="post" class="answer-form">{% csrf_token %}<input type="hidden" name="assignment" value="{{ selected.id }}"><label for="answer">Jouw uitwerking</label><textarea id="answer" name="answer" rows="10" {% if student_case.locked %}disabled{% endif %}>{{ selected.answer }}</textarea>
+          {% if selected.feedback %}<div class="feedback"><strong>Feedback docent</strong>{{ selected.feedback|linebreaks }}</div>{% endif %}
+          {% if not student_case.locked %}<div class="form-actions"><button class="outline button" name="action" value="save">Bewaren</button><button class="primary button" name="action" value="submit">Opdracht indienen</button></div>{% endif %}
+        </form>
+      {% else %}
+        <h2>Inleiding</h2><div class="intro-copy">{{ student_case.introduction|default:"Lees de patiëntgegevens en opdrachten aandachtig."|linebreaks }}</div><h2>Leerdoelen</h2><div class="intro-copy">{{ student_case.learning_objectives|linebreaks }}</div>
+      {% endif %}
+      <div class="pager">{% if previous_assignment %}<a href="?assignment={{ previous_assignment.id }}" aria-label="Vorige opdracht">‹</a>{% elif selected %}<a href="{% url 'dossier:case_detail' case.id %}" aria-label="Terug naar inleiding">‹</a>{% endif %}{% if next_assignment %}<a href="?assignment={{ next_assignment.id }}" aria-label="Volgende opdracht">›</a>{% endif %}</div>
+    </section>
+    <aside class="case-panel">
+      <section class="patient-card">{% if student_case.patient_image %}<img src="{{ student_case.patient_image }}" alt="Fictieve patiënt {{ student_case.patient_name }}">{% endif %}<div><strong>{{ student_case.patient_name }}</strong><p>{{ student_case.patient_context }}</p></div></section>
+      <section class="assignment-panel"><h2>Opdrachten</h2><p class="course-label">{{ student_case.course }}</p>{% for assignment in assignments %}<a class="assignment-row {% if selected.id == assignment.id %}active-row{% endif %}" href="?assignment={{ assignment.id }}"><span class="assignment-icon">↗</span><span><small>{{ assignment.phase }}:</small><strong>{{ assignment.title }}</strong></span><b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b></a>{% endfor %}</section>
+      <a class="primary dossier-link" href="{% url 'dossier:dossier' case.id %}">Open patiëntendossier</a>
+      {% if not student_case.locked %}<form method="post" action="{% url 'dossier:submit_student_case' case.id %}" class="submit-case">{% csrf_token %}<button class="outline button">Volledig dossier indienen</button></form>{% endif %}
+    </aside>
+  </div>
 </main>
 {% endblock %}

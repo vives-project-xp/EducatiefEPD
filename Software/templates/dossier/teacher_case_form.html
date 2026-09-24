@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}{% if mode == 'edit' %}Casus aanpassen{% else %}Nieuwe patiënt{% endif %} | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell narrow"><header class="page-bar"><div><p class="eyebrow">Docentomgeving</p><h1>{% if mode == 'edit' %}Patiënt en casus aanpassen{% else %}Nieuwe fictieve patiënt{% endif %}</h1></div><a class="back" href="{% if case %}{% url 'dossier:teacher_case' case.id %}{% else %}{% url 'dossier:teacher_dashboard' %}{% endif %}">← Annuleren</a></header>
+  <form method="post" class="editor-form">{% csrf_token %}<section><h2>Patiëntgegevens</h2>{{ patient_form.as_div }}</section><section><h2>Onderwijscontext</h2>{{ case_form.as_div }}</section><button class="primary button" type="submit">{% if mode == 'edit' %}Wijzigingen bewaren{% else %}Patiënt en basisdossier aanmaken{% endif %}</button></form>
+</main>
+{% endblock %}

@@ -1,17 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}{{ case.patient.name }} | Dossier{% endblock %}
+{% block title %}{{ student_case.patient_name }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
-  <aside class="sidebar">
-    <div class="person"><strong>{{ case.patient.name }}</strong><img src="{{ case.patient.image }}" alt=""></div>
-    <form class="search" method="get"><span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies"></form>
-    <nav>{% for module in modules %}<a href="#module-{{ forloop.counter }}" class="nav-item {% if forloop.first %}selected{% endif %}"><span>{{ module.title }}</span>{% if forloop.first %}<b class="printer">▣</b>{% else %}<b>⌄</b>{% endif %}</a>{% empty %}<p class="empty">Geen functies gevonden.</p>{% endfor %}</nav>
-  </aside>
-  <main class="main">
-    <header class="top"><div><p class="eyebrow">{{ case.course }}</p><h1>{{ case.title }}</h1><p>{{ case.patient.context }}</p></div><a class="back" href="{% url 'dossier:home' %}">← Casussen</a></header>
-    <section class="work"><div class="work-title"><div><p class="eyebrow">Dossier</p><h2>Opdrachten</h2></div><span>{{ case.assignments.count }} opdrachten</span></div>
-      {% for assignment in case.assignments.all %}<article class="assignment-row"><div class="assignment-icon">↗</div><div><small>{{ assignment.phase }}:</small><h3>{{ assignment.title }}</h3></div><strong class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</strong><span class="arrow">⌄</span></article>{% endfor %}
-    </section>
+  <aside class="sidebar"><div class="person"><strong>{{ student_case.patient_name }}</strong>{% if student_case.patient_image %}<img src="{{ student_case.patient_image }}" alt="">{% endif %}</div><form class="search" method="get"><span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies"></form><nav>{% for module in modules %}<a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}"><span>{{ module.title }}</span><b>›</b></a>{% empty %}<p class="empty">Geen functies gevonden.</p>{% endfor %}</nav></aside>
+  <main class="main"><header class="top"><div><p class="eyebrow">{{ student_case.course }}</p><h1>{{ student_case.patient_name }}</h1><p>{{ student_case.patient_context }}</p></div><a class="back" href="{% url 'dossier:home' %}">← Casussen</a></header>
+    <section class="work">{% if selected %}<div class="work-title"><div><p class="eyebrow">{{ selected.get_kind_display }}</p><h2>{{ selected.title }}</h2></div><span>{{ student_case.get_status_display }}</span></div>{% if selected.instructions %}<div class="module-instructions">{{ selected.instructions|linebreaks }}</div>{% endif %}
+      <form method="post" class="module-form">{% csrf_token %}<input type="hidden" name="module" value="{{ selected.id }}">{% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}{% if not student_case.locked and selected.kind != 'information' %}<button class="primary button" type="submit" name="action" value="save">Bewaren</button>{% endif %}</form>
+    {% else %}<p class="empty-state">Dit dossier bevat geen onderdelen.</p>{% endif %}</section>
   </main>
 </div>
 {% endblock %}

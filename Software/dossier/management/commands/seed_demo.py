@@ -1,38 +1,89 @@
+from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from dossier.models import Assignment, Case, Module, Patient
+
+from dossier.models import Assignment, Case, Patient, Profile
+from dossier.services import create_case_structure
 
 
 class Command(BaseCommand):
+    help = "Maak lokale demo-accounts en een voorbeeldcasus aan."
+
     def handle(self, *args, **options):
+        user_model = get_user_model()
+        teacher, _ = user_model.objects.get_or_create(
+            username="docent", defaults={"first_name": "Demo", "last_name": "Docent"}
+        )
+        teacher.set_password("docent123")
+        teacher.save()
+        Profile.objects.update_or_create(
+            user=teacher, defaults={"role": Profile.Role.TEACHER, "education": "Vroedkunde"}
+        )
+
+        student, _ = user_model.objects.get_or_create(
+            username="student", defaults={"first_name": "Demo", "last_name": "Student"}
+        )
+        student.set_password("student123")
+        student.save()
+        Profile.objects.update_or_create(user=student, defaults={"role": Profile.Role.STUDENT})
+
+        admin, _ = user_model.objects.get_or_create(
+            username="beheerder",
+            defaults={"first_name": "Demo", "last_name": "Beheerder", "is_staff": True, "is_superuser": True},
+        )
+        admin.is_staff = True
+        admin.is_superuser = True
+        admin.set_password("beheerder123")
+        admin.save()
+        Profile.objects.update_or_create(user=admin, defaults={"role": Profile.Role.ADMIN})
+
         patient, _ = Patient.objects.update_or_create(
             reference="VRK-IC1-MIA",
             defaults={
                 "name": "Vanbelle, Mia",
+                "gender": Patient.Gender.FEMALE,
                 "image": "/static/mia-avatar.svg",
-                "context": "Vives_Ziekenhuis - Moeder - Kind - 2de - 3de lijn, Verloskamer, Vroedvrouw",
+                "context": "Vives Ziekenhuis - Moeder en Kind - Verloskamer",
+                "created_by": teacher,
             },
         )
         case, _ = Case.objects.update_or_create(
-            title="VRK IC1 - Vanbelle Mia",
-            defaults={"patient": patient, "course": "Vroedkunde Brugge_OLF1_IC 1", "published": True},
+            patient=patient,
+            defaults={
+                "title": "VRK IC1 - Vanbelle Mia",
+                "course": "Vroedkunde Brugge - OLF1 - IC 1",
+                "introduction": (
+                    "Mia meldt zich aan op de verlosafdeling met spontane arbeid. "
+                    "Ze is ongerust en denkt dat ze vruchtwater verliest."
+                ),
+                "learning_objectives": "De student maakt een zorgplan op volgens het klinisch redeneerplan.",
+                "created_by": teacher,
+            },
         )
-        titles = [
-            "Dashboard", "Anamnese", "Zwangerschapsdossier", "Partusdossier", "MIC dossier",
-            "Postpartumdossier", "Kort verslag graviditeit, partus en postpartum", "NICU / N*-dossier",
-            "Screening emotioneel welzijn", "Klinisch redeneerplan", "Uitwerking opdracht",
+        create_case_structure(case)
+
+        anamnese = case.modules.filter(title="Anamnese").first()
+        if anamnese:
+            field_by_label = {field.label: field for field in anamnese.fields.all()}
+            anamnese.base_data = {
+                field_by_label["Reden van opname"].key: "Spontane arbeid met vermoeden van gebroken vliezen.",
+                field_by_label["Huidige klachten en symptomen"].key: "Hevige pijnlijke contracties en mogelijk vruchtwaterverlies.",
+                field_by_label["Medische voorgeschiedenis"].key: "Geen relevante voorgeschiedenis gekend.",
+            }
+            anamnese.save(update_fields=["base_data"])
+
+        assignments = [
+            ("Opdracht 1", "Diagnostische fase: gegevens verzamelen en een voorlopige diagnose vaststellen", "Welke gegevens zijn prioritair? Welke bijkomende gegevens verzamel je uit het dossier, het opnamegesprek en het onderzoek?"),
+            ("Opdracht 2", "Planningsfase: risicofactoren, diagnose en zorgplan", "Formuleer de definitieve diagnoses, verwachte resultaten, evaluatiecriteria en interventies."),
+            ("Opdracht 3", "Evaluatiefase: resultaat evalueren", "Zijn de verwachte resultaten bereikt en moet het zorgplan worden aangepast?"),
         ]
-        for position, title in enumerate(titles):
-            Module.objects.update_or_create(case=case, title=title, defaults={"position": position})
-        Assignment.objects.update_or_create(case=case, position=1, defaults={
-            "phase": "Opdracht 1", "title": "Diagnostische fase: Gegevens verzamelen + (voorlopige) diagnose vaststellen", "status": "resubmit",
-            "content": "1. Welke gegevens uit de omschrijving van de situatie zijn prioritair?\n\n2. Welke voorlopige potentiële of dreigende vroedkundige diagnose(s) stel je vast op basis van deze gegevens?\n\n3. Welke bijkomende gegevens verzamel je uit het dossier (anamnese)?\n\n4. Welke bijkomende gegevens verzamel je door het opnamegesprek?\n\n5. Welke bijkomende gegevens verzamel je door het opname-onderzoek?\n\nBeantwoord de 5 vragen in 1 registratie onder de functie 'Uitwerking opdracht.'",
-        })
-        Assignment.objects.update_or_create(case=case, position=2, defaults={
-            "phase": "Opdracht 2", "title": "Planningsfase: Risicofactoren + definitieve diagnose vaststellen + opmaken van een zorgplan", "status": "todo",
-            "content": "1. Welke risicofactoren stel je vast op basis van de bijkomende gegevensverzameling?\n\n2. Welke definitieve diagnoses stel je vast op basis van de bijkomende gegevensverzameling?\n\n3. Formuleer bij de definitieve diagnoses het verwachte resultaat.\n\n4. Formuleer telkens de bijhorende evaluatiecriteria waaraan je kan zien dat het resultaat is bereikt.\n\n5. Formuleer de vroedkundige interventies om het resultaat te bekomen.\n\n6. Welke bijkomende gegevens verzamel je tijdens het vervolggesprek en/of -onderzoek?\n\nBeantwoord de 6 vragen in 1 registratie onder de functie 'Uitwerking opdracht.'",
-        })
-        Assignment.objects.update_or_create(case=case, position=3, defaults={
-            "phase": "Opdracht 3", "title": "Evaluatiefase: Resultaat evalueren", "status": "todo",
-            "content": "Zijn de verwachte resultaten bereikt? Moet het zorgplan worden aangepast?\n\nBeantwoord de vraag in 1 registratie onder de functie 'Uitwerking opdracht.'",
-        })
-        self.stdout.write(self.style.SUCCESS("Voorbeeldcasus klaar."))
+        for position, (phase, title, content) in enumerate(assignments, start=1):
+            Assignment.objects.update_or_create(
+                case=case, position=position,
+                defaults={"phase": phase, "title": title, "content": content},
+            )
+
+        case.publish()
+        case.save()
+        self.stdout.write(self.style.SUCCESS(
+            "Demo klaar: docent/docent123, student/student123, beheerder/beheerder123"
+        ))

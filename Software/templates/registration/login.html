@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% block title %}Aanmelden | Educatief EPD{% endblock %}
+{% block content %}
+<main class="login-shell">
+  <section class="login-panel">
+    <p class="eyebrow">VIVES onderwijsomgeving</p>
+    <h1>Educatief EPD</h1>
+    <p class="lead">Meld je aan als docent of student.</p>
+    {% if form.errors %}<p class="form-error">De gebruikersnaam of het wachtwoord klopt niet.</p>{% endif %}
+    <form method="post" class="stack-form">
+      {% csrf_token %}
+      <label for="id_username">Gebruikersnaam</label>
+      {{ form.username }}
+      <label for="id_password">Wachtwoord</label>
+      {{ form.password }}
+      <button class="primary button" type="submit">Aanmelden</button>
+    </form>
+    {% if oidc_enabled %}<div class="login-separator"><span>of</span></div><a class="outline sso-button" href="{% url 'oidc_authentication_init' %}">Aanmelden via de hogeschool</a>{% endif %}
+  </section>
+</main>
+{% endblock %}
