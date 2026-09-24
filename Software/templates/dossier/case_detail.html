@@ -15,11 +15,20 @@
 				<h2>Leerdoelen</h2>
 				<p class="intro-copy">De student maakt een zorgplan op volgens het klinisch redeneerplan.</p>
 			{% endif %}
-			<div class="pager"><a href="{% url 'dossier:case_detail' case.id %}?assignment={{ assignments.0.id }}">‹</a>{% if last_assignment %}<a href="{% url 'dossier:case_detail' case.id %}?assignment={{ last_assignment.id }}">›</a>{% endif %}</div>
+			<div class="pager">
+				{% if previous_assignment %}
+					<a href="{% url 'dossier:case_detail' case.id %}?assignment={{ previous_assignment.id }}" aria-label="Vorige opdracht">‹</a>
+				{% elif selected and first_assignment and selected.id == first_assignment.id %}
+					<a href="{% url 'dossier:case_detail' case.id %}" aria-label="Terug naar inleiding">‹</a>
+				{% endif %}
+				{% if next_assignment %}
+					<a href="{% url 'dossier:case_detail' case.id %}?assignment={{ next_assignment.id }}" aria-label="Volgende opdracht">›</a>
+				{% endif %}
+			</div>
 		</section>
 		<aside class="case-panel">
 			<section class="patient-card"><img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}"><div><strong>{{ case.patient.name }}</strong><p>{{ case.patient.context }}</p></div></section>
-			<section class="assignment-panel"><h2>Opdrachten</h2><p class="course-label">{{ case.course }}</p>{% for assignment in assignments %}<a class="assignment-row {% if selected.id == assignment.id %}active-row{% endif %}" href="{% url 'dossier:case_detail' case.id %}?assignment={{ assignment.id }}"><span class="assignment-icon">↗</span><span><small>{{ assignment.phase }}:</small><strong>{{ assignment.title }}</strong></span><b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b><span class="arrow">⌄</span></a>{% endfor %}</section>
+			<section class="assignment-panel"><h2>Opdrachten</h2><p class="course-label">{{ case.course }}</p>{% for assignment in assignments %}<a class="assignment-row {% if selected and selected.id == assignment.id %}active-row{% endif %}" href="{% url 'dossier:case_detail' case.id %}?assignment={{ assignment.id }}"><span class="assignment-icon">↗</span><span><small>{{ assignment.phase }}:</small><strong>{{ assignment.title }}</strong></span><b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b><span class="arrow">⌄</span></a>{% endfor %}</section>
 		</aside>
 	</div>
 </main>
