@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from EducatiefEPD.dossier.models import Assignment, Case, Module, Patient
+from EducatiefEPD.Software.dossier.models import Assignment, Case, Module, Patient
 
 
 class Command(BaseCommand):
