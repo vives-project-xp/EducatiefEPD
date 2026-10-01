@@ -37,7 +37,7 @@ Een veilig, flexibel en herbruikbaar leerplatform ontwikkelen. Het platform star
 
 | | Naam | Functie |
 | --- | --- | --- |
-| <img src="https://github.com/EwoudBoutje.png" width="64" alt="Ewoud Bouttelisier"> | Ewoud Bouttelier | Ontwikkelaar |
+| <img src="https://github.com/EwoudBoutje.png" width="64" alt="Ewoud Bouttelisier"> | Ewoud Bouttelisier | Ontwikkelaar |
 | <img src="https://github.com/Mathiss-Rambour.png" width="64" alt="Mathiss Rambour"> | Mathiss Rambour | Ontwikkelaar |
 | <img src="https://github.com/bhavninderpalsingh-tech.png" width="64" alt="Bhavninder Pal Singh"> | Bhavninder Pal Singh | Ontwikkelaar |
 
