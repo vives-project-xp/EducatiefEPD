@@ -1,6 +1,8 @@
 services:
   db:
-    image: mysql:8.4
+    build:
+      context: .
+      dockerfile: docker/mysql/Dockerfile
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
@@ -12,7 +14,6 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./docker/mysql/init-test-database.sh:/docker-entrypoint-initdb.d/10-test-database.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
       interval: 5s
