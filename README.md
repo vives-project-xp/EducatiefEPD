@@ -3,6 +3,8 @@
 [![VIVES Elektronica-ICT](https://img.shields.io/badge/VIVES-Elektronica--ICT-blue)](https://www.vives.be/nl/technology/elektronica-ict)
 [![Project Experience](https://img.shields.io/badge/Project-Experience-brightgreen)](https://github.com/vives-project-xp)
 
+<img src="./media/Foto_EPD.jpg">
+
 Een educatief elektronisch patiëntendossier voor zorgopleidingen. Docenten moeten fictieve
 patiëntcasussen en basisdossiers kunnen voorbereiden, terwijl iedere student een eigen
 bewerkbare versie van zo’n dossier krijgt.
@@ -38,5 +40,8 @@ Een veilig, flexibel en herbruikbaar leerplatform ontwikkelen. Het platform star
 | <img src="https://github.com/EwoudBoutje.png" width="64" alt="Ewoud Bouttelisier"> | Ewoud Bouttelier | Ontwikkelaar |
 | <img src="https://github.com/Mathiss-Rambour.png" width="64" alt="Mathiss Rambour"> | Mathiss Rambour | Ontwikkelaar |
 | <img src="https://github.com/bhavninderpalsingh-tech.png" width="64" alt="Bhavninder Pal Singh"> | Bhavninder Pal Singh | Ontwikkelaar |
+
+
+<img src="./media/Poster P.E. Educatief EPD.png">
 
 
