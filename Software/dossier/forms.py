@@ -84,6 +84,9 @@ class FieldConfigurationForm(forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        self.instance.options = split_lines(cleaned.get("options_text", ""))
+        self.instance.rows = split_lines(cleaned.get("rows_text", ""))
+        self.instance.columns = split_lines(cleaned.get("columns_text", ""))
         field_type = cleaned.get("field_type")
         if field_type == FieldDefinition.FieldType.SELECT and not split_lines(cleaned.get("options_text", "")):
             self.add_error("options_text", "Voeg minstens één optie toe.")
@@ -93,6 +96,14 @@ class FieldConfigurationForm(forms.ModelForm):
             if not split_lines(cleaned.get("columns_text", "")):
                 self.add_error("columns_text", "Voeg minstens één kolom toe.")
         return cleaned
+
+    def _update_errors(self, errors):
+        # Model validation uses JSON field names; the editor exposes text inputs.
+        if hasattr(errors, "error_dict"):
+            for name in ("options", "rows", "columns"):
+                if name in errors.error_dict:
+                    errors.error_dict[f"{name}_text"] = errors.error_dict.pop(name)
+        super()._update_errors(errors)
 
     def save(self, commit=True):
         instance = super().save(commit=False)

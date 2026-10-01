@@ -36,6 +36,20 @@ EPD-beheerder kan alle groepen en casussen beheren.
    bibliotheek en de casusstructuur kunnen later veranderen zonder reeds gestarte
    studentdossiers te wijzigen.
 
+## Bibliotheek beheren
+
+Docenten en EPD-beheerders kunnen in **Bibliotheek** alle dossiermodules, vragenlijsten
+en matrices bewerken, ook de vaste standaardmodules. Kies **Bewerk** om de instellingen
+en de onderdelen te openen. Per veld kun je het type, de opties en de volgorde aanpassen,
+een veld toevoegen of **Verwijderen** kiezen.
+
+Met **Verwijderen** op een bibliotheekkaart of **Uit bibliotheek verwijderen** in de
+editor haal je het onderdeel uit de actieve bibliotheek. Het wordt gearchiveerd en niet
+meer aan nieuwe casussen toegevoegd. Bestaande casuskopieën en studentdossiers blijven
+behouden. Hernoemde modules en verwijderde velden worden bij een herstart niet teruggezet.
+De instelling om een template automatisch aan nieuwe casussen toe te voegen blijft bij
+de EPD-beheerder.
+
 ## Student
 
 Open **Mijn casussen**. Alleen gepubliceerde of eerder gestarte casussen die aan een

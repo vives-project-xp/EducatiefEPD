@@ -1,3 +1,50 @@
 {% extends 'base.html' %}
-{% block title %}Dossierstructuur | Educatief EPD{% endblock %}
-{% block content %}<main class="teacher-shell"><header class="page-bar"><div><p class="eyebrow">Herbruikbare inhoud</p><h1>Bibliotheek</h1><p>Nieuwe casussen krijgen vaste onderdelen; andere templates voeg je gericht als kopie toe.</p></div><div class="header-actions"><a class="primary" href="{% url 'dossier:library_create' %}">Template toevoegen</a><a class="back" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a></div></header><form class="filter-bar" method="get"><input name="q" value="{{ query }}" placeholder="Zoek onderdeel"><input name="education" value="{{ education_filter }}" placeholder="Opleiding"><input name="theme" value="{{ theme_filter }}" placeholder="Thema"><select name="category"><option value="">Alle categorieën</option>{% for value,label in categories %}<option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button class="outline button">Filteren</button></form><div class="library-grid">{% for item in templates %}<a class="library-card" href="{% url 'dossier:library_detail' item.id %}"><span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · vast{% endif %}</span><h2>{{ item.title }}</h2><p>{{ item.description }}</p><footer><span>{{ item.education }}</span><span>{{ item.theme }}</span></footer></a>{% empty %}<p class="empty-state">Geen onderdelen gevonden.</p>{% endfor %}</div></main>{% endblock %}
+{% block title %}Bibliotheek | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell">
+  <header class="page-bar">
+    <div>
+      <p class="eyebrow">Herbruikbare inhoud</p>
+      <h1>Bibliotheek</h1>
+      <p>Beheer dossiermodules, vragenlijsten, matrices en hun onderdelen voor nieuwe casuskopieën.</p>
+    </div>
+    <div class="header-actions">
+      <a class="primary" href="{% url 'dossier:library_create' %}">Onderdeel toevoegen</a>
+      <a class="back" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
+    </div>
+  </header>
+  <form class="filter-bar" method="get">
+    <input name="q" value="{{ query }}" placeholder="Zoek onderdeel" aria-label="Zoek onderdeel">
+    <input name="education" value="{{ education_filter }}" placeholder="Opleiding" aria-label="Opleiding">
+    <input name="theme" value="{{ theme_filter }}" placeholder="Thema" aria-label="Thema">
+    <select name="category" aria-label="Categorie">
+      <option value="">Alle categorieën</option>
+      {% for value,label in categories %}
+      <option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="outline button">Filteren</button>
+  </form>
+  <div class="library-grid">
+    {% for item in templates %}
+    <article class="library-card">
+      <a class="library-card-content" href="{% url 'dossier:library_detail' item.id %}">
+        <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · vast{% endif %}</span>
+        <h2>{{ item.title }}</h2>
+        <p>{{ item.description }}</p>
+      </a>
+      <footer><span>{{ item.education|default:'Alle opleidingen' }}</span><span>{{ item.theme }}</span></footer>
+      <div class="row-actions library-card-actions">
+        <a href="{% url 'dossier:library_detail' item.id %}">Bewerk</a>
+        <form method="post" action="{% url 'dossier:library_archive' item.id %}" onsubmit="return confirm('Dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
+          {% csrf_token %}
+          <button class="text-button danger" type="submit" aria-label="{{ item.title }} verwijderen">Verwijderen</button>
+        </form>
+      </div>
+    </article>
+    {% empty %}
+    <p class="empty-state">Geen onderdelen gevonden.</p>
+    {% endfor %}
+  </div>
+</main>
+{% endblock %}

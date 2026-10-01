@@ -147,6 +147,37 @@ try {
   }
   console.log(JSON.stringify({fixture, path: new URL(state.url).pathname,
     educationStatus: permissions[0], groupStatus: permissions[1]}, null, 2));
+  if (process.argv.includes('--library')) {
+    if (fixture === 'student') {
+      const status = await evaluate("fetch('/bibliotheek/').then(response => response.status)");
+      if (status !== 403) throw Error(`Student can open library: ${status}`);
+      console.log(JSON.stringify({libraryStatus: status}));
+    } else {
+      await command('Page.navigate', { url: 'http://localhost:8001/bibliotheek/' });
+      await waitFor("document.querySelectorAll('.library-card').length > 0", 'library cards');
+      const library = await evaluate(`(() => {
+        const cards = [...document.querySelectorAll('.library-card')];
+        const editable = cards.every(card => card.querySelector('.row-actions a') &&
+          card.querySelector('form button[type="submit"]'));
+        const anamnese = cards.find(card => card.querySelector('h2').textContent === 'Anamnese');
+        return {cards: cards.length, editable, url: anamnese?.querySelector('a').href};
+      })()`);
+      if (!library.editable || !library.url) throw Error(`Missing library controls: ${JSON.stringify(library)}`);
+      await command('Page.navigate', { url: library.url });
+      await waitFor("Boolean(document.querySelector('.library-field-row'))", 'library fields');
+      const editor = await evaluate(`(() => {
+        const rows = [...document.querySelectorAll('.library-field-row')];
+        return {fields: rows.length, editable: rows.every(row =>
+          row.querySelector('.row-actions a') && row.querySelector('form button[type="submit"]')),
+          settings: Boolean(document.querySelector('input[name="title"]')),
+          addField: Boolean(document.querySelector('a[href$="/veld/nieuw/"]'))};
+      })()`);
+      if (!editor.editable || !editor.settings || !editor.addField) {
+        throw Error(`Missing library field editor: ${JSON.stringify(editor)}`);
+      }
+      console.log(JSON.stringify({libraryCards: library.cards, editor}, null, 2));
+    }
+  }
   if (process.argv.includes('--logout')) {
     await evaluate(`(() => {
       document.querySelector('form[action="/accounts/logout/"]').requestSubmit();

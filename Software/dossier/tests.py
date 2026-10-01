@@ -11,6 +11,7 @@ from .models import (
     Case,
     Education,
     ExternalIdentity,
+    LibraryField,
     LibraryTemplate,
     Patient,
     Profile,
@@ -18,7 +19,7 @@ from .models import (
     TeachingGroup,
 )
 from .auth import EpdOIDCAuthenticationBackend
-from .services import create_case_structure, start_student_case
+from .services import create_case_structure, ensure_default_templates, start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -324,6 +325,136 @@ class EpdWorkflowTests(TestCase):
             reverse("dossier:education_list"),
         )
         self.assertTrue(Education.objects.filter(slug="zorgkunde").exists())
+
+    def test_teacher_can_edit_fixed_library_template_without_teaching_group(self):
+        self.group.delete()
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.get(title="Anamnese")
+        url = reverse("dossier:library_detail", args=[template.id])
+        page = self.client.get(url)
+        self.assertContains(page, "Nieuwe versie bewaren")
+        self.assertContains(page, "Verwijderen")
+        self.assertRedirects(self.client.post(url, {
+            "title": "Anamnese aangepast", "description": "Aangepaste beschrijving",
+            "category": template.category, "education": self.education.id,
+            "theme": template.theme, "instructions": "Nieuwe instructies",
+            "is_fixed": "",
+        }), url)
+        template.refresh_from_db()
+        self.assertEqual(template.title, "Anamnese aangepast")
+        self.assertEqual(template.version, 2)
+        self.assertTrue(template.is_fixed)
+        ensure_default_templates()
+        self.assertFalse(LibraryTemplate.objects.filter(title="Anamnese").exists())
+        self.assertEqual(self.case.modules.get(source_template=template).title, "Anamnese")
+
+    def test_teacher_can_manage_fields_of_shared_library_template(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Gedeelde module", category=LibraryTemplate.Category.MODULE,
+            education=self.education, created_by=self.admin,
+        )
+        create_url = reverse("dossier:library_field_create", args=[template.id])
+        detail_url = reverse("dossier:library_detail", args=[template.id])
+        self.assertRedirects(self.client.post(create_url, {
+            "label": "Zorgkeuze", "field_type": "select", "position": 1,
+            "options_text": "Optie A\nOptie B", "rows_text": "", "columns_text": "",
+        }), detail_url)
+        field = template.fields.get()
+        edit_url = reverse("dossier:library_field_edit", args=[template.id, field.id])
+        self.assertRedirects(self.client.post(edit_url, {
+            "label": "Zorgmatrix", "field_type": "matrix", "position": 2,
+            "help_text": "Vul het plan in", "required": "on", "options_text": "",
+            "rows_text": "Diagnose\nEvaluatie", "columns_text": "Omschrijving\nMotivatie",
+        }), detail_url)
+        field.refresh_from_db()
+        self.assertEqual(field.label, "Zorgmatrix")
+        self.assertEqual(field.rows, ["Diagnose", "Evaluatie"])
+        self.assertEqual(field.columns, ["Omschrijving", "Motivatie"])
+        self.assertTrue(field.required)
+        delete_url = reverse("dossier:library_field_delete", args=[template.id, field.id])
+        self.assertEqual(self.client.get(delete_url).status_code, 405)
+        self.assertRedirects(self.client.post(delete_url), detail_url)
+        self.assertFalse(LibraryField.objects.filter(id=field.id).exists())
+        template.refresh_from_db()
+        self.assertEqual(template.version, 4)
+
+    def test_invalid_library_choice_field_shows_validation_errors(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.get(title="Anamnese")
+        response = self.client.post(reverse("dossier:library_field_create", args=[template.id]), {
+            "label": "Keuze", "field_type": "select", "position": 1,
+            "options_text": "", "rows_text": "", "columns_text": "",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["form"].errors["options_text"])
+        self.assertFalse(template.fields.filter(label="Keuze").exists())
+
+    def test_deleted_last_default_field_stays_deleted_and_copies_are_preserved(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.get(title="Uitwerking opdracht")
+        field = template.fields.get()
+        module = self.case.modules.get(source_template=template)
+        original_kind = module.kind
+        student_case, _ = start_student_case(self.case, self.student)
+        snapshot = student_case.module_responses.get(module=module)
+        original_schema = snapshot.schema
+        self.client.post(reverse("dossier:library_field_delete", args=[template.id, field.id]))
+        create_case_structure(self.case)
+        self.assertFalse(template.fields.exists())
+        module.refresh_from_db()
+        snapshot.refresh_from_db()
+        self.assertEqual(module.kind, original_kind)
+        self.assertEqual(module.fields.count(), 1)
+        self.assertEqual(snapshot.schema, original_schema)
+
+    def test_teacher_can_remove_fixed_template_without_deleting_existing_dossiers(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.get(title="Anamnese")
+        student_case, _ = start_student_case(self.case, self.student)
+        url = reverse("dossier:library_archive", args=[template.id])
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertRedirects(self.client.post(url), reverse("dossier:library_list"))
+        template.refresh_from_db()
+        self.assertEqual(template.status, LibraryTemplate.Status.ARCHIVED)
+        self.assertNotContains(self.client.get(reverse("dossier:library_list")), "Anamnese")
+        self.assertEqual(self.client.get(reverse("dossier:library_detail", args=[template.id])).status_code, 404)
+        ensure_default_templates()
+        self.assertEqual(LibraryTemplate.objects.filter(title="Anamnese").count(), 1)
+        patient = Patient.objects.create(name="Nieuw", reference="AFTER-DELETE")
+        new_case = Case.objects.create(
+            title="Nieuwe casus", patient=patient, education=self.education, course="Vroedkunde",
+        )
+        create_case_structure(new_case)
+        self.assertFalse(new_case.modules.filter(source_template=template).exists())
+        self.assertTrue(self.case.modules.filter(source_template=template).exists())
+        self.assertTrue(student_case.module_responses.filter(title="Anamnese").exists())
+
+    def test_student_cannot_manage_library_via_direct_requests(self):
+        self.client.login(username="student", password="testpass")
+        template = LibraryTemplate.objects.get(title="Anamnese")
+        field = template.fields.first()
+        targets = [
+            ("library_list", []), ("library_create", []),
+            ("library_detail", [template.id]), ("library_archive", [template.id]),
+            ("library_field_create", [template.id]),
+            ("library_field_edit", [template.id, field.id]),
+            ("library_field_delete", [template.id, field.id]),
+        ]
+        for name, args in targets:
+            with self.subTest(view=name):
+                self.assertEqual(self.client.post(reverse(f"dossier:{name}", args=args)).status_code, 403)
+        template.refresh_from_db()
+        self.assertEqual(template.status, LibraryTemplate.Status.ACTIVE)
+        self.assertTrue(template.fields.filter(id=field.id).exists())
+
+    def test_library_field_delete_cannot_target_another_template(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.get(title="Anamnese")
+        other_field = LibraryTemplate.objects.get(title="Partusdossier").fields.first()
+        response = self.client.post(reverse("dossier:library_field_delete", args=[template.id, other_field.id]))
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(LibraryField.objects.filter(id=other_field.id).exists())
 
     def test_invalid_numeric_value_is_rejected(self):
         self.case.publish()

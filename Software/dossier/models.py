@@ -180,6 +180,7 @@ class LibraryTemplate(models.Model):
     theme = models.CharField(max_length=120, blank=True)
     instructions = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=1)
+    seed_key = models.SlugField(max_length=80, unique=True, null=True, blank=True, editable=False)
     is_fixed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(

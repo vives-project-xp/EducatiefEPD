@@ -41,4 +41,5 @@ urlpatterns = [
     path("bibliotheek/<int:template_id>/archiveren/", views.library_archive, name="library_archive"),
     path("bibliotheek/<int:template_id>/veld/nieuw/", views.library_field, name="library_field_create"),
     path("bibliotheek/<int:template_id>/veld/<int:field_id>/", views.library_field, name="library_field_edit"),
+    path("bibliotheek/<int:template_id>/veld/<int:field_id>/verwijderen/", views.library_field_delete, name="library_field_delete"),
 ]

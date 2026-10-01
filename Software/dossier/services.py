@@ -2,6 +2,7 @@ from copy import deepcopy
 
 from django.db import transaction
 from django.db.models import Q
+from django.utils.text import slugify
 
 from .models import (
     AssignmentSubmission,
@@ -141,16 +142,18 @@ def ensure_default_templates():
         slug="vroedkunde", defaults={"name": "Vroedkunde"}
     )
     for blueprint in DEFAULT_DOSSIER:
-        template, _ = LibraryTemplate.objects.get_or_create(
-            title=blueprint["title"], education=education,
+        template, created = LibraryTemplate.objects.get_or_create(
+            seed_key=f"vroedkunde-{slugify(blueprint['title'])}",
             defaults={
+                "title": blueprint["title"],
+                "education": education,
                 "description": blueprint["description"],
                 "category": blueprint["category"],
                 "theme": blueprint["theme"],
                 "is_fixed": True,
             },
         )
-        if template.fields.exists():
+        if not created:
             continue
         for position, (label, field_type) in enumerate(blueprint.get("fields", [])):
             LibraryField.objects.create(
@@ -174,9 +177,6 @@ def create_case_structure(case):
     ).filter(Q(education=case.education) | Q(education__isnull=True)).order_by("id"):
         copied = case.modules.filter(source_template=template).first()
         if copied:
-            if not template.fields.exists() and copied.kind != Module.Kind.INFORMATION:
-                copied.kind = Module.Kind.INFORMATION
-                copied.save(update_fields=["kind"])
             continue
         existing = case.modules.filter(title=template.title).first()
         if existing:

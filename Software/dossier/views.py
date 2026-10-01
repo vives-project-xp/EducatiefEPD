@@ -829,7 +829,7 @@ def library_list(request):
     category = request.GET.get("category", "")
     education = request.GET.get("education", "").strip()
     theme = request.GET.get("theme", "").strip()
-    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("created_by")
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("education")
     if query:
         templates = templates.filter(Q(title__icontains=query) | Q(description__icontains=query))
     if category in LibraryTemplate.Category.values:
@@ -846,28 +846,20 @@ def library_list(request):
 
 
 @login_required
+@transaction.atomic
 def library_template(request, template_id=None):
     require_teacher(request.user)
-    template = get_object_or_404(LibraryTemplate, id=template_id) if template_id else None
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
+    if request.method == "POST":
+        templates = templates.select_for_update()
+    template = get_object_or_404(templates, id=template_id) if template_id else None
     form = LibraryTemplateForm(request.POST or None, instance=template)
-    can_manage = is_admin(request.user) or (
-        template is not None and not template.is_fixed and template.created_by_id == request.user.id
-    )
     if not is_admin(request.user):
         form.fields.pop("is_fixed")
-        form.fields["education"].queryset = Education.objects.filter(
-            id__in=TeachingGroup.objects.filter(teacher=request.user).values("education_id")
-        )
-        form.fields["education"].required = True
-        if not template:
-            can_manage = form.fields["education"].queryset.exists()
-    if request.method == "POST" and not can_manage:
-        raise PermissionDenied
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         if not item.pk:
             item.created_by = request.user
-            item.is_fixed = False
         else:
             item.version += 1
         item.save()
@@ -876,7 +868,7 @@ def library_template(request, template_id=None):
         return redirect("dossier:library_detail", template_id=item.id)
     if template:
         return render(request, "dossier/library_detail.html", {
-            "template_item": template, "form": form, "can_manage": can_manage,
+            "template_item": template, "form": form,
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,
@@ -884,11 +876,13 @@ def library_template(request, template_id=None):
 
 
 @login_required
+@transaction.atomic
 def library_field(request, template_id, field_id=None):
     require_teacher(request.user)
-    template = get_object_or_404(LibraryTemplate, id=template_id)
-    if not (is_admin(request.user) or (not template.is_fixed and template.created_by == request.user)):
-        raise PermissionDenied
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
+    if request.method == "POST":
+        templates = templates.select_for_update()
+    template = get_object_or_404(templates, id=template_id)
     field = get_object_or_404(template.fields, id=field_id) if field_id else None
     form = LibraryFieldForm(request.POST or None, instance=field, parent=template)
     if request.method == "POST" and form.is_valid():
@@ -907,14 +901,34 @@ def library_field(request, template_id, field_id=None):
 
 
 @login_required
+@require_POST
+@transaction.atomic
 def library_archive(request, template_id):
     require_teacher(request.user)
-    require_post(request)
-    template = get_object_or_404(LibraryTemplate, id=template_id)
-    if not (is_admin(request.user) or (not template.is_fixed and template.created_by == request.user)):
-        raise PermissionDenied
+    template = get_object_or_404(
+        LibraryTemplate.objects.select_for_update(),
+        id=template_id, status=LibraryTemplate.Status.ACTIVE,
+    )
     template.status = LibraryTemplate.Status.ARCHIVED
     template.save(update_fields=["status", "updated_at"])
     audit(request, "library.archived", template)
-    messages.success(request, "Bibliotheektemplate gearchiveerd.")
+    messages.success(request, "Onderdeel uit de bibliotheek verwijderd. Bestaande casuskopieën blijven behouden.")
     return redirect("dossier:library_list")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def library_field_delete(request, template_id, field_id):
+    require_teacher(request.user)
+    template = get_object_or_404(
+        LibraryTemplate.objects.select_for_update(),
+        id=template_id, status=LibraryTemplate.Status.ACTIVE,
+    )
+    field = get_object_or_404(template.fields, id=field_id)
+    audit(request, "library_field.deleted", field, label=field.label, template_id=template.id)
+    field.delete()
+    template.version += 1
+    template.save(update_fields=["version", "updated_at"])
+    messages.success(request, "Onderdeel verwijderd. Bestaande casuskopieën blijven behouden.")
+    return redirect("dossier:library_detail", template_id=template.id)
