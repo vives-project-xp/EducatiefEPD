@@ -2,6 +2,21 @@
 
 Het platform gebruikt uitsluitend MySQL 8.4. De database is alleen bereikbaar op het interne Docker-netwerk en publiceert geen hostpoort.
 
+## Aanmelden via Authentik
+
+De lokale Authentik-testinstantie en de configuratie staan in [authentik/README.md](authentik/README.md).
+Authentik beheert accounts en globale EPD-rollen. Opleidingen, lesgroepen en casustoewijzingen
+worden in het EPD beheerd. Productie gebruikt HTTPS voor zowel de EPD-callback als alle OIDC-
+eindpunten. `OIDC_ENABLED=1` vereist een exacte issuer, client-ID, client secret, authorization-,
+token-, UserInfo-, JWKS- en end-session-URL en de groepsmapping. De webcontainer krijgt deze
+waarden via Compose; zij worden niet in Git opgeslagen.
+
+Na een overstap naar een andere Authentik-omgeving worden gebruikers op `(issuer, sub)`
+herkend. Een nieuw issuer maakt nieuwe EPD-accounts; e-mailadressen koppelen geen accounts.
+Maak vóór de overstap een configuratiekopie en controleer de claims met een testaccount uit
+iedere rol. Houd `EMERGENCY_LOGIN_ENABLED=0`, behalve tijdens tijdelijk herstel. Maak één
+lokale superuser aan met `createsuperuser` en sla diens wachtwoord buiten de applicatie op.
+
 ## Eerste installatie
 
 1. Kopieer `.env.example` naar `.env`.
@@ -14,13 +29,16 @@ docker compose up --build -d
 docker compose ps
 ```
 
-5. Maak de eerste beheerder:
+5. Maak alleen voor noodtoegang een lokale superuser. De dagelijkse EPD-beheerder komt
+   via de geconfigureerde Authentik-beheerdersgroep:
 
 ```sh
 docker compose exec web python manage.py createsuperuser
 ```
 
-De webcontainer wacht op MySQL, voert migraties uit, initialiseert de vaste dossierstructuur en start Gunicorn.
+De webcontainer wacht op MySQL, voert migraties uit, zaait de standaardbibliotheek indien
+nodig en start Gunicorn. De vaste dossierstructuur wordt bij het aanmaken van een casus
+gekopieerd.
 
 Controleer de effectieve applicatieverbinding:
 
@@ -49,11 +67,10 @@ docker compose exec -T db sh -c \
   > backups/educatief_epd.sql
 ```
 
-Op PowerShell:
+Op PowerShell gebruikt het bytesgewijze script geen tekstomzetting:
 
 ```powershell
-New-Item -ItemType Directory -Force backups | Out-Null
-docker compose exec -T db sh -c 'exec mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --triggers --default-character-set=utf8mb4 "$MYSQL_DATABASE"' > backups\educatief_epd.sql
+node backup_database.mjs
 ```
 
 Bewaar productiebestanden versleuteld buiten de applicatieserver.
@@ -72,6 +89,9 @@ printf '%s\n' 'SELECT COUNT(*) FROM educatief_epd_restore.dossier_case;' | \
 ```
 
 Verwijder de hersteldatabase pas nadat recordaantallen en steekproeven zijn gecontroleerd.
+Voor een automatische lokale herstelcontrole maakt `node verify_restore.mjs` een dump,
+zet die in een uniek tijdelijk schema terug, vergelijkt aantallen casussen,
+studentdossiers en externe identiteiten en verwijdert daarna het tijdelijke schema.
 
 ## Updates en monitoring
 

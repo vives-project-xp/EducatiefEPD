@@ -2,8 +2,8 @@ from django import forms
 from django.utils.text import slugify
 
 from .models import (
-    Assignment, Case, FieldDefinition, LibraryField, LibraryTemplate,
-    Module, ModuleField, Patient,
+    Assignment, Case, Education, FieldDefinition, LibraryField, LibraryTemplate,
+    Module, ModuleField, Patient, TeachingGroup,
 )
 
 
@@ -26,9 +26,10 @@ class PatientForm(forms.ModelForm):
 class CaseForm(forms.ModelForm):
     class Meta:
         model = Case
-        fields = ["title", "course", "introduction", "learning_objectives"]
+        fields = ["title", "education", "course", "introduction", "learning_objectives"]
         labels = {
-            "title": "Titel van de casus", "course": "Opleidingsonderdeel",
+            "title": "Titel van de casus", "education": "Opleiding",
+            "course": "Opleidingsonderdeel",
             "introduction": "Inleiding", "learning_objectives": "Leerdoelen",
         }
         widgets = {
@@ -126,15 +127,30 @@ class ModuleFieldForm(FieldConfigurationForm):
 class LibraryTemplateForm(forms.ModelForm):
     class Meta:
         model = LibraryTemplate
-        fields = ["title", "description", "category", "education", "theme", "instructions"]
+        fields = ["title", "description", "category", "education", "theme", "instructions", "is_fixed"]
         labels = {
             "title": "Naam", "description": "Beschrijving", "category": "Categorie",
             "education": "Opleiding", "theme": "Thema", "instructions": "Instructies",
+            "is_fixed": "Automatisch toevoegen aan nieuwe casussen",
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 3}),
             "instructions": forms.Textarea(attrs={"rows": 4}),
         }
+
+
+class EducationForm(forms.ModelForm):
+    class Meta:
+        model = Education
+        fields = ["name", "slug"]
+        labels = {"name": "Naam", "slug": "Korte code"}
+
+
+class TeachingGroupForm(forms.ModelForm):
+    class Meta:
+        model = TeachingGroup
+        fields = ["name", "education", "teacher"]
+        labels = {"name": "Groepsnaam", "education": "Opleiding", "teacher": "Docent"}
 
 
 class LibraryFieldForm(FieldConfigurationForm):

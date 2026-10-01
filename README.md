@@ -31,7 +31,7 @@ Een veilig, flexibel en herbruikbaar leerplatform ontwikkelen. Het platform star
 | Database | MySQL |
 | Webinterface | Django-templates, HTML en CSS |
 | Deployment | Docker Compose |
-| Authenticatie | Ondersteuning voor koppeling met een centrale identity provider |
+| Authenticatie | OpenID Connect via Authentik |
 
 ## Inhoud van software en media
 
@@ -69,6 +69,7 @@ EducatiefEPD/
 - `templates/` en `static/` bevatten respectievelijk de webpagina's en vormgeving.
 - `compose.yaml`, `Dockerfile` en `requirements.txt` beschrijven hoe de applicatie draait en welke Python-pakketten nodig zijn. `manage.py` voert Django-beheercommando's uit.
 - `.env.example` toont welke lokale instellingen nodig zijn. Gebruik eigen waarden in `.env` en deel dat bestand niet.
+- [Software/HANDLEIDING.md](Software/HANDLEIDING.md) beschrijft de rollen en dagelijkse workflow. [Software/DEPLOYMENT.md](Software/DEPLOYMENT.md) en [Software/authentik/README.md](Software/authentik/README.md) beschrijven installatie en de lokale OIDC-test.
 - `media/` is voor projectafbeeldingen en documentatiemateriaal. Gebruik geen vertrouwelijke of herleidbare patiëntgegevens.
 
 ## Leden

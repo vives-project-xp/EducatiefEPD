@@ -5,6 +5,8 @@ from .models import (
     AssignmentSubmission,
     AuditEvent,
     Case,
+    Education,
+    ExternalIdentity,
     LibraryField,
     LibraryTemplate,
     Module,
@@ -13,6 +15,7 @@ from .models import (
     Patient,
     Profile,
     StudentCase,
+    TeachingGroup,
 )
 
 
@@ -66,6 +69,9 @@ class AuditEventAdmin(admin.ModelAdmin):
 
 admin.site.register(Patient)
 admin.site.register(Profile)
+admin.site.register(Education)
+admin.site.register(TeachingGroup)
+admin.site.register(ExternalIdentity)
 admin.site.register(Assignment)
 admin.site.register(StudentCase)
 admin.site.register(AssignmentSubmission)

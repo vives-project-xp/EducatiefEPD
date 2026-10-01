@@ -24,6 +24,8 @@ services:
   web:
     build: .
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8001:8001"
     environment:
@@ -31,12 +33,28 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-1}
       MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
       MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
       MYSQL_HOST: db
       MYSQL_PORT: 3306
       SEED_DEMO: ${SEED_DEMO:-0}
+      OIDC_ENABLED: ${OIDC_ENABLED:-0}
+      EMERGENCY_LOGIN_ENABLED: ${EMERGENCY_LOGIN_ENABLED:-0}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_RP_CLIENT_ID: ${OIDC_RP_CLIENT_ID:-}
+      OIDC_RP_CLIENT_SECRET: ${OIDC_RP_CLIENT_SECRET:-}
+      OIDC_OP_AUTHORIZATION_ENDPOINT: ${OIDC_OP_AUTHORIZATION_ENDPOINT:-}
+      OIDC_OP_TOKEN_ENDPOINT: ${OIDC_OP_TOKEN_ENDPOINT:-}
+      OIDC_TOKEN_HOST_HEADER: ${OIDC_TOKEN_HOST_HEADER:-}
+      OIDC_OP_USER_ENDPOINT: ${OIDC_OP_USER_ENDPOINT:-}
+      OIDC_OP_JWKS_ENDPOINT: ${OIDC_OP_JWKS_ENDPOINT:-}
+      OIDC_END_SESSION_ENDPOINT: ${OIDC_END_SESSION_ENDPOINT:-}
+      OIDC_GROUP_CLAIM: ${OIDC_GROUP_CLAIM:-groups}
+      OIDC_STUDENT_GROUPS: ${OIDC_STUDENT_GROUPS:-epd-studenten}
+      OIDC_TEACHER_GROUPS: ${OIDC_TEACHER_GROUPS:-epd-docenten}
+      OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-epd-beheerders}
     depends_on:
       db:
         condition: service_healthy

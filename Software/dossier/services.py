@@ -1,10 +1,12 @@
 from copy import deepcopy
 
 from django.db import transaction
+from django.db.models import Q
 
 from .models import (
     AssignmentSubmission,
     AuditEvent,
+    Education,
     FieldDefinition,
     LibraryField,
     LibraryTemplate,
@@ -135,13 +137,15 @@ DEFAULT_DOSSIER = [
 
 @transaction.atomic
 def ensure_default_templates():
+    education, _ = Education.objects.get_or_create(
+        slug="vroedkunde", defaults={"name": "Vroedkunde"}
+    )
     for blueprint in DEFAULT_DOSSIER:
         template, _ = LibraryTemplate.objects.get_or_create(
-            title=blueprint["title"],
+            title=blueprint["title"], education=education,
             defaults={
                 "description": blueprint["description"],
                 "category": blueprint["category"],
-                "education": "Vroedkunde",
                 "theme": blueprint["theme"],
                 "is_fixed": True,
             },
@@ -167,7 +171,7 @@ def create_case_structure(case):
     ensure_default_templates()
     for template in LibraryTemplate.objects.filter(
         status=LibraryTemplate.Status.ACTIVE, is_fixed=True
-    ).order_by("id"):
+    ).filter(Q(education=case.education) | Q(education__isnull=True)).order_by("id"):
         copied = case.modules.filter(source_template=template).first()
         if copied:
             if not template.fields.exists() and copied.kind != Module.Kind.INFORMATION:
@@ -198,7 +202,7 @@ def start_student_case(case, student):
     student_case, created = StudentCase.objects.select_for_update().get_or_create(
         case=case, student=student
     )
-    if created or not student_case.case_title:
+    if created:
         student_case.case_title = case.title
         student_case.course = case.course
         student_case.introduction = case.introduction
@@ -209,23 +213,16 @@ def start_student_case(case, student):
         student_case.patient_context = case.patient.context
         student_case.save()
 
-    for assignment in case.assignments.all():
-        submission, submission_created = AssignmentSubmission.objects.get_or_create(
-            student_case=student_case, assignment=assignment
-        )
-        if submission_created or not submission.title:
+        for assignment in case.assignments.all():
+            submission = AssignmentSubmission(student_case=student_case, assignment=assignment)
             submission.hydrate_from_source()
             submission.save()
 
-    for module in case.modules.prefetch_related("fields").all():
-        response, response_created = ModuleResponse.objects.get_or_create(
-            student_case=student_case, module=module
-        )
-        if response_created or not response.title:
+        for module in case.modules.prefetch_related("fields").all():
+            response = ModuleResponse(student_case=student_case, module=module)
             response.hydrate_from_source()
             response.schema = module_schema(module)
-            if response_created:
-                response.data = deepcopy(module.base_data)
+            response.data = deepcopy(module.base_data)
             response.save()
     return student_case, created
 
@@ -235,6 +232,9 @@ def copy_template_to_case(template, case):
     template = LibraryTemplate.objects.select_for_update().prefetch_related("fields").get(
         pk=template.pk
     )
+    existing = case.modules.filter(source_template=template).first()
+    if existing:
+        return existing
     kind_map = {
         LibraryTemplate.Category.MODULE: Module.Kind.FORM,
         LibraryTemplate.Category.QUESTIONNAIRE: Module.Kind.QUESTIONNAIRE,

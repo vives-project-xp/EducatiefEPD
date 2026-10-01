@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from dossier.models import Assignment, Case, Patient, Profile
+from dossier.models import Assignment, Case, Education, Patient, Profile, TeachingGroup
 from dossier.services import create_case_structure
 
 
@@ -10,13 +10,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         user_model = get_user_model()
+        education, _ = Education.objects.get_or_create(
+            slug="vroedkunde", defaults={"name": "Vroedkunde"}
+        )
         teacher, _ = user_model.objects.get_or_create(
             username="docent", defaults={"first_name": "Demo", "last_name": "Docent"}
         )
         teacher.set_password("docent123")
         teacher.save()
         Profile.objects.update_or_create(
-            user=teacher, defaults={"role": Profile.Role.TEACHER, "education": "Vroedkunde"}
+            user=teacher, defaults={"role": Profile.Role.TEACHER, "education": education}
         )
 
         student, _ = user_model.objects.get_or_create(
@@ -24,7 +27,9 @@ class Command(BaseCommand):
         )
         student.set_password("student123")
         student.save()
-        Profile.objects.update_or_create(user=student, defaults={"role": Profile.Role.STUDENT})
+        Profile.objects.update_or_create(
+            user=student, defaults={"role": Profile.Role.STUDENT, "education": education}
+        )
 
         admin, _ = user_model.objects.get_or_create(
             username="beheerder",
@@ -50,6 +55,7 @@ class Command(BaseCommand):
             patient=patient,
             defaults={
                 "title": "VRK IC1 - Vanbelle Mia",
+                "education": education,
                 "course": "Vroedkunde Brugge - OLF1 - IC 1",
                 "introduction": (
                     "Mia meldt zich aan op de verlosafdeling met spontane arbeid. "
@@ -60,6 +66,11 @@ class Command(BaseCommand):
             },
         )
         create_case_structure(case)
+        group, _ = TeachingGroup.objects.get_or_create(
+            name="Demogroep", education=education, teacher=teacher
+        )
+        group.members.add(student)
+        case.allowed_groups.add(group)
 
         anamnese = case.modules.filter(title="Anamnese").first()
         if anamnese:

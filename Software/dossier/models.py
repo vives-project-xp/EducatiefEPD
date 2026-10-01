@@ -4,6 +4,17 @@ from django.db import models
 from django.utils import timezone
 
 
+class Education(models.Model):
+    name = models.CharField(max_length=120, unique=True)
+    slug = models.SlugField(max_length=120, unique=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Profile(models.Model):
     class Role(models.TextChoices):
         STUDENT = "student", "Student"
@@ -14,10 +25,50 @@ class Profile(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="epd_profile"
     )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.STUDENT)
-    education = models.CharField(max_length=120, blank=True)
+    education = models.ForeignKey(
+        Education, on_delete=models.SET_NULL, null=True, blank=True, related_name="profiles"
+    )
 
     def __str__(self):
         return f"{self.user.get_username()} ({self.get_role_display()})"
+
+
+class ExternalIdentity(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="external_identities"
+    )
+    issuer = models.URLField(max_length=255)
+    subject = models.CharField(max_length=255)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["issuer", "subject"], name="unique_external_identity")
+        ]
+
+    def __str__(self):
+        return f"{self.issuer}: {self.subject}"
+
+
+class TeachingGroup(models.Model):
+    name = models.CharField(max_length=120)
+    education = models.ForeignKey(Education, on_delete=models.PROTECT, related_name="groups")
+    teacher = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="teaching_groups"
+    )
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name="epd_teaching_groups"
+    )
+
+    class Meta:
+        ordering = ["education__name", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["education", "teacher", "name"], name="unique_teaching_group_name"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.education}: {self.name}"
 
 
 class Patient(models.Model):
@@ -64,6 +115,8 @@ class Case(models.Model):
 
     title = models.CharField(max_length=180)
     patient = models.OneToOneField(Patient, on_delete=models.PROTECT, related_name="case")
+    education = models.ForeignKey(Education, on_delete=models.PROTECT, related_name="cases")
+    allowed_groups = models.ManyToManyField(TeachingGroup, blank=True, related_name="cases")
     course = models.CharField(max_length=180)
     introduction = models.TextField(blank=True)
     learning_objectives = models.TextField(blank=True)
@@ -121,11 +174,13 @@ class LibraryTemplate(models.Model):
     title = models.CharField(max_length=180)
     description = models.TextField(blank=True)
     category = models.CharField(max_length=24, choices=Category.choices)
-    education = models.CharField(max_length=120, blank=True)
+    education = models.ForeignKey(
+        Education, on_delete=models.PROTECT, null=True, blank=True, related_name="templates"
+    )
     theme = models.CharField(max_length=120, blank=True)
     instructions = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=1)
-    is_fixed = models.BooleanField(default=True)
+    is_fixed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="library_templates",
@@ -298,8 +353,8 @@ class StudentCase(models.Model):
         total = self.assignment_submissions.count()
         if not total:
             return 0
-        completed = self.assignment_submissions.exclude(
-            status=AssignmentSubmission.Status.TODO
+        completed = self.assignment_submissions.filter(
+            status__in=[AssignmentSubmission.Status.SUBMITTED, AssignmentSubmission.Status.APPROVED]
         ).count()
         return round(completed / total * 100)
 
