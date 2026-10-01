@@ -93,10 +93,19 @@ def health(request):
 def home(request):
     if is_teacher(request.user):
         return redirect("dossier:teacher_dashboard")
-    cases = list(
-        Case.objects.filter(
-            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user)
+    query = request.GET.get("q", "").strip()
+    selected_case_id = request.GET.get("case", "")
+    case_list = Case.objects.filter(
+        Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user)
+    )
+    if query:
+        case_list = case_list.filter(
+            Q(title__icontains=query)
+            | Q(patient__name__icontains=query)
+            | Q(course__icontains=query)
         )
+    cases = list(
+        case_list
         .select_related("patient")
         .prefetch_related("assignments")
         .distinct()
@@ -114,7 +123,24 @@ def home(request):
             list(case.student_instance.assignment_submissions.all())
             if case.student_instance else list(case.assignments.all())
         )
-    return render(request, "dossier/home.html", {"cases": cases})
+    current_cases = [
+        case for case in cases
+        if not case.student_instance or not case.student_instance.locked
+    ]
+    previous_cases = [
+        case for case in cases
+        if case.student_instance and case.student_instance.locked
+    ]
+    selected_case = next(
+        (case for case in cases if str(case.id) == selected_case_id), None
+    )
+    return render(request, "dossier/home.html", {
+        "cases": cases,
+        "current_cases": current_cases,
+        "previous_cases": previous_cases,
+        "query": query,
+        "selected_case": selected_case,
+    })
 
 
 @login_required
@@ -292,7 +318,8 @@ def submit_student_case(request, case_id):
 
 @login_required
 def teacher_dashboard(request):
-    require_teacher(request.user)
+    if not is_teacher(request.user):
+        return redirect("dossier:home")
     status = request.GET.get("status", "")
     query = request.GET.get("q", "").strip()
     cases = teacher_cases(request.user)

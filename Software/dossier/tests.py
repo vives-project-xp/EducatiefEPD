@@ -48,10 +48,11 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
 
-    def test_student_cannot_open_teacher_dashboard(self):
+    def test_student_dashboard_route_redirects_to_student_home(self):
         self.client.login(username="student", password="testpass")
-        self.assertEqual(
-            self.client.get(reverse("dossier:teacher_dashboard")).status_code, 403
+        self.assertRedirects(
+            self.client.get(reverse("dossier:teacher_dashboard")),
+            reverse("dossier:home"),
         )
 
     def test_teacher_cannot_change_fixed_dossier_structure(self):
@@ -232,3 +233,59 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(
             self.client.get(reverse("dossier:dossier", args=[self.case.id])).status_code, 200
         )
+
+    def test_student_home_separates_current_and_previous_cases(self):
+        self.case.publish()
+        self.case.save()
+        previous_instance, _ = start_student_case(self.case, self.student)
+        previous_instance.status = StudentCase.Status.SUBMITTED
+        previous_instance.save()
+
+        active_patient = Patient.objects.create(name="Actief, Anna", reference="TEST-ACTIVE")
+        active_case = Case.objects.create(
+            title="Actieve casus", patient=active_patient, course="Vroedkunde",
+            status=Case.Status.PUBLISHED, created_by=self.teacher,
+        )
+        start_student_case(active_case, self.student)
+
+        new_patient = Patient.objects.create(name="Nieuw, Noor", reference="TEST-NEW")
+        new_case = Case.objects.create(
+            title="Nieuwe casus", patient=new_patient, course="Vroedkunde",
+            status=Case.Status.PUBLISHED, created_by=self.teacher,
+        )
+
+        self.client.login(username="student", password="testpass")
+        response = self.client.get(reverse("dossier:home"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertCountEqual(
+            [case.id for case in response.context["current_cases"]],
+            [active_case.id, new_case.id],
+        )
+        self.assertEqual(
+            [case.id for case in response.context["previous_cases"]], [self.case.id]
+        )
+
+    def test_student_home_searches_and_opens_selected_case_destinations(self):
+        self.case.publish()
+        self.case.save()
+        other_patient = Patient.objects.create(
+            name="Anders, Alex", reference="TEST-OTHER"
+        )
+        Case.objects.create(
+            title="Andere casus", patient=other_patient, course="Zorgkunde",
+            status=Case.Status.PUBLISHED, created_by=self.teacher,
+        )
+        self.client.login(username="student", password="testpass")
+
+        response = self.client.get(reverse("dossier:home"), {
+            "q": "Testcasus", "case": str(self.case.id),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_case"].id, self.case.id)
+        self.assertEqual([case.id for case in response.context["cases"]], [self.case.id])
+        self.assertContains(
+            response, reverse("dossier:case_detail", args=[self.case.id])
+        )
+        self.assertContains(response, reverse("dossier:dossier", args=[self.case.id]))

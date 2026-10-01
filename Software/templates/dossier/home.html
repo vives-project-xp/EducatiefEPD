@@ -5,14 +5,42 @@
   <header class="page-bar"><div class="brandline">Mijn leeromgeving <span>Vroedkunde</span></div></header>
   <p class="eyebrow">Vroedkunde · simulatie</p><h1>Mijn casussen</h1>
   <p class="lead">Open een beschikbare casus of hervat je persoonlijke patiëntendossier.</p>
-  <div class="cards">
-    {% for case in cases %}<article class="case-card">
-      <header><div><h2>{{ case.title }}</h2><strong>{{ case.patient.name }}</strong></div>{% if case.student_instance %}<span class="state live">{{ case.student_instance.get_status_display }}</span>{% else %}<span class="state">Nieuw</span>{% endif %}</header>
-      <div class="patient">{% if case.patient.image %}<img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}">{% endif %}<p>{{ case.patient.context }}</p></div>
-      <div class="course">{{ case.course }}</div>
-      <div class="assignments">{% for assignment in case.display_assignments %}<div class="assignment-preview"><span class="open-icon">↗</span><div><small>{{ assignment.phase }}:</small><span>{{ assignment.title }}</span></div>{% if case.student_instance %}<b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b>{% else %}<b class="status-todo">In te leveren</b>{% endif %}</div>{% empty %}<p class="empty-state">Nog geen opdrachten.</p>{% endfor %}</div>
-      <footer><a class="outline" href="{% url 'dossier:case_detail' case.id %}">Bekijk casus</a><a class="primary" href="{% url 'dossier:dossier' case.id %}">{% if case.student_instance %}Hervat dossier{% else %}Start casus{% endif %}</a></footer>
-    </article>{% empty %}<p class="empty-state">Er zijn momenteel geen casussen beschikbaar.</p>{% endfor %}
-  </div>
+  <section class="case-navigator" aria-labelledby="case-navigator-title">
+    <div class="case-navigator-heading"><div><p class="eyebrow">Snel openen</p><h2 id="case-navigator-title">Zoek en selecteer een casus</h2></div></div>
+    <form method="get" class="case-search-form">
+      <label for="case-search">Zoek op casus, patiënt of opleiding<input id="case-search" type="search" name="q" value="{{ query }}" placeholder="Bijvoorbeeld: zwangerschap of Vroedkunde"></label>
+      <label for="case-select">Selecteer casus<select id="case-select" name="case"><option value="">Kies een casus</option>{% for case in cases %}<option value="{{ case.id }}" {% if selected_case.id == case.id %}selected{% endif %}>{{ case.title }} · {{ case.patient.name }}</option>{% endfor %}</select></label>
+      <button class="outline button" type="submit">Toon selectie</button>
+    </form>
+    {% if selected_case %}<nav class="selected-case-actions" aria-label="Open geselecteerde casus of dossier">
+      <span class="selected-case-name">Geselecteerd: <strong>{{ selected_case.title }}</strong></span>
+      <a class="outline" href="{% url 'dossier:case_detail' selected_case.id %}">Casus openen</a>
+      <a class="primary" href="{% url 'dossier:dossier' selected_case.id %}">EPD openen</a>
+    </nav>{% endif %}
+  </section>
+  <section class="case-group" aria-labelledby="current-cases-title">
+    <header class="case-group-heading"><div><p class="eyebrow">Verder leren</p><h2 id="current-cases-title">Huidige casussen</h2></div><span class="case-count">{{ current_cases|length }}</span></header>
+    <div class="cards">
+      {% for case in current_cases %}<article class="case-card">
+        <header><div><h3>{{ case.title }}</h3><strong>{{ case.patient.name }}</strong></div>{% if case.student_instance %}<span class="state live">{{ case.student_instance.get_status_display }}</span>{% else %}<span class="state">Nieuw</span>{% endif %}</header>
+        <div class="patient">{% if case.patient.image %}<img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}">{% endif %}<p>{{ case.patient.context }}</p></div>
+        <div class="course">{{ case.course }}</div>
+        <div class="assignments">{% for assignment in case.display_assignments %}<div class="assignment-preview"><span class="open-icon" aria-hidden="true">↗</span><div><small>{{ assignment.phase }}:</small><span>{{ assignment.title }}</span></div>{% if case.student_instance %}<b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b>{% else %}<b class="status-todo">In te leveren</b>{% endif %}</div>{% empty %}<p class="empty-state">Nog geen opdrachten.</p>{% endfor %}</div>
+        <footer><a class="outline" href="{% url 'dossier:case_detail' case.id %}">Bekijk casus</a><a class="primary" href="{% url 'dossier:dossier' case.id %}">{% if case.student_instance %}Hervat dossier{% else %}Start casus{% endif %}</a></footer>
+      </article>{% empty %}<p class="empty-state">{% if query %}Geen huidige casussen gevonden voor “{{ query }}”.{% else %}Er zijn geen actieve of nieuwe casussen.{% endif %}</p>{% endfor %}
+    </div>
+  </section>
+  <section class="case-group previous-cases" aria-labelledby="previous-cases-title">
+    <header class="case-group-heading"><div><p class="eyebrow">Afgerond of ingediend</p><h2 id="previous-cases-title">Vorige casussen</h2></div><span class="case-count">{{ previous_cases|length }}</span></header>
+    <div class="cards">
+      {% for case in previous_cases %}<article class="case-card">
+        <header><div><h3>{{ case.title }}</h3><strong>{{ case.patient.name }}</strong></div><span class="state status-{{ case.student_instance.status }}">{{ case.student_instance.get_status_display }}</span></header>
+        <div class="patient">{% if case.patient.image %}<img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}">{% endif %}<p>{{ case.patient.context }}</p></div>
+        <div class="course">{{ case.course }}</div>
+        <div class="assignments">{% for assignment in case.display_assignments %}<div class="assignment-preview"><span class="open-icon" aria-hidden="true">↗</span><div><small>{{ assignment.phase }}:</small><span>{{ assignment.title }}</span></div><b class="status-{{ assignment.status }}">{{ assignment.get_status_display }}</b></div>{% empty %}<p class="empty-state">Geen opdrachten beschikbaar.</p>{% endfor %}</div>
+        <footer><a class="outline" href="{% url 'dossier:case_detail' case.id %}">Bekijk casus</a><a class="primary" href="{% url 'dossier:dossier' case.id %}">Bekijk dossier</a></footer>
+      </article>{% empty %}<p class="empty-state">{% if query %}Geen vorige casussen gevonden voor “{{ query }}”.{% else %}Ingediende casussen verschijnen hier.{% endif %}</p>{% endfor %}
+    </div>
+  </section>
 </main>
 {% endblock %}

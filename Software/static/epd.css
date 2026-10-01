@@ -125,6 +125,22 @@ a{transition:color .15s ease,background-color .15s ease,border-color .15s ease}
 .assignment-preview small,.assignment-row small{color:var(--muted);font-size:.78rem}
 .assignment-preview b{font-size:.82rem}
 .case-card footer{flex-wrap:wrap;gap:10px;margin-top:20px}
+.case-group{margin-top:36px}
+.case-group-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px;padding-bottom:13px;border-bottom:1px solid var(--line)}
+.case-group-heading .eyebrow{margin:0 0 3px}
+.case-group-heading h2{margin:0;font-size:1.35rem}
+.case-count{display:grid;min-width:34px;height:34px;place-items:center;padding:0 9px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--muted);font-size:.85rem;font-weight:700}
+.previous-cases{margin-top:44px}
+.previous-cases .case-card{background:#fafbfd;box-shadow:none}
+.case-navigator{display:grid;gap:14px;margin-top:28px;padding:20px 22px;border:1px solid var(--line);border-radius:var(--radius-md);background:#fff;box-shadow:var(--shadow-soft)}
+.case-navigator-heading h2{margin:0;font-size:1.08rem}
+.case-navigator-heading .eyebrow{margin:0 0 3px}
+.case-search-form{display:grid;grid-template-columns:minmax(220px,1.1fr) minmax(260px,1fr) auto;align-items:end;gap:12px}
+.case-search-form label{display:grid;gap:6px;color:var(--ink);font-size:.84rem;font-weight:700}
+.case-search-form input,.case-search-form select{width:100%;min-height:44px;border:1px solid #b8c2d0;border-radius:var(--radius-sm);padding:9px 12px;background:#fff;color:var(--ink);font:inherit;font-size:.9rem}
+.selected-case-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #e8ebf0}
+.selected-case-name{flex:1 1 100%;color:var(--muted);font-size:.84rem}
+.selected-case-name strong{color:var(--ink)}
 
 .teacher-list{overflow:hidden;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md)}
 .teacher-row{align-items:center;gap:16px;padding:18px 20px;border-color:#e8ebf0}
@@ -291,6 +307,9 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue)}
 	.editor-section,.editor-form section{padding:16px}
 	.case-card{padding:18px}
 	.case-card footer>*{flex:1 1 100%;width:100%}
+	.case-navigator{padding:16px}
+	.case-search-form{grid-template-columns:1fr}
+	.selected-case-actions>*{flex:1 1 100%;width:100%}
 	.patient{align-items:flex-start}
 	.patient img{width:68px;height:68px}
 	.viewer-header h1{font-size:1.4rem}
