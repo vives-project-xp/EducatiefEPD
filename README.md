@@ -31,6 +31,43 @@ Een veilig, flexibel en herbruikbaar leerplatform ontwikkelen. Het platform star
 - Deployment: Docker Compose.
 - Authenticatie: ondersteuning voor koppeling met een centrale identity provider.
 
+## Inhoud van software en media
+
+Overzicht van de belangrijkste mappen en startbestanden:
+
+```text
+EducatiefEPD/
+|-- Software/
+|   |-- .env.example
+|   |-- compose.yaml
+|   |-- DEPLOYMENT.md
+|   |-- Dockerfile
+|   |-- manage.py
+|   |-- requirements.txt
+|   |-- config/
+|   |-- docker/
+|   |   `-- mysql/
+|   |-- dossier/
+|   |   |-- management/commands/
+|   |   `-- migrations/
+|   |-- static/
+|   |-- templates/
+|   `-- backups/
+`-- media/
+    |-- Foto_EPD.jpg
+    |-- IMG_1509.HEIC
+    |-- Poster P.E. Educatief EPD.png
+    `-- README.md
+```
+
+## Benodigde inhoud
+
+- `config/` bevat de Django-configuratie; `dossier/` bevat de applicatie en database-migraties.
+- `templates/` en `static/` bevatten respectievelijk de webpagina's en vormgeving.
+- `compose.yaml`, `Dockerfile` en `requirements.txt` beschrijven hoe de applicatie draait en welke Python-pakketten nodig zijn. `manage.py` voert Django-beheercommando's uit.
+- `.env.example` toont welke lokale instellingen nodig zijn. Gebruik eigen waarden in `.env` en deel dat bestand niet.
+- `media/` is voor projectafbeeldingen en documentatiemateriaal. Gebruik geen vertrouwelijke of herleidbare patiëntgegevens.
+
 ## Leden
 
 | <img src="https://github.com/EwoudBoutje.png" width="64" alt="Ewoud Bouttelisier"> | Ewoud Bouttelier | Ontwikkelaar |
