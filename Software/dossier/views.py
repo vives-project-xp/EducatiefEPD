@@ -179,9 +179,10 @@ def prepare_schema_fields(schema, data):
                     "cells": [
                         {
                             "name": f"field_{key}_{row_index}_{column_index}",
+                            "column": column,
                             "value": matrix_values.get(f"{row_index}_{column_index}", ""),
                         }
-                        for column_index, _ in enumerate(item.get("columns", []))
+                        for column_index, column in enumerate(item.get("columns", []))
                     ],
                 }
                 for row_index, row in enumerate(item.get("rows", []))

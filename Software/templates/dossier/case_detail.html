@@ -2,7 +2,7 @@
 {% block title %}{{ student_case.case_title }} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="case-viewer">
-  <header class="viewer-header"><div><p class="eyebrow">{{ student_case.get_status_display }}</p><h1>{{ student_case.case_title }}</h1></div><a href="{% url 'dossier:home' %}" aria-label="Terug naar casussen">×</a></header>
+  <header class="viewer-header"><div><p class="eyebrow">{{ student_case.get_status_display }}</p><h1>{{ student_case.case_title }}</h1></div><a class="viewer-back" href="{% url 'dossier:home' %}"><span aria-hidden="true">←</span> Casussen</a></header>
   <div class="viewer-grid">
     <section class="reading-pane">
       <div class="case-banner"><span class="menu-square">≡</span><strong>{{ student_case.patient_name }}</strong></div>

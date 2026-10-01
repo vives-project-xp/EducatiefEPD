@@ -6,7 +6,7 @@
     <p class="eyebrow">VIVES onderwijsomgeving</p>
     <h1>Educatief EPD</h1>
     <p class="lead">Meld je aan als docent of student.</p>
-    {% if form.errors %}<p class="form-error">De gebruikersnaam of het wachtwoord klopt niet.</p>{% endif %}
+    {% if form.errors %}<p class="form-error" role="alert">De gebruikersnaam of het wachtwoord klopt niet.</p>{% endif %}
     <form method="post" class="stack-form">
       {% csrf_token %}
       <label for="id_username">Gebruikersnaam</label>

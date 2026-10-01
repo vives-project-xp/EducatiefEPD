@@ -8,11 +8,50 @@
   <link rel="stylesheet" href="{% static 'epd.css' %}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Ga naar hoofdinhoud</a>
+  {% if user.is_authenticated %}
+    <header class="site-header">
+      <a class="site-brand" href="{% url 'dossier:home' %}">
+        <span class="site-brand-mark" aria-hidden="true">EPD</span>
+        <span><strong>Educatief EPD</strong><small>VIVES · Vroedkunde</small></span>
+      </a>
+      <nav class="site-nav" aria-label="Hoofdnavigatie">
+        {% if user.is_staff or user.is_superuser %}
+          <a href="{% url 'dossier:teacher_dashboard' %}" class="{% if request.resolver_match.url_name == 'teacher_dashboard' %}active{% endif %}" {% if request.resolver_match.url_name == 'teacher_dashboard' %}aria-current="page"{% endif %}>Casussen</a>
+          <a href="{% url 'dossier:library_list' %}" class="{% if request.resolver_match.url_name == 'library_list' %}active{% endif %}" {% if request.resolver_match.url_name == 'library_list' %}aria-current="page"{% endif %}>Dossierstructuur</a>
+        {% elif user.epd_profile.role == 'teacher' %}
+          <a href="{% url 'dossier:teacher_dashboard' %}" class="{% if request.resolver_match.url_name == 'teacher_dashboard' %}active{% endif %}" {% if request.resolver_match.url_name == 'teacher_dashboard' %}aria-current="page"{% endif %}>Casussen</a>
+          <a href="{% url 'dossier:library_list' %}" class="{% if request.resolver_match.url_name == 'library_list' %}active{% endif %}" {% if request.resolver_match.url_name == 'library_list' %}aria-current="page"{% endif %}>Dossierstructuur</a>
+        {% else %}
+          <a href="{% url 'dossier:home' %}" class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>Mijn casussen</a>
+        {% endif %}
+      </nav>
+      <details class="profile-menu">
+        <summary aria-label="Profiel en accountopties">
+          <span class="profile-avatar" aria-hidden="true">{{ user.get_full_name|default:user.username|slice:":1"|upper }}</span>
+          <span class="profile-summary">
+            <strong>{{ user.get_full_name|default:user.username }}</strong>
+            <small>{% if user.is_staff or user.is_superuser %}Beheerder{% elif user.epd_profile %}{{ user.epd_profile.get_role_display }}{% else %}Student{% endif %}</small>
+          </span>
+          <span class="profile-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="profile-details">
+          <p class="profile-details-title">Accountgegevens</p>
+          <dl>
+            <div><dt>Gebruikersnaam</dt><dd>{{ user.username }}</dd></div>
+            {% if user.email %}<div><dt>E-mailadres</dt><dd>{{ user.email }}</dd></div>{% endif %}
+            {% if user.epd_profile.education %}<div><dt>Opleiding</dt><dd>{{ user.epd_profile.education }}</dd></div>{% endif %}
+          </dl>
+          <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="profile-signout" type="submit">Afmelden</button></form>
+        </div>
+      </details>
+    </header>
+  {% endif %}
   {% if messages %}
-    <div class="messages" aria-live="polite">
-      {% for message in messages %}<p class="message {{ message.tags }}">{{ message }}</p>{% endfor %}
+    <div class="messages" aria-live="polite" aria-atomic="true">
+      {% for message in messages %}<p class="message {{ message.tags }}" role="{% if 'error' in message.tags %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}
     </div>
   {% endif %}
-  {% block content %}{% endblock %}
+  <div id="main-content" tabindex="-1">{% block content %}{% endblock %}</div>
 </body>
 </html>
