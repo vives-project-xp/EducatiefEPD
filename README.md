@@ -39,27 +39,28 @@ Overzicht van de belangrijkste mappen en startbestanden:
 
 ```text
 EducatiefEPD/
-|-- Software/
-|   |-- .env.example
-|   |-- compose.yaml
-|   |-- DEPLOYMENT.md
-|   |-- Dockerfile
-|   |-- manage.py
-|   |-- requirements.txt
-|   |-- config/
-|   |-- docker/
-|   |   `-- mysql/
-|   |-- dossier/
-|   |   |-- management/commands/
-|   |   `-- migrations/
-|   |-- static/
-|   |-- templates/
-|   `-- backups/
-`-- media/
-    |-- Foto_EPD.jpg
-    |-- IMG_1509.HEIC
-    |-- Poster P.E. Educatief EPD.png
-    `-- README.md
+├── Software/
+│   ├── config/
+│   ├── docker/
+│   │   └── mysql/
+│   ├── dossier/
+│   │   ├── management/
+│   │   │   └── commands/
+│   │   └── migrations/
+│   ├── static/
+│   ├── templates/
+│   ├── backups/
+│   ├── .env.example
+│   ├── compose.yaml
+│   ├── DEPLOYMENT.md
+│   ├── Dockerfile
+│   ├── manage.py
+│   └── requirements.txt
+└── media/
+    ├── Foto_EPD.jpg
+    ├── IMG_1509.HEIC
+    ├── Poster P.E. Educatief EPD.png
+    └── README.md
 ```
 
 ## Benodigde inhoud
