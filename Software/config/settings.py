@@ -37,6 +37,7 @@ INSTALLED_APPS = [
 ]
 
 OIDC_ENABLED = env_bool("OIDC_ENABLED", False)
+EMERGENCY_LOGIN_ENABLED = env_bool("EMERGENCY_LOGIN_ENABLED", False)
 if OIDC_ENABLED:
     INSTALLED_APPS.append("mozilla_django_oidc")
 
@@ -101,18 +102,31 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
+OIDC_TOKEN_HOST_HEADER = os.getenv("OIDC_TOKEN_HOST_HEADER", "")
 if OIDC_ENABLED:
     AUTHENTICATION_BACKENDS.insert(0, "dossier.auth.EpdOIDCAuthenticationBackend")
-    OIDC_RP_CLIENT_ID = os.environ["OIDC_RP_CLIENT_ID"]
-    OIDC_RP_CLIENT_SECRET = os.environ["OIDC_RP_CLIENT_SECRET"]
-    OIDC_OP_AUTHORIZATION_ENDPOINT = os.environ["OIDC_OP_AUTHORIZATION_ENDPOINT"]
-    OIDC_OP_TOKEN_ENDPOINT = os.environ["OIDC_OP_TOKEN_ENDPOINT"]
-    OIDC_OP_USER_ENDPOINT = os.environ["OIDC_OP_USER_ENDPOINT"]
-    OIDC_OP_JWKS_ENDPOINT = os.getenv("OIDC_OP_JWKS_ENDPOINT", "")
-    OIDC_RP_SIGN_ALGO = os.getenv("OIDC_RP_SIGN_ALGO", "RS256")
-    OIDC_RP_SCOPES = os.getenv("OIDC_RP_SCOPES", "openid email profile groups")
+    required_oidc = [
+        "OIDC_ISSUER", "OIDC_RP_CLIENT_ID", "OIDC_RP_CLIENT_SECRET",
+        "OIDC_OP_AUTHORIZATION_ENDPOINT", "OIDC_OP_TOKEN_ENDPOINT",
+        "OIDC_OP_USER_ENDPOINT", "OIDC_OP_JWKS_ENDPOINT", "OIDC_END_SESSION_ENDPOINT",
+    ]
+    missing_oidc = [name for name in required_oidc if not os.getenv(name)]
+    if missing_oidc:
+        raise ImproperlyConfigured("Ontbrekende OIDC-configuratie: " + ", ".join(missing_oidc))
+    for name in required_oidc:
+        globals()[name] = os.environ[name]
+    OIDC_RP_SIGN_ALGO = "RS256"
+    OIDC_RP_SCOPES = "openid email profile"
+    OIDC_USE_PKCE = True
+    OIDC_STORE_ID_TOKEN = True
+    LOGIN_REDIRECT_URL_FAILURE = "/accounts/login-fout/"
+    OIDC_GROUP_CLAIM = os.getenv("OIDC_GROUP_CLAIM", "groups")
+    OIDC_STUDENT_GROUPS = env_list("OIDC_STUDENT_GROUPS", "epd-studenten")
     OIDC_TEACHER_GROUPS = env_list("OIDC_TEACHER_GROUPS", "epd-docenten")
     OIDC_ADMIN_GROUPS = env_list("OIDC_ADMIN_GROUPS", "epd-beheerders")
+    if not all([OIDC_STUDENT_GROUPS, OIDC_TEACHER_GROUPS, OIDC_ADMIN_GROUPS]):
+        raise ImproperlyConfigured("Alle drie de OIDC-rolgroepen zijn verplicht.")
+    SESSION_COOKIE_AGE = 3600
 
 LANGUAGE_CODE = "nl-be"
 TIME_ZONE = "Europe/Brussels"
@@ -124,7 +138,10 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+    "staticfiles": {"BACKEND": (
+        "django.contrib.staticfiles.storage.StaticFilesStorage"
+        if DEBUG else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )},
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

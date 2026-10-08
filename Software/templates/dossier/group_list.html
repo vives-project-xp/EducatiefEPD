@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Lesgroepen | Educatief EPD{% endblock %}
+{% block content %}<main class="teacher-shell">
+  <header class="page-bar"><div><p class="eyebrow">Docentomgeving</p><h1>Lesgroepen</h1></div><div class="header-actions"><a class="primary" href="{% url 'dossier:group_create' %}">Lesgroep toevoegen</a><a class="back" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a></div></header>
+  <div class="teacher-list">{% for group in groups %}<a class="teacher-row" href="{% url 'dossier:group_detail' group.id %}"><div><strong>{{ group.name }}</strong><span>{{ group.education.name }} · {{ group.teacher.get_full_name|default:group.teacher.username }}</span></div><span>{{ group.members.count }} studenten</span></a>{% empty %}<p class="empty-state">Nog geen lesgroepen.</p>{% endfor %}</div>
+</main>{% endblock %}

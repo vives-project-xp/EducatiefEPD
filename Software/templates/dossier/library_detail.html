@@ -1,3 +1,50 @@
 {% extends 'base.html' %}
-{% block title %}{{ template_item.title }} | Dossierstructuur{% endblock %}
-{% block content %}<main class="teacher-shell narrow"><header class="page-bar"><div><p class="eyebrow">{{ template_item.get_category_display }} · versie {{ template_item.version }}</p><h1>{{ template_item.title }}</h1><p>{{ template_item.description }}</p></div><a class="back" href="{% url 'dossier:library_list' %}">← Structuur</a></header><section class="editor-section"><h2>Velden</h2>{% for field in template_item.fields.all %}<div class="content-row"><span>{{ field.position }}</span><div><small>{{ field.get_field_type_display }}</small><strong>{{ field.label }}</strong></div>{% if can_manage %}<a href="{% url 'dossier:library_field_edit' template_item.id field.id %}">Bewerk</a>{% endif %}</div>{% empty %}<p>Dit onderdeel bevat geen invulvelden.</p>{% endfor %}{% if can_manage %}<a class="outline inline-action" href="{% url 'dossier:library_field_create' template_item.id %}">Veld toevoegen</a>{% endif %}</section>{% if can_manage %}<form method="post" class="editor-form"><section>{% csrf_token %}<h2>Template-instellingen</h2>{{ form.as_div }}</section><button class="primary button">Nieuwe versie bewaren</button></form>{% endif %}</main>{% endblock %}
+{% block title %}{{ template_item.title }} | Bibliotheek{% endblock %}
+{% block content %}
+<main class="teacher-shell narrow library-editor">
+  <header class="page-bar">
+    <div>
+      <p class="eyebrow">{{ template_item.get_category_display }} · versie {{ template_item.version }}</p>
+      <h1>{{ template_item.title }}</h1>
+      <p>{{ template_item.description }}</p>
+    </div>
+    <a class="back" href="{% url 'dossier:library_list' %}">← Bibliotheek</a>
+  </header>
+  <section class="editor-section">
+    <h2>Onderdelen en velden</h2>
+    {% for field in template_item.fields.all %}
+    <div class="content-row library-field-row">
+      <span>{{ field.position }}</span>
+      <div>
+        <small>{{ field.get_field_type_display }}{% if field.required %} · verplicht{% endif %}</small>
+        <strong>{{ field.label }}</strong>
+        {% if field.help_text %}<span class="muted">{{ field.help_text }}</span>{% endif %}
+      </div>
+      <div class="row-actions">
+        <a href="{% url 'dossier:library_field_edit' template_item.id field.id %}">Bewerk</a>
+        <form method="post" action="{% url 'dossier:library_field_delete' template_item.id field.id %}" onsubmit="return confirm('Dit veld verwijderen? Bestaande casuskopieën blijven behouden.');">
+          {% csrf_token %}
+          <button class="text-button danger" type="submit" aria-label="{{ field.label }} verwijderen">Verwijderen</button>
+        </form>
+      </div>
+    </div>
+    {% empty %}
+    <p>Dit onderdeel bevat geen invulvelden.</p>
+    {% endfor %}
+    <a class="outline inline-action" href="{% url 'dossier:library_field_create' template_item.id %}">Veld toevoegen</a>
+  </section>
+  <form method="post" class="editor-form">
+    <section>
+      {% csrf_token %}
+      <h2>Instellingen</h2>
+      <p class="muted">Wijzigingen gelden voor nieuwe casuskopieën. Bestaande casussen en studentdossiers blijven behouden.</p>
+      {{ form.as_div }}
+    </section>
+    <button class="primary button" type="submit">Nieuwe versie bewaren</button>
+  </form>
+  <form method="post" action="{% url 'dossier:library_archive' template_item.id %}" onsubmit="return confirm('Deze dossiermodule of dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
+    {% csrf_token %}
+    <button class="outline button danger" type="submit">Uit bibliotheek verwijderen</button>
+  </form>
+</main>
+{% endblock %}

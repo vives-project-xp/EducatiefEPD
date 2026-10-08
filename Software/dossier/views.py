@@ -1,26 +1,37 @@
 from django.contrib import messages
+from django.contrib import auth
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import LoginView
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
 from django.db.models import Q
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 
 from .forms import (
     AssignmentForm,
     CaseForm,
+    EducationForm,
     LibraryFieldForm,
     LibraryTemplateForm,
     ModuleFieldForm,
     ModuleForm,
     PatientForm,
     ReviewForm,
+    TeachingGroupForm,
 )
+from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
 from .models import (
     Assignment,
     AssignmentSubmission,
     Case,
+    Education,
     FieldDefinition,
     LibraryField,
     LibraryTemplate,
@@ -29,12 +40,15 @@ from .models import (
     ModuleResponse,
     Profile,
     StudentCase,
+    TeachingGroup,
 )
-from .services import audit, create_case_structure, module_schema, start_student_case
+from .services import (
+    audit, copy_template_to_case, create_case_structure, module_schema, start_student_case,
+)
 
 
 def user_role(user):
-    if user.is_superuser or user.is_staff:
+    if user.is_superuser:
         return Profile.Role.ADMIN
     return getattr(getattr(user, "epd_profile", None), "role", Profile.Role.STUDENT)
 
@@ -63,6 +77,13 @@ def editable_case(user, case_id):
     return get_object_or_404(teacher_cases(user), id=case_id)
 
 
+def editable_group(user, group_id):
+    groups = TeachingGroup.objects.select_related("education", "teacher")
+    if not is_admin(user):
+        groups = groups.filter(teacher=user)
+    return get_object_or_404(groups, id=group_id)
+
+
 def require_post(request):
     if request.method != "POST":
         raise PermissionDenied
@@ -70,6 +91,8 @@ def require_post(request):
 
 def get_student_case(request, case_id):
     case = get_object_or_404(Case.objects.select_related("patient"), id=case_id)
+    if not case.allowed_groups.filter(members=request.user).exists():
+        raise PermissionDenied
     existing = StudentCase.objects.filter(case=case, student=request.user).first()
     if not existing and case.status != Case.Status.PUBLISHED:
         raise PermissionDenied
@@ -77,6 +100,36 @@ def get_student_case(request, case_id):
     if created:
         audit(request, "student_case.started", student_case, case_id=case.id)
     return case, student_case
+
+
+def epd_login(request):
+    if request.user.is_authenticated:
+        return redirect("dossier:home")
+    if settings.OIDC_ENABLED:
+        return redirect("oidc_authentication_init")
+    return LoginView.as_view(template_name="registration/login.html")(request)
+
+
+def epd_login_failure(request):
+    return render(request, "registration/login_failure.html", status=403)
+
+
+def emergency_login(request):
+    if not settings.EMERGENCY_LOGIN_ENABLED:
+        raise Http404
+    return LoginView.as_view(
+        template_name="registration/login.html",
+        authentication_form=EmergencyAdminAuthenticationForm,
+        extra_context={"emergency_login": True},
+    )(request)
+
+
+@require_POST
+def epd_logout(request):
+    oidc_session = request.session.get("_auth_user_backend") == "dossier.auth.EpdOIDCAuthenticationBackend"
+    end_session_url = oidc_end_session_url(request) if oidc_session and settings.OIDC_ENABLED else None
+    auth.logout(request)
+    return redirect(end_session_url or "login")
 
 
 def health(request):
@@ -95,7 +148,8 @@ def home(request):
         return redirect("dossier:teacher_dashboard")
     cases = list(
         Case.objects.filter(
-            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user)
+            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user),
+            allowed_groups__members=request.user,
         )
         .select_related("patient")
         .prefetch_related("assignments")
@@ -127,7 +181,9 @@ def case_detail(request, case_id):
     selected = next((item for item in assignments if str(item.id) == selected_id), None)
 
     if request.method == "POST" and selected:
-        if student_case.locked:
+        if student_case.locked or selected.status in {
+            AssignmentSubmission.Status.SUBMITTED, AssignmentSubmission.Status.APPROVED
+        }:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
             selected.answer = request.POST.get("answer", "").strip()
@@ -212,6 +268,25 @@ def parsed_module_data(request, schema, current_data):
         else:
             value = request.POST.get(f"field_{key}", "").strip()
             has_value = bool(value)
+            if has_value and field_type == FieldDefinition.FieldType.NUMBER:
+                try:
+                    if not Decimal(value).is_finite():
+                        raise InvalidOperation
+                except InvalidOperation:
+                    missing.append(f"{field['label']} (ongeldig getal)")
+            elif has_value and field_type == FieldDefinition.FieldType.DATE:
+                try:
+                    date.fromisoformat(value)
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldige datum)")
+            elif has_value and field_type == FieldDefinition.FieldType.DATETIME:
+                try:
+                    datetime.fromisoformat(value)
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldig tijdstip)")
+            elif has_value and field_type == FieldDefinition.FieldType.SELECT:
+                if value not in field.get("options", []):
+                    missing.append(f"{field['label']} (ongeldige keuze)")
         if field.get("required") and not has_value:
             missing.append(field["label"])
         data[key] = value
@@ -242,19 +317,28 @@ def dossier(request, case_id):
             if key in valid_keys:
                 data = dict(selected.data)
                 observations = list(data.get(key, []))
-                observations.append({
-                    "timestamp": request.POST.get(f"observation_timestamp_{key}", ""),
-                    "value": request.POST.get(f"observation_value_{key}", "").strip(),
-                    "note": request.POST.get(f"observation_note_{key}", "").strip(),
-                })
-                data[key] = observations
-                selected.data = data
-                selected.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Observatie toegevoegd.")
+                timestamp = request.POST.get(f"observation_timestamp_{key}", "")
+                value = request.POST.get(f"observation_value_{key}", "").strip()
+                try:
+                    datetime.fromisoformat(timestamp)
+                    valid_timestamp = True
+                except ValueError:
+                    valid_timestamp = False
+                if not valid_timestamp or not value:
+                    messages.error(request, "Geef een geldig tijdstip en een observatie op.")
+                else:
+                    observations.append({
+                        "timestamp": timestamp, "value": value,
+                        "note": request.POST.get(f"observation_note_{key}", "").strip(),
+                    })
+                    data[key] = observations
+                    selected.data = data
+                    selected.save(update_fields=["data", "updated_at"])
+                    messages.success(request, "Observatie toegevoegd.")
         else:
             data, missing = parsed_module_data(request, selected.schema, selected.data)
             if missing:
-                messages.error(request, f"Vul de verplichte velden in: {', '.join(missing)}.")
+                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
             else:
                 selected.data = data
                 selected.save(update_fields=["data", "updated_at"])
@@ -275,6 +359,8 @@ def submit_student_case(request, case_id):
     if is_teacher(request.user):
         raise PermissionDenied
     _, student_case = get_student_case(request, case_id)
+    if student_case.locked:
+        raise PermissionDenied
     incomplete = student_case.assignment_submissions.filter(
         status__in=[AssignmentSubmission.Status.TODO, AssignmentSubmission.Status.RESUBMIT]
     ).exists()
@@ -311,6 +397,10 @@ def teacher_case_create(request):
     require_teacher(request.user)
     patient_form = PatientForm(request.POST or None, prefix="patient")
     case_form = CaseForm(request.POST or None, prefix="case")
+    if not is_admin(request.user):
+        case_form.fields["education"].queryset = Education.objects.filter(
+            id__in=TeachingGroup.objects.filter(teacher=request.user).values("education_id")
+        )
     if request.method == "POST" and patient_form.is_valid() and case_form.is_valid():
         patient = patient_form.save(commit=False)
         patient.created_by = request.user
@@ -335,6 +425,9 @@ def teacher_case_edit(request, case_id):
     case = editable_case(request.user, case_id)
     patient_form = PatientForm(request.POST or None, instance=case.patient, prefix="patient")
     case_form = CaseForm(request.POST or None, instance=case, prefix="case")
+    case_form.fields["education"].disabled = True
+    if not is_admin(request.user):
+        case_form.fields["education"].queryset = Education.objects.filter(id=case.education_id)
     if request.method == "POST" and patient_form.is_valid() and case_form.is_valid():
         patient_form.save()
         case_form.save()
@@ -352,10 +445,164 @@ def teacher_case(request, case_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     students = list(case.student_cases.select_related("student").all())
+    groups = TeachingGroup.objects.filter(education=case.education)
+    if not is_admin(request.user):
+        groups = groups.filter(teacher=request.user)
+    selected_group_ids = set(case.allowed_groups.values_list("id", flat=True))
+    groups = list(groups)
+    for group in groups:
+        group.assigned = group.id in selected_group_ids
+    templates = LibraryTemplate.objects.filter(
+        Q(education=case.education) | Q(education__isnull=True),
+        status=LibraryTemplate.Status.ACTIVE,
+    ).exclude(id__in=case.modules.exclude(source_template__isnull=True).values("source_template_id"))
     return render(request, "dossier/teacher_case.html", {
         "case": case, "students": students,
+        "available_groups": groups, "available_templates": templates,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
+
+
+@login_required
+def education_list(request):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    return render(request, "dossier/education_list.html", {
+        "educations": Education.objects.all(),
+    })
+
+
+@login_required
+def education_edit(request, education_id=None):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    education = get_object_or_404(Education, id=education_id) if education_id else None
+    form = EducationForm(request.POST or None, instance=education)
+    if request.method == "POST" and form.is_valid():
+        item = form.save()
+        audit(request, "education.saved", item)
+        return redirect("dossier:education_list")
+    return render(request, "dossier/teacher_item_form.html", {
+        "form": form, "title": "Opleiding bewerken" if education else "Opleiding toevoegen",
+        "education_mode": True,
+    })
+
+
+@login_required
+def group_list(request):
+    require_teacher(request.user)
+    groups = TeachingGroup.objects.select_related("education", "teacher").prefetch_related("members")
+    if not is_admin(request.user):
+        groups = groups.filter(teacher=request.user)
+    return render(request, "dossier/group_list.html", {"groups": groups})
+
+
+@login_required
+def group_edit(request, group_id=None):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id) if group_id else None
+    form = TeachingGroupForm(request.POST or None, instance=group)
+    if group:
+        form.fields["education"].disabled = True
+    if not is_admin(request.user):
+        form.fields.pop("teacher")
+    else:
+        form.fields["teacher"].queryset = get_user_model().objects.filter(
+            epd_profile__role=Profile.Role.TEACHER
+        )
+    if request.method == "POST" and form.is_valid():
+        item = form.save(commit=False)
+        if not is_admin(request.user):
+            item.teacher = request.user
+        item.save()
+        audit(request, "group.saved", item)
+        return redirect("dossier:group_detail", group_id=item.id)
+    return render(request, "dossier/teacher_item_form.html", {
+        "form": form, "title": "Lesgroep bewerken" if group else "Lesgroep toevoegen",
+        "group_mode": True,
+    })
+
+
+@login_required
+def group_detail(request, group_id):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id)
+    available_students = get_user_model().objects.filter(
+        epd_profile__role=Profile.Role.STUDENT,
+    ).filter(
+        Q(epd_profile__education=group.education) | Q(epd_profile__education__isnull=True)
+    ).exclude(id__in=group.members.values("id")).order_by("username")
+    return render(request, "dossier/group_detail.html", {
+        "group": group, "available_students": available_students,
+    })
+
+
+@login_required
+@require_POST
+def group_member_add(request, group_id):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id)
+    if not request.POST.get("student_id", "").isdecimal():
+        raise PermissionDenied
+    student = get_object_or_404(
+        get_user_model().objects.filter(
+            Q(epd_profile__education=group.education) | Q(epd_profile__education__isnull=True)
+        ), id=request.POST.get("student_id"), epd_profile__role=Profile.Role.STUDENT,
+    )
+    if student.epd_profile.education_id is None:
+        student.epd_profile.education = group.education
+        student.epd_profile.save(update_fields=["education"])
+    group.members.add(student)
+    audit(request, "group.member_added", group, student_id=student.id)
+    return redirect("dossier:group_detail", group_id=group.id)
+
+
+@login_required
+@require_POST
+def group_member_remove(request, group_id, student_id):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id)
+    student = get_object_or_404(group.members, id=student_id)
+    group.members.remove(student)
+    audit(request, "group.member_removed", group, student_id=student.id)
+    return redirect("dossier:group_detail", group_id=group.id)
+
+
+@login_required
+@require_POST
+def teacher_case_groups(request, case_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    selected_ids = request.POST.getlist("group_ids")
+    if any(not item.isdecimal() for item in selected_ids):
+        raise PermissionDenied
+    groups = TeachingGroup.objects.filter(id__in=selected_ids, education=case.education)
+    if not is_admin(request.user):
+        groups = groups.filter(teacher=request.user)
+    if groups.count() != len(set(selected_ids)):
+        raise PermissionDenied
+    if is_admin(request.user):
+        case.allowed_groups.set(groups)
+    else:
+        case.allowed_groups.set(list(groups) + list(case.allowed_groups.exclude(teacher=request.user)))
+    audit(request, "case.groups_changed", case)
+    return redirect("dossier:teacher_case", case_id=case.id)
+
+
+@login_required
+@require_POST
+def teacher_case_add_template(request, case_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    if not request.POST.get("template_id", "").isdecimal():
+        raise PermissionDenied
+    template = get_object_or_404(
+        LibraryTemplate.objects.filter(Q(education=case.education) | Q(education__isnull=True)),
+        id=request.POST.get("template_id"), status=LibraryTemplate.Status.ACTIVE,
+    )
+    module = copy_template_to_case(template, case)
+    audit(request, "case.template_added", module, template_id=template.id)
+    return redirect("dossier:teacher_case", case_id=case.id)
 
 
 @login_required
@@ -456,20 +703,29 @@ def teacher_module(request, case_id, module_id):
                 raise PermissionDenied
             data = dict(module.base_data)
             observations = list(data.get(key, []))
-            observations.append({
-                "timestamp": request.POST.get(f"observation_timestamp_{key}", ""),
-                "value": request.POST.get(f"observation_value_{key}", "").strip(),
-                "note": request.POST.get(f"observation_note_{key}", "").strip(),
-            })
-            data[key] = observations
-            module.base_data = data
-            module.save(update_fields=["base_data"])
-            audit(request, "base_dossier.observation_added", module)
-            messages.success(request, "Observatie aan het basisdossier toegevoegd.")
+            timestamp = request.POST.get(f"observation_timestamp_{key}", "")
+            value = request.POST.get(f"observation_value_{key}", "").strip()
+            try:
+                datetime.fromisoformat(timestamp)
+                valid_timestamp = True
+            except ValueError:
+                valid_timestamp = False
+            if not valid_timestamp or not value:
+                messages.error(request, "Geef een geldig tijdstip en een observatie op.")
+            else:
+                observations.append({
+                    "timestamp": timestamp, "value": value,
+                    "note": request.POST.get(f"observation_note_{key}", "").strip(),
+                })
+                data[key] = observations
+                module.base_data = data
+                module.save(update_fields=["base_data"])
+                audit(request, "base_dossier.observation_added", module)
+                messages.success(request, "Observatie aan het basisdossier toegevoegd.")
         else:
             data, missing = parsed_module_data(request, schema, module.base_data)
             if missing:
-                messages.error(request, f"Vul de verplichte velden in: {', '.join(missing)}.")
+                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
             else:
                 module.base_data = data
                 module.save(update_fields=["base_data"])
@@ -545,6 +801,8 @@ def teacher_review_assignment(request, student_case_id, submission_id):
     student_case = get_object_or_404(StudentCase.objects.select_related("case"), id=student_case_id)
     editable_case(request.user, student_case.case_id)
     submission = get_object_or_404(student_case.assignment_submissions, id=submission_id)
+    if submission.status != AssignmentSubmission.Status.SUBMITTED:
+        raise PermissionDenied
     form = ReviewForm(request.POST)
     if form.is_valid():
         submission.status = form.cleaned_data["status"]
@@ -571,13 +829,13 @@ def library_list(request):
     category = request.GET.get("category", "")
     education = request.GET.get("education", "").strip()
     theme = request.GET.get("theme", "").strip()
-    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("created_by")
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("education")
     if query:
         templates = templates.filter(Q(title__icontains=query) | Q(description__icontains=query))
     if category in LibraryTemplate.Category.values:
         templates = templates.filter(category=category)
     if education:
-        templates = templates.filter(education__icontains=education)
+        templates = templates.filter(education__name__icontains=education)
     if theme:
         templates = templates.filter(theme__icontains=theme)
     return render(request, "dossier/library_list.html", {
@@ -588,14 +846,16 @@ def library_list(request):
 
 
 @login_required
+@transaction.atomic
 def library_template(request, template_id=None):
     require_teacher(request.user)
-    if not template_id and not is_admin(request.user):
-        raise PermissionDenied
-    template = get_object_or_404(LibraryTemplate, id=template_id) if template_id else None
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
+    if request.method == "POST":
+        templates = templates.select_for_update()
+    template = get_object_or_404(templates, id=template_id) if template_id else None
     form = LibraryTemplateForm(request.POST or None, instance=template)
-    if request.method == "POST" and not is_admin(request.user):
-        raise PermissionDenied
+    if not is_admin(request.user):
+        form.fields.pop("is_fixed")
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         if not item.pk:
@@ -608,7 +868,7 @@ def library_template(request, template_id=None):
         return redirect("dossier:library_detail", template_id=item.id)
     if template:
         return render(request, "dossier/library_detail.html", {
-            "template_item": template, "form": form, "can_manage": is_admin(request.user),
+            "template_item": template, "form": form,
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,
@@ -616,13 +876,13 @@ def library_template(request, template_id=None):
 
 
 @login_required
+@transaction.atomic
 def library_field(request, template_id, field_id=None):
     require_teacher(request.user)
-    if not is_admin(request.user):
-        raise PermissionDenied
-    template = get_object_or_404(LibraryTemplate, id=template_id)
-    if not (is_admin(request.user) or template.created_by == request.user):
-        raise PermissionDenied
+    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
+    if request.method == "POST":
+        templates = templates.select_for_update()
+    template = get_object_or_404(templates, id=template_id)
     field = get_object_or_404(template.fields, id=field_id) if field_id else None
     form = LibraryFieldForm(request.POST or None, instance=field, parent=template)
     if request.method == "POST" and form.is_valid():
@@ -641,16 +901,34 @@ def library_field(request, template_id, field_id=None):
 
 
 @login_required
+@require_POST
+@transaction.atomic
 def library_archive(request, template_id):
     require_teacher(request.user)
-    if not is_admin(request.user):
-        raise PermissionDenied
-    require_post(request)
-    template = get_object_or_404(LibraryTemplate, id=template_id)
-    if not (is_admin(request.user) or template.created_by == request.user):
-        raise PermissionDenied
+    template = get_object_or_404(
+        LibraryTemplate.objects.select_for_update(),
+        id=template_id, status=LibraryTemplate.Status.ACTIVE,
+    )
     template.status = LibraryTemplate.Status.ARCHIVED
     template.save(update_fields=["status", "updated_at"])
     audit(request, "library.archived", template)
-    messages.success(request, "Bibliotheektemplate gearchiveerd.")
+    messages.success(request, "Onderdeel uit de bibliotheek verwijderd. Bestaande casuskopieën blijven behouden.")
     return redirect("dossier:library_list")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def library_field_delete(request, template_id, field_id):
+    require_teacher(request.user)
+    template = get_object_or_404(
+        LibraryTemplate.objects.select_for_update(),
+        id=template_id, status=LibraryTemplate.Status.ACTIVE,
+    )
+    field = get_object_or_404(template.fields, id=field_id)
+    audit(request, "library_field.deleted", field, label=field.label, template_id=template.id)
+    field.delete()
+    template.version += 1
+    template.save(update_fields=["version", "updated_at"])
+    messages.success(request, "Onderdeel verwijderd. Bestaande casuskopieën blijven behouden.")
+    return redirect("dossier:library_detail", template_id=template.id)

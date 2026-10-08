@@ -1,5 +1,7 @@
-.git
 .env
-__pycache__
+authentik/
+__pycache__/
 *.pyc
-staticfiles
+staticfiles/
+backups/
+*.sqlite3

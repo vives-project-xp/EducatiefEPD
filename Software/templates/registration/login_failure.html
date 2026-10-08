@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Aanmelden mislukt | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell narrow">
+  <header class="page-bar"><div><p class="eyebrow">Aanmelden</p><h1>Geen toegang tot het EPD</h1></div></header>
+  <p>De aanmelding is mislukt of je account heeft geen toegewezen EPD-rol. Vraag je beheerder om de Authentik-groepen te controleren.</p>
+  <p><a class="primary button" href="{% url 'login' %}">Opnieuw aanmelden</a></p>
+</main>
+{% endblock %}

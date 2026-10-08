@@ -8,9 +8,9 @@
       <div class="case-banner"><span class="menu-square">≡</span><strong>{{ student_case.patient_name }}</strong></div>
       {% if selected %}
         <h2>{{ selected.phase }}: {{ selected.title }}</h2><div class="assignment-content">{{ selected.content|linebreaks }}</div>
-        <form method="post" class="answer-form">{% csrf_token %}<input type="hidden" name="assignment" value="{{ selected.id }}"><label for="answer">Jouw uitwerking</label><textarea id="answer" name="answer" rows="10" {% if student_case.locked %}disabled{% endif %}>{{ selected.answer }}</textarea>
+        <form method="post" class="answer-form">{% csrf_token %}<input type="hidden" name="assignment" value="{{ selected.id }}"><label for="answer">Jouw uitwerking</label><textarea id="answer" name="answer" rows="10" {% if student_case.locked or selected.status == 'submitted' or selected.status == 'approved' %}disabled{% endif %}>{{ selected.answer }}</textarea>
           {% if selected.feedback %}<div class="feedback"><strong>Feedback docent</strong>{{ selected.feedback|linebreaks }}</div>{% endif %}
-          {% if not student_case.locked %}<div class="form-actions"><button class="outline button" name="action" value="save">Bewaren</button><button class="primary button" name="action" value="submit">Opdracht indienen</button></div>{% endif %}
+          {% if not student_case.locked and selected.status != 'submitted' and selected.status != 'approved' %}<div class="form-actions"><button class="outline button" name="action" value="save">Bewaren</button><button class="primary button" name="action" value="submit">Opdracht indienen</button></div>{% endif %}
         </form>
       {% else %}
         <h2>Inleiding</h2><div class="intro-copy">{{ student_case.introduction|default:"Lees de patiëntgegevens en opdrachten aandachtig."|linebreaks }}</div><h2>Leerdoelen</h2><div class="intro-copy">{{ student_case.learning_objectives|linebreaks }}</div>
