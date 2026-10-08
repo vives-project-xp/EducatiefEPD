@@ -16,13 +16,13 @@ Bestanden hieronder met **nieuw** zijn voorstellen en bestaan nog niet. Voeg nie
 
 ## Gedeelde basis voor AI-functies
 
-1. **Kies en beoordeel een AI-aanbieder.** Bepaal of gegevens de applicatie mogen verlaten, welke bewaartermijnen gelden en of een verwerkersovereenkomst nodig is. Begin voor de eerste tests met fictieve gegevens.
-2. **Voeg configuratie toe.** Zet bijvoorbeeld `AI_ENABLED`, `AI_API_KEY`, `AI_MODEL` en `AI_TIMEOUT_SECONDS` in `Software/.env.example` en lees die in `Software/config/settings.py`. Geef de API-sleutel via `.env` of een secrets manager door; commit nooit echte sleutels.
-3. **Maak een afgeschermde AI-client.** Voeg `Software/dossier/ai/__init__.py` en `Software/dossier/ai/client.py` toe. De client verstuurt alleen expliciet geselecteerde context, gebruikt time-outs en geeft fouten duidelijk door aan de applicatie. Log geen API-sleutels, volledige prompts of persoonsgegevens.
-4. **Maak gedeelde prompt- en validatielogica.** Voeg `Software/dossier/ai/prompts.py` en `Software/dossier/ai/schemas.py` toe. Definieer per taak een vaste instructie en controleer AI-antwoorden op het verwachte formaat voordat ze worden getoond.
-5. **Behoud autorisatie in Django.** De AI-client mag nooit zelf bepalen of een gebruiker een dossier mag zien. De view controleert eerst de rol en toegang met de bestaande helpers in `Software/dossier/views.py`.
-6. **Toon resultaten als concept.** Schrijf AI-uitvoer niet automatisch in `AssignmentSubmission`, `ModuleResponse` of bestaande feedback. Toon de tekst eerst ter controle. Voeg pas opslag toe als daarvoor een expliciet model en bewaarbeleid zijn afgesproken.
-7. **Voeg tests en audit toe.** Gebruik `unittest.mock.patch` om externe AI-calls in tests te vervangen. Test toegangscontrole, lege context, ongeldige AI-uitvoer, providerfouten en de auditgebeurtenis. Bewaar geen volledige gevoelige context in `AuditEvent.details`.
+1. **Kies en beoordeel een AI-aanbieder.** Bepaal of gegevens de applicatie mogen verlaten, welke bewaartermijnen gelden en of een verwerkersovereenkomst nodig is. Begin voor de eerste tests met fictieve gegevens en leg het besluit vast in `Documentatie/AI toepassingen.md`.
+2. **Voeg configuratie toe.** Zet bijvoorbeeld `AI_ENABLED`, `AI_API_KEY`, `AI_MODEL` en `AI_TIMEOUT_SECONDS` in `Software/.env.example`, lees die instellingen in `Software/config/settings.py` en geef ze door aan de webservice in `Software/compose.yaml`. Geef de API-sleutel via `.env` of een secrets manager door; commit nooit echte sleutels.
+3. **Maak een afgeschermde AI-client.** Maak `Software/dossier/ai/__init__.py` en `Software/dossier/ai/client.py`; laat de client alleen expliciet geselecteerde context versturen, time-outs gebruiken en fouten duidelijk doorgeven. Voeg alleen indien nodig een SDK toe aan `Software/requirements.txt`. Log geen API-sleutels, volledige prompts of persoonsgegevens.
+4. **Maak gedeelde prompt- en validatielogica.** Definieer vaste instructies in `Software/dossier/ai/prompts.py` en controleer het verwachte formaat met validators in `Software/dossier/ai/schemas.py` voordat resultaten worden getoond.
+5. **Behoud autorisatie in Django.** Controleer rol en dossierrechten in de betreffende view in `Software/dossier/views.py` met de bestaande helpers en registreer de endpoint in `Software/dossier/urls.py`. De AI-client mag nooit zelf bepalen of een gebruiker een dossier mag zien.
+6. **Toon resultaten als concept.** Render AI-uitvoer vanuit de betreffende view in een template onder `Software/templates/dossier/` en schrijf die niet automatisch naar `AssignmentSubmission`, `ModuleResponse` of bestaande feedback. Voeg pas een model en migratie toe via `Software/dossier/models.py` en `Software/dossier/migrations/` als opslag en bewaarbeleid expliciet zijn afgesproken.
+7. **Voeg tests en audit toe.** Vervang externe AI-calls met `unittest.mock.patch` in `Software/dossier/tests.py` en test toegangscontrole, lege context, ongeldige AI-uitvoer, providerfouten en audit. Gebruik `Software/dossier/services.py` voor de bestaande auditservice en bewaar geen volledige gevoelige context in `AuditEvent.details`; wijzig `Software/dossier/models.py` alleen als de auditstructuur moet veranderen.
 
 ---
 
@@ -30,217 +30,183 @@ Bestanden hieronder met **nieuw** zijn voorstellen en bestaan nog niet. Voeg nie
 
 **Doel:** een docent krijgt een beknopt overzicht van een ingediende fictieve studentcasus.
 
-**Bestanden:** bestaand `Software/dossier/models.py`, `Software/dossier/views.py`, `Software/dossier/urls.py`, `Software/templates/dossier/teacher_student_case.html`, `Software/dossier/tests.py`; nieuw `Software/dossier/ai/summaries.py` en eventueel `Software/templates/dossier/ai_summary.html`.
-
-1. Voeg in `summaries.py` een functie toe die voor één `StudentCase` de relevante antwoorden uit `assignment_submissions` en `module_responses` omzet naar beperkte, gelabelde tekst. Sluit lege velden en irrelevante gegevens uit.
-2. Maak in `views.py` een login-beveiligde POST-view voor het aanvragen van een samenvatting. Controleer `require_teacher`, laad de studentcasus en controleer met `editable_case` of de docent toegang heeft tot de bijbehorende casus.
-3. Voeg in `urls.py` bijvoorbeeld `docent/studentdossier/<int:student_case_id>/ai/samenvatting/` toe en plaats in `teacher_student_case.html` een CSRF-beveiligde knop.
-4. Vraag de AI om vaste onderdelen terug te geven, zoals kern van de casus, belangrijkste observaties, acties, hiaten en vragen voor bespreking. Vraag om geen feiten toe te voegen en iedere bewering aan een dossieronderdeel te koppelen.
-5. Toon het resultaat op hetzelfde docentenscherm als AI-concept. Test docenttoegang, weigering voor studenten, AI-fouten en dat de oorspronkelijke antwoorden niet wijzigen.
+1. Maak in `Software/dossier/ai/summaries.py` een functie die voor één `StudentCase` relevante antwoorden omzet naar beperkte, gelabelde tekst; haal die antwoorden uit de modellen in `Software/dossier/models.py` en sluit lege of irrelevante velden uit.
+2. Voeg in `Software/dossier/views.py` een login-beveiligde POST-view toe die `require_teacher` en `editable_case` gebruikt om docenttoegang te controleren.
+3. Registreer de POST-route in `Software/dossier/urls.py` en plaats de CSRF-beveiligde knop in `Software/templates/dossier/teacher_student_case.html`.
+4. Definieer de vaste samenvattingsonderdelen in `Software/dossier/ai/prompts.py` en valideer de output via `Software/dossier/ai/schemas.py`; laat `Software/dossier/ai/summaries.py` geen feiten toevoegen en iedere bewering aan een dossieronderdeel koppelen.
+5. Toon het resultaat als AI-concept in `Software/templates/dossier/teacher_student_case.html`, verwerk het resultaat in `Software/dossier/views.py` en voeg tests voor docenttoegang, studentenweigering, AI-fouten en ongewijzigde brongegevens toe aan `Software/dossier/tests.py`.
 
 ## 2. Een tijdlijn opbouwen
 
 **Doel:** gebeurtenissen uit de casus in chronologische volgorde tonen, met herkomstinformatie.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `teacher_student_case.html`, `tests.py`; nieuw `Software/dossier/ai/timelines.py` en eventueel `Software/templates/dossier/ai_timeline.html`.
-
-1. Definieer in `timelines.py` welke bronnen gebeurtenissen kunnen opleveren, zoals opdrachtinzendingen en gedateerde velden in module-antwoorden.
-2. Bouw eerst tijdlijnitems met expliciete bronverwijzing en datum uit gestructureerde velden. Laat AI alleen vrije tekst helpen omzetten naar neutrale korte beschrijvingen; laat het geen ontbrekende datums raden.
-3. Valideer iedere datum en sorteer items in Django. Plaats onvolledige of onzekere datums in een aparte groep, bijvoorbeeld “Datum onbekend”.
-4. Voeg een login-beveiligde docentroute toe in `urls.py` en een weergave in `teacher_student_case.html`. Toon bij elk item een link of verwijzing naar het oorspronkelijke dossieronderdeel.
-5. Test chronologische sortering, ontbrekende datums, foutieve datums, bronverwijzingen en toegang tot andermans casussen.
+1. Definieer in `Software/dossier/ai/timelines.py` welke bronnen gebeurtenissen opleveren; gebruik daarvoor onder meer opdrachtinzendingen en gedateerde velden van de modellen in `Software/dossier/models.py`.
+2. Bouw in `Software/dossier/ai/timelines.py` tijdlijnitems met expliciete bronverwijzing en datum uit gestructureerde velden. Laat de prompt in `Software/dossier/ai/prompts.py` AI alleen vrije tekst omzetten, nooit ontbrekende datums raden.
+3. Valideer datums, sorteer items en groepeer onzekere datums in `Software/dossier/ai/timelines.py`; wijzig datumvelden in `Software/dossier/models.py` alleen als de bestaande velden niet volstaan.
+4. Voeg de login-beveiligde view toe in `Software/dossier/views.py`, registreer de route in `Software/dossier/urls.py` en toon de tijdlijn met bronverwijzingen in `Software/templates/dossier/teacher_student_case.html`.
+5. Voeg tests voor sortering, ontbrekende/foutieve datums, bronverwijzingen en toegang toe in `Software/dossier/tests.py` en test de tijdlijnlogica in `Software/dossier/ai/timelines.py`.
 
 ## 3. Ontbrekende of tegenstrijdige registraties signaleren
 
 **Doel:** mogelijke onvolledigheden en inconsistenties zichtbaar maken zonder gegevens automatisch te wijzigen.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `teacher_student_case.html`, `tests.py`; nieuw `Software/dossier/ai/consistency.py`.
-
-1. Begin in `consistency.py` met deterministische controles voor ontbrekende verplichte velden en datums. Gebruik daarvoor `ModuleResponse.schema` en `ModuleResponse.data` waar mogelijk.
-2. Voeg optioneel AI-analyse toe voor mogelijke inhoudelijke tegenstrijdigheden. Geef alleen relevante, beperkte tekstfragmenten mee en vraag om twee concrete bronverwijzingen per mogelijke tegenspraak.
-3. Valideer de output en presenteer elk resultaat als “te controleren signaal”, niet als vastgestelde fout. Bied geen automatische correctie aan.
-4. Toon signalen op het bevoegde dossier- of docentenscherm. Registreer in `AuditEvent` dat de controle is uitgevoerd, maar zet geen volledige dossierinhoud in de auditdetails.
-5. Test correcte registraties, ontbrekende velden, foutieve AI-output, fout-positieven en toegangscontrole.
+1. Implementeer deterministische controles in `Software/dossier/ai/consistency.py` en gebruik daarvoor `ModuleResponse.schema` en `ModuleResponse.data` zoals gedefinieerd in `Software/dossier/models.py`.
+2. Voeg in `Software/dossier/ai/consistency.py` optionele AI-analyse toe voor mogelijke tegenstrijdigheden; definieer beperkte context en bronverwijzingen in `Software/dossier/ai/prompts.py` en valideer de resultaten met `Software/dossier/ai/schemas.py`.
+3. Valideer output in `Software/dossier/ai/consistency.py` en presenteer resultaten als controleerbare signalen via `Software/dossier/views.py` en de relevante template onder `Software/templates/dossier/`; pas niets automatisch aan.
+4. Toon signalen in de bevoegde view/template en registreer de controle via `audit` in `Software/dossier/services.py` zonder dossierinhoud in auditdetails. `AuditEvent` staat al in `Software/dossier/models.py`.
+5. Voeg tests voor normale, ontbrekende en tegenstrijdige registraties, foutieve AI-output en toegangscontrole toe aan `Software/dossier/tests.py` en test de controles in `Software/dossier/ai/consistency.py`.
 
 ## 4. Reflectievragen genereren
 
 **Doel:** een student krijgt vragen die diens eigen reflectie op een oefencasus verdiepen.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `case_detail.html`, `tests.py`; nieuw `Software/dossier/ai/reflection.py` en eventueel `Software/templates/dossier/ai_reflection.html`.
-
-1. Koppel de functie aan één bestaande opdracht of casus en bepaal de context uit de gepubliceerde casus en relevante leerdoelen.
-2. Voeg in `reflection.py` een generator toe die een beperkt aantal open vragen oplevert, bijvoorbeeld over onderbouwing, alternatieven, signalen en vervolgstappen.
-3. Voeg een POST-route toe die alleen toegankelijk is voor een student die via `get_student_case` toegang heeft tot de casus. Vermijd generatie voor een niet-toegankelijke of ongepubliceerde casus.
-4. Toon vragen als oefenhulp en sla ze niet op in het formele antwoordveld. Als de student ze later wil bewaren, laat die dat expliciet doen.
-5. Test toegang tot toegewezen casussen, lege leerdoelen en providerfouten.
+1. Bepaal in `Software/dossier/views.py` en aan de hand van de modellen in `Software/dossier/models.py` welke opdracht/casus en leerdoelen als context zijn toegestaan.
+2. Maak in `Software/dossier/ai/reflection.py` een generator voor een beperkt aantal open vragen, schrijf de instructies in `Software/dossier/ai/prompts.py` en valideer de uitvoer met `Software/dossier/ai/schemas.py`.
+3. Voeg de POST-view met `get_student_case`-toegangscontrole toe aan `Software/dossier/views.py` en registreer de endpoint in `Software/dossier/urls.py`.
+4. Toon vragen als oefenhulp in `Software/templates/dossier/case_detail.html` of `Software/templates/dossier/dossier.html`; sla ze niet op als formele antwoorden in `Software/dossier/models.py`, tenzij expliciete opslag wordt ontworpen.
+5. Voeg tests voor casustoegang, lege leerdoelen en providerfouten toe aan `Software/dossier/tests.py` en test de generator in `Software/dossier/ai/reflection.py`.
 
 ## 5. Feedback op een fictieve casus geven
 
 **Doel:** formatieve feedback bieden zonder een cijfer of formeel docentenoordeel te genereren.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `case_detail.html`, `teacher_student_case.html`, `tests.py`; nieuw `Software/dossier/ai/formative_feedback.py` en eventueel `Software/templates/dossier/ai_feedback.html`.
-
-1. Definieer samen met docenten een rubric met criteria zoals analyse, onderbouwing en volledigheid. Gebruik geen rubric die automatisch een formele score bepaalt.
-2. Laat de student de functie alleen op een fictieve, eigen casus of inzending toepassen. Verzamel uitsluitend het betreffende antwoord, de opdrachtinstructie en de leerdoelen.
-3. Voeg een generator toe die per criterium sterke punten, vragen en verbeterkansen geeft, met verwijzingen naar concrete passages.
-4. Toon de uitvoer als “AI-oefenfeedback” en houd deze apart van `AssignmentSubmission.feedback`, dat de docent gebruikt voor formele feedback.
-5. Test dat AI-feedback geen bestaande docentfeedback overschrijft en dat niet-ingediende of niet-toegankelijke inzendingen volgens de afgesproken regels worden behandeld.
+1. Definieer met docenten een rubric zonder formele score en leg criteria vast in `Documentatie/AI toepassingen.md`; valideer de rubric eventueel met een schema in `Software/dossier/ai/schemas.py`.
+2. Beperk toepassing in `Software/dossier/views.py` tot een fictieve eigen casus en selecteer uit `Software/dossier/models.py` alleen het antwoord, de opdrachtinstructie en leerdoelen.
+3. Maak de feedbackgenerator in `Software/dossier/ai/formative_feedback.py`, zet instructies in `Software/dossier/ai/prompts.py` en valideer output met `Software/dossier/ai/schemas.py`.
+4. Toon output afzonderlijk van formele docentfeedback in `Software/templates/dossier/case_detail.html` of `Software/templates/dossier/teacher_student_case.html`, verwerkt via `Software/dossier/views.py`; schrijf niet naar `AssignmentSubmission.feedback` in `Software/dossier/models.py`.
+5. Test dat formele feedback niet wordt overschreven en controleer inzendstatus en rechten met tests in `Software/dossier/tests.py` en de autorisatie in `Software/dossier/views.py`.
 
 ## 6. Ruwe aantekeningen herschrijven
 
 **Doel:** een gebruiker kan een eigen tekstvoorstel laten ordenen of verduidelijken.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `dossier.html`, `_dynamic_fields.html`, `tests.py`; nieuw `Software/dossier/ai/rewrites.py` en eventueel `Software/templates/dossier/ai_rewrite.html`.
-
-1. Kies eerst welke tekstvelden geschikt zijn en voor welke rollen de actie beschikbaar wordt.
-2. Voeg een POST-endpoint toe dat de tekst uit het formulier gebruikt, maar het oorspronkelijke veld niet opslaat of overschrijft.
-3. Laat `rewrites.py` alleen taal, structuur of toon aanpassen. Geef expliciet mee dat feiten, datums en onzekerheden ongewijzigd moeten blijven.
-4. Toon origineel en voorstel naast elkaar met knoppen om het voorstel over te nemen, verder te bewerken of te verwerpen. De gebruiker bevestigt zelf het opslaan via het bestaande formulier.
-5. Test CSRF, roltoegang, lege tekst en dat de oorspronkelijke registratie gelijk blijft wanneer het voorstel wordt verworpen.
+1. Kies geschikte velden en rollen aan de hand van `Software/dossier/models.py` en `Software/dossier/views.py` en leg de scope vast in `Documentatie/AI toepassingen.md`.
+2. Voeg in `Software/dossier/views.py` een POST-view toe, registreer die in `Software/dossier/urls.py` en zorg dat de aangeleverde tekst niet automatisch wordt opgeslagen.
+3. Maak `Software/dossier/ai/rewrites.py` en definieer in `Software/dossier/ai/prompts.py` dat alleen taal, structuur of toon aangepast mag worden; feiten, datums en onzekerheden blijven behouden.
+4. Toon origineel en voorstel in `Software/templates/dossier/dossier.html` of `Software/templates/dossier/_dynamic_fields.html`, met verwerking van overnemen/bewerken/verwerpen in `Software/dossier/views.py`.
+5. Test CSRF, roltoegang, lege tekst en behoud van origineel in `Software/dossier/tests.py` en `Software/dossier/ai/rewrites.py`.
 
 ## 7. Een interactieve casussimulatie aanbieden
 
 **Doel:** de student oefent een gesprek in een fictieve situatie met AI als gesprekspartner.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `tests.py`; nieuw `Software/dossier/ai/simulations.py`, `Software/templates/dossier/simulation.html` en, als gesprekken bewaard worden, een modelwijziging in `models.py` plus een Django-migratie.
-
-1. Definieer een simulatiescenario met rol, doel, toegestane achtergrondinformatie en stopvoorwaarden. Begin met docent-goedgekeurde fictieve casussen.
-2. Bouw in `simulations.py` een gespreksturn-functie met begrensde gesprekslengte en alleen context van dat scenario.
-3. Maak scherm en POST-routes voor starten, antwoorden en afronden. Controleer dat de student de gekozen casus mag gebruiken.
-4. Toon na afloop reflectie of feedback als oefenmateriaal. Sla het gesprek niet op als reguliere dossierregistratie; als opslag nodig is, maak een expliciet model met bewaartermijn en verwijderoptie.
-5. Test sessie-isolatie tussen studenten, maximale lengte, providerfouten en dat geen gegevens uit andere casussen in het gesprek verschijnen.
+1. Definieer scenario, rol, doel, context en stopvoorwaarden voor fictieve casussen op basis van bestaand materiaal in `Software/dossier/models.py`; zet scenario-instructies in `Software/dossier/ai/simulations.py`.
+2. Bouw een begrensde gespreksturn-functie in `Software/dossier/ai/simulations.py` en laat die de gedeelde client in `Software/dossier/ai/client.py` gebruiken.
+3. Maak de schermlogica in `Software/dossier/views.py`, registreer POST-routes in `Software/dossier/urls.py` en voeg het gespreksscherm toe als `Software/templates/dossier/simulation.html`.
+4. Toon feedback als oefenmateriaal in `Software/templates/dossier/simulation.html`. Als gesprekken bewaard worden, definieer dan een model in `Software/dossier/models.py`, maak een migratie onder `Software/dossier/migrations/` en leg het bewaarbeleid vast.
+5. Test isolatie, maximale lengte, providerfouten en bronafbakening in `Software/dossier/tests.py` en `Software/dossier/ai/simulations.py`.
 
 ## 8. Varianten van bestaande casussen maken
 
 **Doel:** docenten laten een fictieve casus als concept uitbreiden of aanpassen.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `teacher_case.html`, `tests.py`; nieuw `Software/dossier/ai/case_variants.py` en eventueel `Software/templates/dossier/ai_case_variant.html`.
-
-1. Voeg alleen voor docenten een actie toe op de casusbeheerpagina en laat de docent doel en moeilijkheidsgraad kiezen.
-2. Genereer een voorstel op basis van casusinhoud en leerdoelen. Vraag om uitsluitend fictieve details toe te voegen en geen bestaande feiten stilzwijgend te veranderen.
-3. Toon verschil tussen origineel en variant. Schrijf de variant pas na expliciete goedkeuring als nieuwe `Case` op, of als concept volgens het bestaande statusmodel.
-4. Zorg dat varianten niet automatisch gepubliceerd of aan studentgroepen toegewezen worden.
-5. Test dat de originele casus ongewijzigd blijft, alleen bevoegde docenten varianten maken en concepten niet zichtbaar zijn voor studenten.
+1. Voeg de docentactie en doel-/niveauselectie toe aan `Software/templates/dossier/teacher_case.html` en behandel de invoer in `Software/dossier/views.py`.
+2. Genereer een voorstel met fictieve details in `Software/dossier/ai/case_variants.py`; definieer de prompt in `Software/dossier/ai/prompts.py` en haal toegestane bronvelden uit `Software/dossier/models.py`.
+3. Toon het verschil in `Software/templates/dossier/ai_case_variant.html` en sla pas na goedkeuring als nieuwe conceptcasus op via `Software/dossier/views.py` en de modellen in `Software/dossier/models.py`.
+4. Voorkom automatische publicatie of groepskoppeling met controles in `Software/dossier/views.py`, `Software/dossier/models.py` en de routeconfiguratie in `Software/dossier/urls.py`.
+5. Test behoud van originele inhoud, docentrollen en conceptzichtbaarheid in `Software/dossier/tests.py` en `Software/dossier/views.py`.
 
 ## 9. Vragen stellen over goedgekeurd lesmateriaal
 
 **Doel:** antwoorden geven op basis van controleerbare bronnen uit de casusbibliotheek.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `library_list.html`, `tests.py`; nieuw `Software/dossier/ai/library_search.py`, `Software/dossier/ai/retrieval.py` en `Software/templates/dossier/library_assistant.html`.
-
-1. Bepaal welke bibliotheekitems goedgekeurd en door de rol van de gebruiker toegankelijk zijn. Begin met tekst uit `LibraryTemplate` en bijbehorende velden.
-2. Implementeer zoeken naar relevante passages. Voor een eerste versie kan eenvoudige tekstzoeking volstaan; embeddings of een vectorstore zijn een aparte latere keuze.
-3. Geef alleen gevonden passages aan de AI en vraag om bronverwijzingen. Als geen bruikbare passages bestaan, laat de assistent aangeven dat er geen bron is.
-4. Voeg een vraagformulier toe aan de bibliotheek en toon antwoord met links naar de gebruikte items.
-5. Test dat gearchiveerde of niet-toegestane items niet in antwoorden terechtkomen en dat bronverwijzingen correct zijn.
+1. Bepaal met de modellen in `Software/dossier/models.py` en de toegangslogica in `Software/dossier/views.py` welke bibliotheekitems goedgekeurd en roltoegankelijk zijn.
+2. Implementeer passagezoeking, eventueel eerst eenvoudige tekstzoeking, in `Software/dossier/ai/retrieval.py` en `Software/dossier/ai/library_search.py`.
+3. Geef uitsluitend gevonden passages mee via `Software/dossier/ai/library_search.py`, definieer bronverwijzingen in `Software/dossier/ai/prompts.py` en valideer ze in `Software/dossier/ai/schemas.py`; geef geen antwoord zonder bron.
+4. Voeg de vraagview toe aan `Software/dossier/views.py`, registreer de route in `Software/dossier/urls.py` en maak het vraag-/antwoordscherm in `Software/templates/dossier/library_assistant.html`, eventueel bereikbaar vanuit `Software/templates/dossier/library_list.html`.
+5. Test archivering, toegangsrechten en bronverwijzingen in `Software/dossier/tests.py` en `Software/dossier/ai/retrieval.py`.
 
 ## 10. Vervolgstappen bij een oefencasus verkennen
 
 **Doel:** meerdere mogelijke onderzoeksvragen of acties verkennen bij een fictieve casus.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `case_detail.html`, `tests.py`; nieuw `Software/dossier/ai/next_steps.py` en eventueel `Software/templates/dossier/ai_next_steps.html`.
-
-1. Beperk deze functie tot fictieve oefencasussen en laat de gebruiker expliciet een casus selecteren.
-2. Vraag de AI om meerdere opties, de onderliggende redenatie en welke informatie nog ontbreekt. Vraag niet om één definitieve instructie.
-3. Presenteer de uitkomst als brainstorm met waarschuwing dat de student bronnen en leerstof moet raadplegen.
-4. Gebruik een eigen view en templatefragment; schrijf de suggesties niet automatisch naar het dossier of een actieplan.
-5. Test lege context, onverwachte AI-uitvoer, roltoegang en duidelijke markering als AI-suggesties.
+1. Beperk de functie tot fictieve oefencasussen en expliciete selectie in `Software/templates/dossier/case_detail.html`; controleer de toegang in `Software/dossier/views.py` en gebruik de casusmodellen uit `Software/dossier/models.py`.
+2. Vraag om meerdere opties, afwegingen en ontbrekende informatie in de prompt in `Software/dossier/ai/prompts.py`; genereer en valideer ze via `Software/dossier/ai/next_steps.py` en `Software/dossier/ai/schemas.py`.
+3. Presenteer de resultaten als brainstorm in `Software/templates/dossier/ai_next_steps.html` en geef ze door vanuit `Software/dossier/views.py`.
+4. Houd de functie apart met een eigen route in `Software/dossier/urls.py` en view in `Software/dossier/views.py`; schrijf niet automatisch naar `Software/dossier/models.py` of een actieplan.
+5. Test lege context, fouten, roltoegang en markering als AI-suggestie in `Software/dossier/tests.py` en `Software/dossier/ai/next_steps.py`.
 
 ## 11. Les- en beoordelingsmateriaal voorbereiden
 
 **Doel:** docenten conceptvragen, voorbeeldantwoorden of rubricvoorstellen laten maken.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `library_detail.html`, `tests.py`; nieuw `Software/dossier/ai/teaching_material.py` en `Software/templates/dossier/ai_teaching_material.html`.
-
-1. Maak een docentenscherm waarin de docent leerdoel, materiaaltype, doelgroep en niveau selecteert.
-2. Genereer één materiaaltype per verzoek en valideer de uitvoer op formaat, bijvoorbeeld vraag plus antwoord plus bron of rubriccriterium.
-3. Toon alles als concept met bewerkfunctionaliteit. Sla pas na controle op in een passend bibliotheekitem; publiceer niet automatisch.
-4. Voeg zo nodig aparte velden toe aan modellen; maak de migratie met `python manage.py makemigrations dossier` en controleer die vóór toepassing.
-5. Test dat studenten geen materiaal kunnen genereren of publiceren en dat conceptmateriaal niet openbaar wordt.
+1. Maak in `Software/templates/dossier/ai_teaching_material.html` een docentenscherm voor leerdoel, materiaaltype, doelgroep en niveau en koppel dit aan een view in `Software/dossier/views.py` met een route in `Software/dossier/urls.py`.
+2. Genereer één materiaaltype per verzoek in `Software/dossier/ai/teaching_material.py` en valideer het formaat met `Software/dossier/ai/schemas.py`.
+3. Toon de uitvoer als bewerkbaar concept in `Software/templates/dossier/ai_teaching_material.html` en sla die pas na docentcontrole op via `Software/dossier/views.py` en, indien bibliotheekopslag wordt toegevoegd, `Software/dossier/models.py`.
+4. Voeg indien nodig velden toe aan `Software/dossier/models.py` en maak de bijbehorende migratie in `Software/dossier/migrations/`.
+5. Test roltoegang, publicatie en conceptzichtbaarheid met tests in `Software/dossier/tests.py` en controles in `Software/dossier/views.py`.
 
 ## 12. Teksten begrijpelijker maken
 
 **Doel:** uitleg of lesmateriaal laten herschrijven op een gekozen taalniveau.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `library_detail.html`, `tests.py`; nieuw `Software/dossier/ai/plain_language.py` en `Software/templates/dossier/ai_plain_language.html`.
-
-1. Voeg een actie toe op geselecteerde goedgekeurde instructies of casusbeschrijvingen, met een beperkt aantal taalniveaus.
-2. Stuur alleen de geselecteerde tekst en het niveau; vraag om betekenis, vakinhoud en waarschuwingen niet weg te laten.
-3. Toon origineel en aangepaste tekst naast elkaar. Houd de aangepaste variant tijdelijk of sla die alleen op na bevestiging door de docent.
-4. Test vaktermen, lege invoer, HTML/speciale tekens en behoud van belangrijke instructies.
-5. Laat docenten representatieve output beoordelen voordat studenten deze functie gebruiken.
+1. Voeg de actie en niveauselectie voor goedgekeurde teksten toe aan `Software/templates/dossier/library_detail.html` en verwerk de aanvraag in `Software/dossier/views.py`.
+2. Stuur alleen tekst en niveau vanuit `Software/dossier/ai/plain_language.py` en definieer in `Software/dossier/ai/prompts.py` dat inhoud en waarschuwingen behouden moeten blijven.
+3. Toon origineel en voorstel in `Software/templates/dossier/ai_plain_language.html`; sla via `Software/dossier/views.py` en eventueel `Software/dossier/models.py` alleen op na bevestiging.
+4. Test vaktermen, lege invoer, speciale tekens en behoud van instructies in `Software/dossier/tests.py` en `Software/dossier/ai/plain_language.py`.
+5. Leg de evaluatiecriteria vast in `Documentatie/AI toepassingen.md` en laat docenten output beoordelen vóór studentgebruik; voeg regressietests toe aan `Software/dossier/tests.py`.
 
 ## 13. Lesmateriaal vertalen
 
 **Doel:** een docent laten vertalen en controleren van goedgekeurde onderwijsinhoud.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `library_detail.html`, `tests.py`; nieuw `Software/dossier/ai/translations.py` en `Software/templates/dossier/ai_translation.html`.
-
-1. Laat een docent brontekst en doeltaal selecteren. Definieer waar nodig een gecontroleerde lijst met vaktermen.
-2. Genereer een conceptvertaling met behoud van opmaak, betekenis en onzekerheden. Laat AI geen ontbrekende inhoud aanvullen.
-3. Toon vertaling en origineel naast elkaar en vermeld taal/model of generatieversie volgens het bewaarbeleid.
-4. Publiceer of vervang origineel nooit automatisch; laat de docent expliciet opslaan als vertaalde versie.
-5. Test termenlijst, opmaak, fouten in vertaling en dat de brontekst onveranderd blijft.
+1. Laat de docent brontekst en doeltaal selecteren in `Software/templates/dossier/library_detail.html`, verwerk die keuze in `Software/dossier/views.py` en definieer vaktermen eventueel in `Software/dossier/ai/glossary.py`.
+2. Genereer een conceptvertaling met behoud van betekenis en opmaak in `Software/dossier/ai/translations.py` en schrijf de vertaalinstructies in `Software/dossier/ai/prompts.py`.
+3. Toon origineel en vertaling naast elkaar in `Software/templates/dossier/ai_translation.html`, gevuld vanuit `Software/dossier/views.py`.
+4. Laat de docent expliciet opslaan via `Software/dossier/views.py`; vervang bronmateriaal nooit automatisch in `Software/dossier/models.py`. Maak alleen een migratie onder `Software/dossier/migrations/` als vertalingen structureel worden opgeslagen.
+5. Test terminologie, opmaak, vertaalfouten en ongewijzigde bron in `Software/dossier/tests.py` en `Software/dossier/ai/translations.py`.
 
 ## 14. Een persoonlijke leerroute voorstellen
 
 **Doel:** een student passende volgende oefeningen laten ontdekken op basis van leerdoelen en eigen voortgang.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `home.html`, `tests.py`; nieuw `Software/dossier/ai/learning_path.py` en eventueel `Software/templates/dossier/learning_path.html`.
-
-1. Bepaal welke voortgangsvelden relevant en toegestaan zijn; stuur geen volledige dossiers of docentnotities mee.
-2. Genereer aanbevelingen uitsluitend uit beschikbare, gepubliceerde casussen en expliciete leerdoelen.
-3. Toon per suggestie waarom die wordt aanbevolen en laat de student kiezen. Bied een optie om de aanbeveling te negeren.
-4. Gebruik aanbevelingen niet voor cijfers, studievoortgangsbesluiten, selectie of automatische profilering.
-5. Test dat aanbevelingen alleen verwijzen naar casussen waartoe de student toegang heeft en dat geen verborgen docentfeedback wordt gebruikt.
+1. Bepaal toegestane voortgangsvelden in `Software/dossier/models.py` en selecteer die in `Software/dossier/views.py`; sluit dossiers en docentnotities uit.
+2. Genereer aanbevelingen uit gepubliceerde, toegankelijke casussen in `Software/dossier/ai/learning_path.py` en definieer de prompt in `Software/dossier/ai/prompts.py`.
+3. Toon aanbevelingen en reden in `Software/templates/dossier/learning_path.html` of `Software/templates/dossier/home.html`; verwerk accepteren/negeren in `Software/dossier/views.py`.
+4. Leg uitsluiting van cijfers, formele voortgangsbesluiten en profilering vast in `Documentatie/AI toepassingen.md` en bewaak die in `Software/dossier/views.py`.
+5. Test casustoegang en uitsluiting van verborgen feedback in `Software/dossier/tests.py` en `Software/dossier/ai/learning_path.py`.
 
 ## 15. Casussen aan leerdoelen koppelen
 
 **Doel:** docenten helpen casussen aan competenties of leerdoelen te koppelen.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `teacher_case.html`, `tests.py`; nieuw `Software/dossier/ai/learning_objectives.py`.
-
-1. Bepaal waar leerdoelen nu worden opgeslagen en welke bestaande casusvelden als context mogen worden gebruikt.
-2. Laat AI mogelijke koppelingen met onderbouwing en verwijzing naar relevante casuspassages voorstellen.
-3. Toon voorstellen aan de bevoegde docent en laat die bevestigen, verwijderen of wijzigen.
-4. Sla alleen bevestigde koppelingen op. Als de huidige modellen geen relatie ondersteunen, voeg die toe in `models.py` en maak een gecontroleerde migratie.
-5. Test dat AI-voorstellen niet automatisch als gevalideerde curriculumdata worden behandeld.
+1. Bepaal de bestaande leerdoelopslag en toegestane casusvelden in `Software/dossier/models.py` en controleer de selectie in `Software/dossier/views.py`.
+2. Laat AI koppelingen met onderbouwing en passageverwijzingen voorstellen via `Software/dossier/ai/learning_objectives.py`; definieer instructies in `Software/dossier/ai/prompts.py` en validatie in `Software/dossier/ai/schemas.py`.
+3. Toon voorstellen aan de bevoegde docent via `Software/dossier/views.py`, registreer de actie in `Software/dossier/urls.py` en voeg de interface toe aan `Software/templates/dossier/teacher_case.html`.
+4. Sla alleen bevestigde koppelingen op in `Software/dossier/models.py`; maak daarvoor zo nodig een nieuwe migratie onder `Software/dossier/migrations/`.
+5. Test dat AI-voorstellen niet automatisch als gevalideerde data gelden met tests in `Software/dossier/tests.py` en controles in `Software/dossier/views.py`.
 
 ## 16. Quizvragen en flashcards maken
 
 **Doel:** oefenmateriaal genereren uit goedgekeurde lesstof.
 
-**Bestanden:** bestaand `models.py`, `views.py`, `urls.py`, `library_detail.html`, `tests.py`; nieuw `Software/dossier/ai/quizzes.py` en `Software/templates/dossier/ai_quiz.html`.
-
-1. Laat de docent bronmateriaal, leerdoel, aantal vragen en vraagtype selecteren.
-2. Laat AI vragen, antwoorden, uitleg en bronverwijzingen in een vast JSON-formaat opleveren; valideer dit met `ai/schemas.py`.
-3. Toon vragen als preview en laat een docent dubbelzinnige of foutieve vragen aanpassen.
-4. Voeg goedgekeurde quizitems toe aan een aparte oefenmodule of bestaand opdrachtmodel. Publiceer ze niet zonder expliciete docentactie.
-5. Test antwoordvalidatie, bronverwijzingen, inhoudelijke fouten en dat studenten de antwoordsleutel niet vóór het beantwoorden zien.
+1. Laat de docent bron, leerdoel, aantal en vraagtype kiezen in `Software/templates/dossier/ai_quiz.html` en verwerk de invoer in `Software/dossier/views.py`.
+2. Genereer vragen, antwoorden, uitleg en bronverwijzingen in `Software/dossier/ai/quizzes.py` en valideer het formaat met `Software/dossier/ai/schemas.py`.
+3. Toon een preview in `Software/templates/dossier/ai_quiz.html` en laat docentaanpassingen verwerken via `Software/dossier/views.py`.
+4. Sla alleen goedgekeurde quizitems op met modellen in `Software/dossier/models.py` en verwerking in `Software/dossier/views.py`; maak indien nodig een migratie onder `Software/dossier/migrations/`.
+5. Test antwoordvalidatie, bronnen, inhoudsfouten en verborgen antwoordsleutels in `Software/dossier/tests.py` en `Software/dossier/ai/quizzes.py`.
 
 ## 17. Lesmateriaal controleren op duidelijkheid
 
 **Doel:** docenten signalen geven over mogelijk onduidelijke instructies voordat materiaal wordt gepubliceerd.
 
-**Bestanden:** bestaand `views.py`, `urls.py`, `library_detail.html`, `tests.py`; nieuw `Software/dossier/ai/material_review.py` en `Software/templates/dossier/ai_material_review.html`.
-
-1. Voeg een docentactie toe om een conceptinstructie of bibliotheekitem te controleren.
-2. Vraag AI om concrete passages te markeren met het mogelijke probleem en een suggestie, bijvoorbeeld ontbrekende stap, onverklaarde vakterm of dubbelzinnige formulering.
-3. Toon bevindingen naast de bron en laat de docent zelf wijzigingen aanbrengen.
-4. Start geen automatische herschrijving of publicatie. Bewaar eventuele controle-uitvoer apart van de gepubliceerde brontekst.
-5. Test dat ieder signaal naar een bestaande passage verwijst en dat fouten van de AI de bewerkingspagina niet blokkeren.
+1. Voeg de docentactie toe in `Software/templates/dossier/library_detail.html`, behandel die in `Software/dossier/views.py` en registreer de route in `Software/dossier/urls.py`.
+2. Laat AI mogelijke onduidelijkheden aan concrete passages koppelen in `Software/dossier/ai/material_review.py`; definieer de instructies in `Software/dossier/ai/prompts.py` en de validatie in `Software/dossier/ai/schemas.py`.
+3. Toon bevindingen naast de bron in `Software/templates/dossier/ai_material_review.html` en lever ze aan vanuit `Software/dossier/views.py`.
+4. Voorkom automatisch herschrijven of publiceren in `Software/dossier/views.py`; bewaar controles apart van bronmateriaal en voeg alleen bij expliciete opslag een modelwijziging toe in `Software/dossier/models.py`.
+5. Test passageverwijzingen en foutafhandeling in `Software/dossier/tests.py` en `Software/dossier/ai/material_review.py`.
 
 ## Aanbevolen implementatievolgorde
 
-1. Begin met reflectievragen, quizvragen of het controleren van lesmateriaal op fictieve of goedgekeurde inhoud.
-2. Implementeer eerst de gedeelde configuratie, AI-client, validatie en tests; kies daarna één toepassing als proef.
-3. Laat docenten output controleren en meet feitelijke juistheid, bruikbaarheid, foutmeldingen en kosten.
-4. Voeg pas daarna functies toe die studentdossiers verwerken. Controleer eerst privacy, toegangsrechten, bewaartermijnen en afspraken met de AI-aanbieder.
-5. Houd AI-uitvoer steeds herkenbaar als gegenereerd concept. De gebruiker blijft verantwoordelijk voor controle, beoordeling en besluiten.
+1. Begin met reflectievragen, quizvragen of lesmateriaalcontrole op fictieve/goedgekeurde inhoud en implementeer die in de bijbehorende AI-module onder `Software/dossier/ai/` met een scherm onder `Software/templates/dossier/`.
+2. Implementeer configuratie in `Software/.env.example`, `Software/config/settings.py` en `Software/compose.yaml`, de client in `Software/dossier/ai/client.py`, prompts en validatie in `Software/dossier/ai/prompts.py` en `Software/dossier/ai/schemas.py`, en tests in `Software/dossier/tests.py`.
+3. Laat docenten output controleren aan de hand van evaluatiecriteria in `Documentatie/AI toepassingen.md`; meet juistheid, bruikbaarheid, fouten en kosten met tests in `Software/dossier/tests.py` en registreer gebruik zo nodig via `Software/dossier/services.py`.
+4. Voeg dossierfuncties pas toe na privacy-, autorisatie- en bewaarbeoordeling; werk toegangscontroles bij in `Software/dossier/views.py`, routes in `Software/dossier/urls.py`, configuratie in `Software/.env.example` en alleen bij opslag de modellen in `Software/dossier/models.py`.
+5. Houd AI-uitvoer herkenbaar als concept in de relevante templates onder `Software/templates/dossier/`, verwerk ze via `Software/dossier/views.py` en voeg controles toe aan `Software/dossier/tests.py`.
 
 ## Validatie na implementatie
 
-Voer vanuit `Software` minimaal de relevante tests uit:
+Voer vanuit de map `Software` minimaal de relevante tests uit met `docker compose run --rm web python manage.py test dossier`. Dit controleert onder meer `Software/dossier/tests.py`, `Software/config/settings.py` en de aangepaste AI-views en services. Voer daarna `docker compose run --rm web python manage.py check` uit.
 
 ```powershell
 docker compose run --rm web python manage.py test dossier
