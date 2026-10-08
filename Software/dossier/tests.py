@@ -1,3 +1,4 @@
+import json
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.core.exceptions import SuspiciousOperation
@@ -11,6 +12,7 @@ from .models import (
     Case,
     Education,
     ExternalIdentity,
+    LibraryDossier,
     LibraryField,
     LibraryTemplate,
     Patient,
@@ -378,6 +380,148 @@ class EpdWorkflowTests(TestCase):
         self.assertFalse(LibraryField.objects.filter(id=field.id).exists())
         template.refresh_from_db()
         self.assertEqual(template.version, 4)
+
+    def test_teacher_can_bundle_and_add_library_modules_as_a_dossier(self):
+        self.client.force_login(self.teacher)
+        existing_module = LibraryTemplate.objects.get(title="Anamnese", education=self.education)
+        create_url = reverse("dossier:library_dossier_create")
+        create_page = self.client.get(create_url)
+        self.assertContains(create_page, "Anamnese")
+        response = self.client.post(create_url, {
+            "title": "Dossierbundel volledig", "description": "Bestaand onderdeel en nieuwe module",
+            "education": self.education.id,
+            "existing_modules": [str(existing_module.id)],
+            "new_modules": json.dumps([
+                {
+                    "title": "Bundelmodule A",
+                    "category": "module",
+                    "description": "Nieuwe module met volledige velden",
+                    "theme": "Opname",
+                    "instructions": "Registreer de observatie.",
+                    "fields": [
+                        {
+                            "label": "Observatie",
+                            "type": "short_text",
+                            "help_text": "Korte notitie",
+                            "required": True,
+                            "options": [],
+                            "rows": [],
+                            "columns": [],
+                        },
+                        {
+                            "label": "Opvolging",
+                            "type": "select",
+                            "help_text": "",
+                            "required": False,
+                            "options": ["Controleren", "Afronden"],
+                            "rows": [],
+                            "columns": [],
+                        },
+                    ],
+                },
+            ]),
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        existing_module.refresh_from_db()
+        self.assertEqual(existing_module.status, LibraryTemplate.Status.ACTIVE)
+        self.assertTrue(LibraryTemplate.objects.filter(id=existing_module.id).exists())
+        dossier = LibraryDossier.objects.get(title="Dossierbundel volledig")
+        entries = list(dossier.module_entries.all())
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].template, existing_module)
+        created_module = entries[1].template
+        self.assertEqual(created_module.title, "Bundelmodule A")
+        self.assertEqual(created_module.description, "Nieuwe module met volledige velden")
+        self.assertEqual(created_module.theme, "Opname")
+        self.assertEqual(created_module.instructions, "Registreer de observatie.")
+        first_module = created_module
+        self.assertEqual(first_module.category, LibraryTemplate.Category.MODULE)
+        self.assertEqual(first_module.education, self.education)
+        self.assertEqual(first_module.fields.count(), 2)
+        self.assertTrue(first_module.fields.get(label="Observatie").required)
+        self.assertEqual(
+            first_module.fields.get(label="Opvolging").options,
+            ["Controleren", "Afronden"],
+        )
+
+        list_response = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(list_response, "Dossierbundel volledig")
+        self.assertContains(list_response, "Anamnese")
+        self.assertContains(list_response, "Bundelmodule A")
+        case_response = self.client.get(reverse("dossier:teacher_case", args=[self.case.id]))
+        self.assertContains(case_response, "Dossierbundel volledig")
+
+        add_url = reverse("dossier:teacher_case_add_dossier", args=[self.case.id])
+        response = self.client.post(add_url, {"dossier_id": dossier.id})
+        self.assertRedirects(response, reverse("dossier:teacher_case", args=[self.case.id]))
+        copied = list(self.case.modules.filter(source_template__in=[existing_module, first_module]))
+        self.assertEqual([module.source_template for module in copied], [existing_module, first_module])
+        copied_new_module = next(module for module in copied if module.source_template == first_module)
+        self.assertEqual(copied_new_module.fields.count(), 2)
+        self.assertTrue(copied_new_module.fields.filter(label="Observatie").exists())
+
+        copy_response = self.client.post(
+            reverse("dossier:library_dossier_copy", args=[dossier.id])
+        )
+        self.assertRedirects(copy_response, reverse("dossier:library_list"))
+        duplicate = LibraryDossier.objects.get(title=f"Kopie van {dossier.title}")
+        self.assertEqual(
+            list(duplicate.module_entries.values_list("template_id", flat=True)),
+            [existing_module.id, first_module.id],
+        )
+        library_page = self.client.get(reverse("dossier:library_list"))
+        visible_dossier_ids = [
+            item.id for item in library_page.context["dossiers"]
+        ]
+        original_index = visible_dossier_ids.index(dossier.id)
+        self.assertEqual(
+            visible_dossier_ids[original_index - 1],
+            duplicate.id,
+        )
+
+        archive_response = self.client.post(
+            reverse("dossier:library_dossier_archive", args=[dossier.id])
+        )
+        self.assertRedirects(archive_response, reverse("dossier:library_list"))
+        dossier.refresh_from_db()
+        self.assertEqual(dossier.status, LibraryDossier.Status.ARCHIVED)
+        self.assertTrue(self.case.modules.filter(source_template=first_module).exists())
+
+    def test_multiple_library_dossiers_can_be_opened_independently(self):
+        self.client.force_login(self.teacher)
+        for title in ("Dossier een", "Dossier twee"):
+            self.client.post(reverse("dossier:library_dossier_create"), {
+                "title": title, "description": "", "education": self.education.id,
+                "new_modules": json.dumps([{
+                    "title": f"Module {title}",
+                    "category": "module",
+                    "fields": [],
+                }]),
+            })
+        self.assertEqual(LibraryDossier.objects.count(), 2)
+        self.assertEqual(LibraryTemplate.objects.filter(title__startswith="Module Dossier").count(), 2)
+        page = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(page, "Dossier een")
+        self.assertContains(page, "Dossier twee")
+        self.assertEqual(
+            [item.title for item in page.context["dossiers"]],
+            ["Dossier twee", "Dossier een"],
+        )
+        filtered_page = self.client.get(
+            reverse("dossier:library_list"), {"dossier_q": "Dossier een"}
+        )
+        self.assertContains(filtered_page, "Dossier een")
+        self.assertNotContains(filtered_page, "Dossier twee")
+        substring_page = self.client.get(
+            reverse("dossier:library_list"), {"dossier_q": "ossier een"}
+        )
+        self.assertNotContains(substring_page, "Dossier een")
+        education_filtered_page = self.client.get(
+            reverse("dossier:library_list"),
+            {"dossier_education": str(self.education.id)},
+        )
+        self.assertContains(education_filtered_page, "Dossier een")
+        self.assertContains(education_filtered_page, "Dossier twee")
 
     def test_invalid_library_choice_field_shows_validation_errors(self):
         self.client.login(username="teacher", password="testpass")

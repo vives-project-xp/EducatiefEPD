@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}{{ title }} | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell narrow">
+  <header class="page-bar library-page-header">
+    <div>
+      <p class="eyebrow">Bibliotheek · samengestelde dossiers</p>
+      <h1>{{ title }}</h1>
+      <p>Kies bestaande bibliotheekonderdelen en bouw eventuele nieuwe modules met hun velden op.</p>
+    </div>
+    <nav class="library-form-navigation">
+      <a class="back library-dashboard-link" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
+      <a class="back" href="{% url 'dossier:library_list' %}">← Bibliotheek</a>
+    </nav>
+  </header>
+  <form method="post" class="editor-form library-dossier-form">
+    {% csrf_token %}
+    <section>
+      <h2>Dossiergegevens</h2>
+      <div class="dossier-details-fields">
+        <div class="dossier-input-field">
+          <label for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+          {{ form.title }}
+          {{ form.title.errors }}
+        </div>
+        <div class="dossier-input-field">
+          <label for="{{ form.education.id_for_label }}">{{ form.education.label }}</label>
+          {{ form.education }}
+          {{ form.education.errors }}
+        </div>
+        <div class="dossier-input-field">
+          <label for="{{ form.description.id_for_label }}">{{ form.description.label }}</label>
+          {{ form.description }}
+          {{ form.description.errors }}
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>Modules</h2>
+      <h3>Bestaande bibliotheekonderdelen</h3>
+      <p>Selecteer één of meer onderdelen die je in dit dossiersjabloon wilt opnemen.</p>
+      {{ form.existing_modules.errors }}
+      {% if form.existing_modules.field.queryset %}
+        <label class="dossier-existing-modules-label" for="{{ form.existing_modules.id_for_label }}">Beschikbare onderdelen</label>
+        {{ form.existing_modules }}
+      {% else %}
+        <p class="empty-state">Er zijn geen bestaande onderdelen voor deze opleiding.</p>
+      {% endif %}
+      <h3>Nieuwe, volledig ingerichte modules</h3>
+      <p>Voeg modules toe met titel, instructies en invulvelden. Bij keuzelijsten en matrices kun je ook opties, rijen en kolommen invoeren.</p>
+      {{ form.new_modules }}
+      {{ form.new_modules.errors }}
+      <div id="new-modules" class="dossier-new-modules" aria-live="polite"></div>
+      <button class="outline button" type="button" id="add-module">Module toevoegen</button>
+    </section>
+    <button class="primary button" type="submit">{% if dossier %}Modules toevoegen en bewaren{% else %}Dossier en modules aanmaken{% endif %}</button>
+  </form>
+</main>
+<template id="module-template">
+  <article class="dossier-module-editor">
+    <header class="dossier-module-editor-header">
+      <h3>Nieuwe module</h3>
+      <button class="text-button danger remove-module" type="button">Module verwijderen</button>
+    </header>
+    <div class="dossier-module-fields">
+      <label>Naam module<input type="text" data-module="title" maxlength="180" required></label>
+      <label>Type module<select data-module="category">
+        {% for value, label in module_categories %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select></label>
+      <label>Beschrijving<textarea data-module="description" rows="2"></textarea></label>
+      <label>Thema<input type="text" data-module="theme" maxlength="120"></label>
+      <label class="full-width">Instructies<textarea data-module="instructions" rows="3"></textarea></label>
+    </div>
+    <div class="dossier-fields-heading">
+      <h4>Invulvelden</h4>
+      <button class="outline button add-field" type="button">Veld toevoegen</button>
+    </div>
+    <div class="dossier-module-field-list"></div>
+  </article>
+</template>
+<template id="module-field-template">
+  <fieldset class="dossier-field-editor">
+    <legend>Invulveld</legend>
+    <button class="text-button danger remove-field" type="button">Veld verwijderen</button>
+    <div class="dossier-module-fields">
+      <label>Veldnaam<input type="text" data-field="label" maxlength="180" required></label>
+      <label>Veldtype<select data-field="type">
+        {% for value, label in field_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select></label>
+      <label class="full-width">Hulptekst<input type="text" data-field="help_text" maxlength="280"></label>
+      <label class="dossier-required-field"><input type="checkbox" data-field="required"> Verplicht invulveld</label>
+      <label class="full-width field-options" hidden>Keuzeopties, één per regel<textarea data-field="options" rows="3"></textarea></label>
+      <label class="field-rows" hidden>Matrixrijen, één per regel<textarea data-field="rows" rows="3"></textarea></label>
+      <label class="field-columns" hidden>Matrixkolommen, één per regel<textarea data-field="columns" rows="3"></textarea></label>
+    </div>
+  </fieldset>
+</template>
+<script src="{% static 'library_dossier.js' %}" defer></script>
+{% endblock %}

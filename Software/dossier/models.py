@@ -197,6 +197,56 @@ class LibraryTemplate(models.Model):
         return f"{self.title} (v{self.version})"
 
 
+class LibraryDossier(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Actief"
+        ARCHIVED = "archived", "Gearchiveerd"
+
+    title = models.CharField(max_length=180)
+    description = models.TextField(blank=True)
+    education = models.ForeignKey(
+        Education, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="library_dossiers",
+    )
+    modules = models.ManyToManyField(
+        LibraryTemplate, through="LibraryDossierModule", related_name="dossiers"
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="library_dossiers",
+        null=True, blank=True,
+    )
+    copied_from = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, related_name="copies", null=True, blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return self.title
+
+
+class LibraryDossierModule(models.Model):
+    dossier = models.ForeignKey(
+        LibraryDossier, on_delete=models.CASCADE, related_name="module_entries"
+    )
+    template = models.ForeignKey(
+        LibraryTemplate, on_delete=models.PROTECT, related_name="dossier_entries"
+    )
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["dossier", "template"], name="unique_dossier_library_template"
+            )
+        ]
+
+
 class Module(models.Model):
     class Kind(models.TextChoices):
         INFORMATION = "information", "Informatie"

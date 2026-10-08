@@ -2,49 +2,111 @@
 {% block title %}Bibliotheek | Educatief EPD{% endblock %}
 {% block content %}
 <main class="teacher-shell">
-  <header class="page-bar">
+  <header class="page-bar library-page-header">
     <div>
       <p class="eyebrow">Herbruikbare inhoud</p>
       <h1>Bibliotheek</h1>
-      <p>Beheer dossiermodules, vragenlijsten, matrices en hun onderdelen voor nieuwe casuskopieën.</p>
+      <p>Bundel bestaande dossiermodules per opleiding en hergebruik dossiersjablonen in nieuwe casussen.</p>
     </div>
-    <div class="header-actions">
+    <div class="library-header-actions">
+      <a class="back library-dashboard-link" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
+      <div class="header-actions">
+      <a class="primary" href="{% url 'dossier:library_dossier_create' %}">Dossier maken</a>
       <a class="primary" href="{% url 'dossier:library_create' %}">Onderdeel toevoegen</a>
-      <a class="back" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
+      </div>
     </div>
   </header>
-  <form class="filter-bar" method="get">
-    <input name="q" value="{{ query }}" placeholder="Zoek onderdeel" aria-label="Zoek onderdeel">
-    <input name="education" value="{{ education_filter }}" placeholder="Opleiding" aria-label="Opleiding">
-    <input name="theme" value="{{ theme_filter }}" placeholder="Thema" aria-label="Thema">
-    <select name="category" aria-label="Categorie">
-      <option value="">Alle categorieën</option>
-      {% for value,label in categories %}
-      <option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
+  <section class="editor-section">
+    <div class="section-heading">
+      <div><p class="eyebrow">Samengestelde dossiers</p><h2>Dossiersjablonen</h2></div>
+    </div>
+    <form class="filter-bar" method="get">
+      <input name="dossier_q" value="{{ dossier_query }}" placeholder="Zoek dossiersjabloon" aria-label="Zoek dossiersjabloon">
+      <select name="dossier_education" aria-label="Filter dossiersjablonen op opleiding">
+        <option value="">Alle opleidingen</option>
+        {% for education_id, education_name in dossier_educations %}
+        <option value="{{ education_id }}" {% if dossier_education_filter == education_id|stringformat:"s" %}selected{% endif %}>{{ education_name }}</option>
+        {% endfor %}
+      </select>
+      <button class="outline button">Dossiers filteren</button>
+    </form>
+    <div class="library-grid">
+      {% for dossier in dossiers %}
+      <article class="library-card">
+        <details class="library-dossier-card">
+          <summary class="library-card-content">
+            <span class="eyebrow">{{ dossier.education|default:'Alle opleidingen' }} · {{ dossier.module_entries.all|length }} modules</span>
+            <h2>{{ dossier.title }}</h2>
+            <p>{{ dossier.description }}</p>
+            <span class="dossier-expand-hint">Open om de modules te bekijken</span>
+          </summary>
+          <div class="dossier-module-list">
+            {% for entry in dossier.module_entries.all %}
+            <a class="content-row linked" href="{% url 'dossier:library_detail' entry.template.id %}">
+              <span>{{ forloop.counter }}</span>
+              <div><small>{{ entry.template.get_category_display }}</small><strong>{{ entry.template.title }}</strong></div>
+              <b>›</b>
+            </a>
+            {% empty %}
+            <p class="empty-state">Nog geen modules in dit dossier.</p>
+            {% endfor %}
+          </div>
+        </details>
+        <footer><span>{{ dossier.education|default:'Alle opleidingen' }}</span><span>Dossiersjabloon</span></footer>
+        <div class="row-actions library-card-actions">
+          <a href="{% url 'dossier:library_dossier_edit' dossier.id %}">Bewerk</a>
+          <form method="post" action="{% url 'dossier:library_dossier_copy' dossier.id %}">
+            {% csrf_token %}
+            <button class="text-button" type="submit" aria-label="{{ dossier.title }} kopiëren">Kopieer</button>
+          </form>
+          <form method="post" action="{% url 'dossier:library_dossier_archive' dossier.id %}" onsubmit="return confirm('Dit dossiersjabloon uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
+            {% csrf_token %}
+            <button class="text-button danger" type="submit" aria-label="{{ dossier.title }} verwijderen">Verwijderen</button>
+          </form>
+        </div>
+      </article>
+      {% empty %}
+      <p class="empty-state">Er zijn nog geen dossiersjablonen.</p>
       {% endfor %}
-    </select>
-    <button class="outline button">Filteren</button>
-  </form>
-  <div class="library-grid">
-    {% for item in templates %}
-    <article class="library-card">
-      <a class="library-card-content" href="{% url 'dossier:library_detail' item.id %}">
-        <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · vast{% endif %}</span>
-        <h2>{{ item.title }}</h2>
-        <p>{{ item.description }}</p>
-      </a>
-      <footer><span>{{ item.education|default:'Alle opleidingen' }}</span><span>{{ item.theme }}</span></footer>
-      <div class="row-actions library-card-actions">
-        <a href="{% url 'dossier:library_detail' item.id %}">Bewerk</a>
-        <form method="post" action="{% url 'dossier:library_archive' item.id %}" onsubmit="return confirm('Dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
-          {% csrf_token %}
-          <button class="text-button danger" type="submit" aria-label="{{ item.title }} verwijderen">Verwijderen</button>
-        </form>
-      </div>
-    </article>
-    {% empty %}
-    <p class="empty-state">Geen onderdelen gevonden.</p>
-    {% endfor %}
-  </div>
+    </div>
+  </section>
+  <section class="editor-section">
+    <div class="section-heading">
+      <div><p class="eyebrow">Losse onderdelen</p><h2>Bibliotheekonderdelen</h2></div>
+    </div>
+    <form class="filter-bar" method="get">
+      <input name="q" value="{{ query }}" placeholder="Zoek onderdeel" aria-label="Zoek onderdeel">
+      <input name="education" value="{{ education_filter }}" placeholder="Opleiding" aria-label="Opleiding">
+      <input name="theme" value="{{ theme_filter }}" placeholder="Thema" aria-label="Thema">
+      <select name="category" aria-label="Categorie">
+        <option value="">Alle categorieën</option>
+        {% for value,label in categories %}
+        <option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button class="outline button">Filteren</button>
+    </form>
+    <div class="library-grid">
+      {% for item in templates %}
+      <article class="library-card">
+        <a class="library-card-content" href="{% url 'dossier:library_detail' item.id %}">
+          <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · vast{% endif %}</span>
+          <h2>{{ item.title }}</h2>
+          <p>{{ item.description }}</p>
+        </a>
+        <footer><span>{{ item.education|default:'Alle opleidingen' }}</span><span>{{ item.theme }}</span></footer>
+        <div class="row-actions library-card-actions">
+          <a href="{% url 'dossier:library_detail' item.id %}">Bewerk</a>
+          <form method="post" action="{% url 'dossier:library_archive' item.id %}" onsubmit="return confirm('Dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
+            {% csrf_token %}
+            <button class="text-button danger" type="submit" aria-label="{{ item.title }} verwijderen">Verwijderen</button>
+          </form>
+        </div>
+      </article>
+      {% empty %}
+      <p class="empty-state">Geen onderdelen gevonden.</p>
+      {% endfor %}
+    </div>
+  </section>
 </main>
 {% endblock %}

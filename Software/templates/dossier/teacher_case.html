@@ -5,7 +5,30 @@
   <header class="page-bar"><div><p class="eyebrow">{{ case.course }}</p><h1>{{ case.title }}</h1><p>{{ case.patient.name }} · {{ case.patient.reference }}</p></div><div class="header-actions"><span class="state status-{{ case.status }}">{{ case.get_status_display }}</span><a class="outline" href="{% url 'dossier:teacher_case_edit' case.id %}">Patiënt aanpassen</a><a class="back" href="{% url 'dossier:teacher_dashboard' %}">← Overzicht</a></div></header>
   <div class="lifecycle-actions"><form method="post" action="{% url 'dossier:teacher_case_transition' case.id %}">{% csrf_token %}{% if case.status != 'published' %}<button class="primary button" name="action" value="publish">Publiceren</button>{% else %}<button class="outline button" name="action" value="draft">Terug naar concept</button>{% endif %}{% if case.status != 'archived' %}<button class="text-button danger" name="action" value="archive">Archiveren</button>{% endif %}</form><p>Wijzigingen gelden alleen voor studenten die de casus daarna starten.</p></div>
   <section class="editor-section"><div class="section-heading"><h2>Toegang voor lesgroepen</h2><a class="outline" href="{% url 'dossier:group_list' %}">Lesgroepen beheren</a></div><p>Alleen studenten in een geselecteerde lesgroep kunnen deze casus openen.</p><form method="post" action="{% url 'dossier:teacher_case_groups' case.id %}" class="editor-form">{% csrf_token %}{% for group in available_groups %}<label><input type="checkbox" name="group_ids" value="{{ group.id }}" {% if group.assigned %}checked{% endif %}> {{ group.name }} ({{ group.members.count }} studenten)</label>{% empty %}<p class="empty-state">Maak eerst een lesgroep voor {{ case.education.name }}.</p>{% endfor %}<button class="outline button">Toewijzing bewaren</button></form></section>
-  <section class="editor-section"><div class="section-heading"><h2>Onderdeel uit bibliotheek</h2><a class="outline" href="{% url 'dossier:library_list' %}">Bibliotheek openen</a></div><form method="post" action="{% url 'dossier:teacher_case_add_template' case.id %}" class="editor-form">{% csrf_token %}<select name="template_id" required>{% for template in available_templates %}<option value="{{ template.id }}">{{ template.title }} (v{{ template.version }})</option>{% endfor %}</select><button class="outline button" {% if not available_templates %}disabled{% endif %}>Als kopie toevoegen</button></form></section>
+  <section class="editor-section">
+    <div class="section-heading"><h2>Dossier uit bibliotheek toevoegen</h2><a class="outline" href="{% url 'dossier:library_list' %}">Bibliotheek openen</a></div>
+    <p>Kies een dossiersjabloon om alle bijbehorende modules als kopieën toe te voegen.</p>
+    <form method="post" action="{% url 'dossier:teacher_case_add_dossier' case.id %}" class="editor-form">
+      {% csrf_token %}
+      <select name="dossier_id" required>
+        {% for dossier in available_dossiers %}
+        <option value="{{ dossier.id }}">{{ dossier.title }} ({{ dossier.module_entries.all|length }} modules)</option>
+        {% endfor %}
+      </select>
+      <button class="primary button" {% if not available_dossiers %}disabled{% endif %}>Dossier toevoegen</button>
+      {% if not available_dossiers %}<p class="empty-state">Er is nog geen dossiersjabloon voor deze opleiding.</p>{% endif %}
+    </form>
+  </section>
+  <section class="editor-section">
+    <div class="section-heading"><h2>Los onderdeel uit bibliotheek</h2><a class="outline" href="{% url 'dossier:library_list' %}">Bibliotheek openen</a></div>
+    <form method="post" action="{% url 'dossier:teacher_case_add_template' case.id %}" class="editor-form">
+      {% csrf_token %}
+      <select name="template_id" required>
+        {% for template in available_templates %}<option value="{{ template.id }}">{{ template.title }} (v{{ template.version }})</option>{% endfor %}
+      </select>
+      <button class="outline button" {% if not available_templates %}disabled{% endif %}>Als kopie toevoegen</button>
+    </form>
+  </section>
   <div class="teacher-grid">
     <section class="editor-section"><div class="section-heading"><div><p class="eyebrow">Vaste structuur</p><h2>Basisdossier</h2></div></div>{% for module in case.modules.all %}<a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}"><span>{{ forloop.counter }}</span><div><small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong><em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em></div><b>›</b></a>{% empty %}<p>De vaste dossierstructuur ontbreekt.</p>{% endfor %}</section>
     <section class="editor-section"><div class="section-heading"><div><p class="eyebrow">Onderwijsinhoud</p><h2>Opdrachten</h2></div><a class="outline" href="{% url 'dossier:teacher_assignment_create' case.id %}">Opdracht toevoegen</a></div>{% for assignment in case.assignments.all %}<div class="content-row"><span>{{ assignment.position }}</span><div><small>{{ assignment.phase }}</small><strong>{{ assignment.title }}</strong></div><div class="row-actions"><a href="{% url 'dossier:teacher_assignment_edit' case.id assignment.id %}">Bewerk</a><form method="post" action="{% url 'dossier:teacher_assignment_delete' case.id assignment.id %}">{% csrf_token %}<button class="text-button danger">Verwijder</button></form></div></div>{% empty %}<p>Nog geen opdrachten.</p>{% endfor %}</section>
