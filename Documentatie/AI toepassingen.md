@@ -196,21 +196,66 @@ Bestanden hieronder met **nieuw** zijn voorstellen en bestaan nog niet. Voeg nie
 4. Voorkom automatisch herschrijven of publiceren in `Software/dossier/views.py`; bewaar controles apart van bronmateriaal en voeg alleen bij expliciete opslag een modelwijziging toe in `Software/dossier/models.py`.
 5. Test passageverwijzingen en foutafhandeling in `Software/dossier/tests.py` en `Software/dossier/ai/material_review.py`.
 
-## Aanbevolen implementatievolgorde
+## AI-bestanden aanmaken: betekenis en programmeertaal
 
-1. Begin met reflectievragen, quizvragen of lesmateriaalcontrole op fictieve/goedgekeurde inhoud en implementeer die in de bijbehorende AI-module onder `Software/dossier/ai/` met een scherm onder `Software/templates/dossier/`.
-2. Implementeer configuratie in `Software/.env.example`, `Software/config/settings.py` en `Software/compose.yaml`, de client in `Software/dossier/ai/client.py`, prompts en validatie in `Software/dossier/ai/prompts.py` en `Software/dossier/ai/schemas.py`, en tests in `Software/dossier/tests.py`.
-3. Laat docenten output controleren aan de hand van evaluatiecriteria in `Documentatie/AI toepassingen.md`; meet juistheid, bruikbaarheid, fouten en kosten met tests in `Software/dossier/tests.py` en registreer gebruik zo nodig via `Software/dossier/services.py`.
-4. Voeg dossierfuncties pas toe na privacy-, autorisatie- en bewaarbeoordeling; werk toegangscontroles bij in `Software/dossier/views.py`, routes in `Software/dossier/urls.py`, configuratie in `Software/.env.example` en alleen bij opslag de modellen in `Software/dossier/models.py`.
-5. Houd AI-uitvoer herkenbaar als concept in de relevante templates onder `Software/templates/dossier/`, verwerk ze via `Software/dossier/views.py` en voeg controles toe aan `Software/dossier/tests.py`.
+De paden in de stappenplannen zijn relatief aan de projectmap. Een pad als `Software/dossier/ai/summaries.py` betekent: open de projectmap `Software`, open daarin `dossier`, maak de map `ai` aan en maak daarin het bestand `summaries.py`. Maak alleen de bestanden aan die bij de AI-functie horen die je op dat moment implementeert; de lijst met suggesties is geen opdracht om alle bestanden vooraf leeg aan te maken.
 
-## Validatie na implementatie
+### De AI-map en Python-modules
 
-Voer vanuit de map `Software` minimaal de relevante tests uit met `docker compose run --rm web python manage.py test dossier`. Dit controleert onder meer `Software/dossier/tests.py`, `Software/config/settings.py` en de aangepaste AI-views en services. Voer daarna `docker compose run --rm web python manage.py check` uit.
+De AI-logica hoort bij de Django-app `dossier`. Maak daarom de map `Software/dossier/ai/` aan binnen die app, niet naast `Software/dossier/`. Elk hieronder genoemd nieuw bestand is een voorstel en bestaat nog niet. De `.py`-bestanden zijn Python-modules. Maak alleen de modules aan die nodig zijn voor de toepassing die je implementeert.
 
-```powershell
-docker compose run --rm web python manage.py test dossier
-docker compose run --rm web python manage.py check
-```
+#### Gedeelde Python-bestanden
 
-Test daarnaast handmatig met een docent, student zonder rechten en fictieve casusdata. Controleer dat ongeldige AI-uitvoer en providerstoringen als fout worden getoond, dat de oorspronkelijke antwoorden intact blijven en dat geen geheime sleutels of volledige persoonsgegevens in logs terechtkomen.
+- `Software/dossier/ai/__init__.py`: maakt `ai` een Python-package zodat andere Django-modules de AI-code kunnen importeren. Dit bestand mag leeg zijn.
+
+- `Software/dossier/ai/client.py`: bevat de gedeelde code die verzoeken naar de gekozen AI-aanbieder verstuurt. Hier horen time-outs, veilige configuratie en expliciete foutafhandeling thuis; zet hier geen dossierselectie of rolbeslissingen in.
+- `Software/dossier/ai/prompts.py`: bevat de Python-tekst en hulpfuncties waarmee instructies voor AI-taken worden samengesteld. De instructies moeten de taak afbakenen en aangeven wat de AI niet mag verzinnen.
+- `Software/dossier/ai/schemas.py`: bevat Python-validatie voor AI-antwoorden, zoals verplichte velden, gegevenstypen en toegestane structuur. Ongeldige antwoorden worden als fout afgehandeld en niet als een geslaagd resultaat getoond.
+- `Software/dossier/ai/glossary.py`: optioneel Python-bestand voor een gecontroleerde woordenlijst met vaktermen, voornamelijk bruikbaar bij vertalingen. Maak dit alleen als de vertaalfunctie die woordenlijst nodig heeft.
+
+#### Python-bestanden per toepassing
+
+Elk toepassingsbestand haalt geen willekeurige data op: de view controleert eerst rechten en geeft daarna alleen de nodige context aan de bijbehorende functie.
+
+- `Software/dossier/ai/summaries.py`: bouwt de beperkte dossiercontext op, vraagt een samenvatting aan via `client.py` en controleert de structuur van het resultaat.
+- `Software/dossier/ai/timelines.py`: maakt chronologische gebeurtenissen met datum en bronverwijzing. Datums worden uit dossiergegevens gehaald en niet door AI geraden.
+- `Software/dossier/ai/consistency.py`: controleert eerst vaste regels, zoals verplichte velden, en kan daarnaast mogelijke inhoudelijke tegenstrijdigheden laten signaleren.
+- `Software/dossier/ai/reflection.py`: genereert open reflectievragen op basis van een oefencasus en de bijbehorende leerdoelen.
+- `Software/dossier/ai/formative_feedback.py`: genereert formatieve oefenfeedback volgens een rubric, zonder formele beoordeling of cijfer toe te kennen.
+- `Software/dossier/ai/rewrites.py`: maakt een tekstvoorstel voor taal, structuur of toon zonder de oorspronkelijke tekst zelf op te slaan of te wijzigen.
+- `Software/dossier/ai/simulations.py`: beheert een beurt in een begrensde, fictieve casussimulatie en geeft alleen de context van die simulatie mee.
+- `Software/dossier/ai/case_variants.py`: genereert een voorstel voor een nieuwe fictieve casusvariant; overschrijft of publiceert de broncasus niet.
+- `Software/dossier/ai/retrieval.py`: zoekt relevante passages in toegestane bibliotheekinhoud en geeft die passages met herkomst terug.
+- `Software/dossier/ai/library_search.py`: combineert de vraag van de gebruiker met gevonden bibliotheekpassages en laat een antwoord met bronverwijzingen maken.
+- `Software/dossier/ai/next_steps.py`: stelt meerdere mogelijke onderzoeksvragen of vervolgstappen voor bij een fictieve oefencasus.
+- `Software/dossier/ai/teaching_material.py`: genereert conceptles- of beoordelingsmateriaal op basis van door een docent gekozen leerdoelen.
+- `Software/dossier/ai/plain_language.py`: herschrijft geselecteerde uitleg naar een eenvoudiger taalniveau met behoud van inhoud.
+- `Software/dossier/ai/translations.py`: maakt een conceptvertaling en kan daarbij de vaktermen uit `glossary.py` toepassen.
+- `Software/dossier/ai/learning_path.py`: stelt passende oefeningen voor op basis van toegestane leerdoelen en voortgang; het neemt geen studie- of beoordelingsbesluiten.
+- `Software/dossier/ai/learning_objectives.py`: stelt mogelijke koppelingen tussen een casus en leerdoelen voor, met onderbouwing die een docent kan controleren.
+- `Software/dossier/ai/quizzes.py`: genereert conceptquizvragen, antwoorden, uitleg en bronverwijzingen.
+- `Software/dossier/ai/material_review.py`: signaleert concrete passages met mogelijk onduidelijke instructies of onverklaarde termen.
+
+#### Nieuwe HTML-templates per toepassing
+
+Bestanden onder `Software/templates/dossier/` zijn HTML-templates met Django Template Language. Ze tonen gegevens die een view aanlevert; ze voeren zelf geen AI-aanroepen uit.
+
+- `Software/templates/dossier/ai_summary.html`: optionele aparte weergave voor een gegenereerde samenvatting. Als de samenvatting direct op het studentdossierscherm verschijnt, is een extra template niet nodig.
+- `Software/templates/dossier/ai_timeline.html`: optionele aparte weergave van een tijdlijn met datums en links of verwijzingen naar bronnen.
+- `Software/templates/dossier/ai_reflection.html`: optionele weergave van reflectievragen. De vragen kunnen ook in `case_detail.html` of `dossier.html` worden getoond; maak dan geen extra template.
+- `Software/templates/dossier/ai_feedback.html`: optionele weergave van formatieve AI-feedback, duidelijk gescheiden van formele docentfeedback.
+- `Software/templates/dossier/ai_rewrite.html`: optionele weergave met de oorspronkelijke tekst en het herschrijfvoorstel naast elkaar.
+- `Software/templates/dossier/simulation.html`: scherm voor de fictieve simulatie, invoer van studentbeurten en eventuele nabespreking.
+- `Software/templates/dossier/ai_case_variant.html`: preview waarin docent de voorgestelde casusvariant met de originele casus kan vergelijken.
+- `Software/templates/dossier/library_assistant.html`: vraag- en antwoordscherm dat bronverwijzingen naar bibliotheekmateriaal toont.
+- `Software/templates/dossier/ai_next_steps.html`: weergave van meerdere voorgestelde vervolgstappen als brainstormmateriaal.
+- `Software/templates/dossier/ai_teaching_material.html`: formulier en preview voor door AI voorgesteld les- of beoordelingsmateriaal.
+- `Software/templates/dossier/ai_plain_language.html`: vergelijking tussen de oorspronkelijke uitleg en de vereenvoudigde tekst.
+- `Software/templates/dossier/ai_translation.html`: vergelijking tussen de oorspronkelijke tekst en de conceptvertaling.
+- `Software/templates/dossier/learning_path.html`: overzicht van voorgestelde oefeningen en waarom die bij leerdoelen passen.
+- `Software/templates/dossier/ai_quiz.html`: selectie van quizinstellingen en preview/bewerking van gegenereerde vragen.
+- `Software/templates/dossier/ai_material_review.html`: lijst met onduidelijke passages en suggesties voor docentcontrole.
+
+Als een functie data blijvend moet bewaren, wordt het Python-model aangepast in `Software/dossier/models.py` en maakt Django op basis daarvan een Python-migratie onder `Software/dossier/migrations/`. Die migratie wordt gegenereerd met `python manage.py makemigrations dossier`; maak geen leeg migratiebestand met de hand. Gebruik `Software/dossier/tests.py` voor Python-tests en mock de AI-client zodat tests geen echte provider of API-kosten nodig hebben.
+
+Bijvoorbeeld: voor alleen dossiersamenvattingen maak je de map `Software/dossier/ai/` met `__init__.py`, `client.py`, `prompts.py`, `schemas.py` en `summaries.py`. Je maakt daarnaast alleen de noodzakelijke aanpassingen aan Django-view, URL, bestaand template en tests. De overige modules en templates maak je pas aan wanneer je die functies daadwerkelijk gaat bouwen.
