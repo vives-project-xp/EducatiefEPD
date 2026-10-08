@@ -1,7 +1,46 @@
 {% extends 'base.html' %}
 {% block title %}{{ group.name }} | Lesgroep{% endblock %}
 {% block content %}<main class="teacher-shell narrow">
-  <header class="page-bar"><div><p class="eyebrow">{{ group.education.name }}</p><h1>{{ group.name }}</h1><p>Docent: {{ group.teacher.get_full_name|default:group.teacher.username }}</p></div><div class="header-actions"><a class="outline" href="{% url 'dossier:group_edit' group.id %}">Bewerken</a><a class="back" href="{% url 'dossier:group_list' %}">← Lesgroepen</a></div></header>
-  <section class="editor-section"><h2>Studenten</h2>{% for student in group.members.all %}<div class="content-row"><div><strong>{{ student.get_full_name|default:student.username }}</strong><small>{{ student.email }}</small></div><form method="post" action="{% url 'dossier:group_member_remove' group.id student.id %}">{% csrf_token %}<button class="text-button danger">Verwijderen</button></form></div>{% empty %}<p class="empty-state">Nog geen studenten toegewezen.</p>{% endfor %}</section>
-  <section class="editor-section"><h2>Student toevoegen</h2><p>Een student moet eerst eenmaal aangemeld zijn via Authentik.</p><form method="post" action="{% url 'dossier:group_member_add' group.id %}" class="editor-form">{% csrf_token %}<label for="student_id">Student</label><select name="student_id" id="student_id" required>{% for student in available_students %}<option value="{{ student.id }}">{{ student.get_full_name|default:student.username }} ({{ student.email }})</option>{% endfor %}</select><button class="primary button" {% if not available_students %}disabled{% endif %}>Toevoegen</button></form></section>
+  <header class="page-bar">
+    <div>
+      <p class="eyebrow">{{ group.education.name }}</p>
+      <h1>{{ group.name }}</h1>
+      <p>Docent: {{ group.teacher.get_full_name|default:group.teacher.username }}</p>
+    </div>
+    <div class="header-actions">
+      <a class="outline" href="{% url 'dossier:group_edit' group.id %}">Bewerken</a>
+      <a class="back" href="{% url 'dossier:group_list' %}">← Lesgroepen</a>
+    </div>
+  </header>
+  <section class="editor-section">
+    <h2>Studenten</h2>
+    {% for student in group.members.all %}
+      <div class="content-row">
+        <div>
+          <strong>{{ student.get_full_name|default:student.username }}</strong>
+          <small>{{ student.email }}</small>
+        </div>
+        <form method="post" action="{% url 'dossier:group_member_remove' group.id student.id %}">
+          {% csrf_token %}
+          <button class="text-button danger">Verwijderen</button>
+        </form>
+      </div>
+    {% empty %}
+      <p class="empty-state">Nog geen studenten toegewezen.</p>
+    {% endfor %}
+  </section>
+  <section class="editor-section">
+    <h2>Student toevoegen</h2>
+    <p>Een student moet eerst eenmaal aangemeld zijn via Authentik.</p>
+    <form method="post" action="{% url 'dossier:group_member_add' group.id %}" class="editor-form">
+      {% csrf_token %}
+      <label for="student_id">Student</label>
+      <select name="student_id" id="student_id" required>
+        {% for student in available_students %}
+          <option value="{{ student.id }}">{{ student.get_full_name|default:student.username }} ({{ student.email }})</option>
+        {% endfor %}
+        </select>
+        <button class="primary button" {% if not available_students %}disabled{% endif %}>Toevoegen</button>
+      </form>
+    </section>
 </main>{% endblock %}
