@@ -39,6 +39,15 @@
     - [VRK - Labo bloed\_Postpartum/postoperatief](#vrk---labo-bloed_postpartumpostoperatief)
     - [VRK - Labo urine\_Postpartum/postoperatief](#vrk---labo-urine_postpartumpostoperatief)
     - [VRK - Labo vochten\_Postpartum/postoperatief](#vrk---labo-vochten_postpartumpostoperatief)
+  - [NICU / N*-dossier](#nicu--n-dossier)
+    - [VRK - NICU Dossier](#vrk---nicu-dossier)
+    - [VRK - Medicatiebeleid per dag (NICU-dossier)](#vrk---medicatiebeleid-per-dag-nicu-dossier)
+  - [Screening emotioneel welzijn](#screening-emotioneel-welzijn)
+    - [Screeningsformulieren](#screeningsformulieren)
+  - [Klinisch redeneerplan](#klinisch-redeneerplan)
+    - [Zorg-/verpleegplan](#zorg-verpleegplan)
+  - [Uitwerking opdracht](#uitwerking-opdracht)
+    - [Opdracht indienen](#opdracht-indienen)
   - [Kort verslag graviditeit, partus en postpartum](#kort-verslag-graviditeit-partus-en-postpartum)
     - [VRK - Verslag zwangerschap - partus - directe postpartum - kraamperiode (moeder + kind)](#vrk---verslag-zwangerschap---partus---directe-postpartum---kraamperiode-moeder--kind)
       - [Zwangerschap](#zwangerschap)
@@ -455,10 +464,75 @@ De lijst toont ook **VRK - Postpartum tweedelijn - Zorgpad kraamvrouw (zonder ta
 | Voeding | Type voeding, reden van bijvoeding, soort kunstvoeding en verloop van de voeding. |
 | Afspraken en nazorg | Afspraken na ontslag, zoals gynaecologische/pediatrische opvolging, thuiszorg, bereikbaarheid kraamafdeling, PKU-kaart en afspraak Kind & Gezin. |
 
+## NICU / N*-dossier
+
+### VRK - NICU Dossier
+
+| Formulier/rij | Welke gegevens invullen |
+| --- | --- |
+| Patiëntengegevens | Identificatiegegevens van de neonaat en de overige gevraagde patiëntgegevens. Controleer dat de registratie bij het juiste kind hoort. |
+| Opnamegegevens | Gegevens van de opname, waaronder de gevraagde datum, het tijdstip en de opnamecontext. |
+| Gegevens moeder | Identificatie- en contactgegevens van de moeder zoals het formulier vraagt. |
+| Toestand neonaat direct na geboorte | Gegevens over de toestand bij de geboorte, met de gevraagde geboorte- en eventuele reanimatiegegevens. |
+| Voedingsgegevens | Voedingswijze en relevante gegevens over de start en het verloop van de voeding. |
+| Oftalmologische gegevens | Oogheelkundige bevindingen en opvolging die in het formulier gevraagd worden. |
+| Comfort neo-schaal | Comfortobservaties en scores per gevraagd observatiemoment. |
+| Zorg voor ademhaling | Ademhalingsobservaties, waaronder de gevraagde Silverman-score en eventuele ondersteuning of toestelinstellingen. |
+| Vitale parameters | De gevraagde vitale metingen per tijdstip. |
+| Ontwikkelingsgerichte zorg | Observaties en afspraken over ontwikkelingsgerichte zorg, positionering en ouder-/familiebetrokkenheid zoals gevraagd. |
+| Fototherapie | Gegevens over de fototherapie en de gevraagde observaties of instellingen. |
+| Hygiënische zorgen | Datum/tijdstip en registratie van de hygiënische zorgen per verzorgingsmoment. |
+| Early Feeding Score | Beoordeel per voedingsmoment de getoonde voedingsbereidheid en observatiepunten. Registreer of orale voeding mogelijk is en eventuele aanpassingen voor een volgend voedingsmoment. |
+| Ontslaggegevens | De gevraagde gegevens over het ontslag en de verdere opvolging. |
+
+### VRK - Medicatiebeleid per dag (NICU-dossier)
+
+| Formulier/rij | Welke gegevens invullen |
+| --- | --- |
+| Medicatiebeleid per dag | Medicatiegegevens voor de betreffende dag, gekoppeld aan de juiste neonaat en datum. |
+
+## Screening emotioneel welzijn
+
+### Screeningsformulieren
+
+| Formulier/rij | Welke gegevens invullen |
+| --- | --- |
+| Whooley | Antwoorden op de getoonde vragen over somberheid en verminderd interesse- of pleziergevoel in de afgelopen maand. |
+| GAD2 | Antwoorden op de twee getoonde vragen over angst en piekeren. Bij de op het scherm aangegeven score van 2 volgt de GAD7-screening. |
+| GAD7 | Antwoorden op de zeven getoonde vragen en de bijbehorende score/resultaatvelden. |
+| EPDS | Antwoorden op de tien getoonde vragen en de bijbehorende score/resultaatvelden. |
+| Interpretatie en opvolging | Registreer de getoonde uitkomst en eventuele opvolging volgens de geldende afspraken van de opleiding of afdeling. Een screeningsscore is op zichzelf geen diagnose. |
+
+## Klinisch redeneerplan
+
+### Zorg-/verpleegplan
+
+| Formulier/rij | Welke gegevens invullen |
+| --- | --- |
+| Domein | Plaats de zorgvraag onder het passende domein wanneer dat van toepassing is. |
+| Diagnosis (PES) | Beschrijf de diagnose volgens de PES-opbouw zoals gevraagd. |
+| Expected result (SMART) | Formuleer het verwachte resultaat concreet en toetsbaar, met de getoonde SMART-velden. |
+| Intervention (PCZ) | Noteer de interventie volgens de PCZ-structuur die in het formulier wordt gebruikt. |
+| Evaluation instruments | Vermeld waarmee het resultaat of de interventie geëvalueerd wordt. |
+| Evaluation date | Vul de datum in waarop de evaluatie gepland of uitgevoerd wordt. |
+| Concept/Definitief/Historie | Werk een concept bij, maak een gecontroleerd plan definitief of raadpleeg eerdere registraties via Historie. |
+
+## Uitwerking opdracht
+
+### Opdracht indienen
+
+| Formulier/rij | Welke gegevens invullen |
+| --- | --- |
+| Betreft opdracht (nummer) | Vul het nummer in van de opdracht waarop de uitwerking betrekking heeft. |
+| Uitwerking opdracht | Noteer de uitwerking in het tekstveld wanneer de opdracht tekstueel wordt ingediend. |
+| Uitwerking in pdf | Voeg de uitwerking als PDF toe wanneer die vorm gebruikt wordt. |
+| Bestanden | Voeg eventuele aanvullende bestanden toe die bij de opdracht horen. |
+| Indienen | Sla de registratie definitief op en lever ze in voor beoordeling door de docent. Controleer vooraf of het juiste opdrachtnummer en de juiste bestanden zijn gekoppeld. |
+
 ## Opslaan en controleren
 
 - Maak een nieuwe registratie aan voor een nieuw consult, dag, observatiemoment of onderzoek.
 - Neem een vorige registratie alleen over als de gegevens nog bruikbaar zijn en controleer alle overgenomen waarden.
 - Sla onvolledige invoer als concept op wanneer die optie beschikbaar is; maak nagekeken registraties definitief.
 - Controleer tijdstippen, zwangerschapsduur, uitslagen, moeder-kindkoppeling en ontslag-/nazorgafspraken.
-- De schermopnames tonen de categorieën en velden, maar niet alle lokale invulregels. Volg voor klinische interpretatie en verplichte registratie de afdelingsafspraken.
+- De schermopnames tonen de categorieën en velden, maar niet alle lokale invulregels. Volg voor klinische interpretatie, screening en verplichte registratie de afdelingsafspraken.
