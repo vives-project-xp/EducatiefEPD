@@ -75,8 +75,20 @@
           <p class="empty-state">Nog geen opdrachten.</p>
         {% endfor %}
       </div>
-      <footer><a class="outline" href="{% url 'dossier:case_detail' case.id %}">Bekijk casus</a><a class="primary" href="{% url 'dossier:dossier' case.id %}">{% if case.student_instance %}Hervat dossier{% else %}Start casus{% endif %}</a></footer>
-    </article>{% empty %}<p class="empty-state">Er zijn momenteel geen casussen beschikbaar.</p>{% endfor %}
+      <footer>
+        <a class="outline" href="{% url 'dossier:case_detail' case.id %}">Bekijk casus</a>
+        <a class="primary" href="{% url 'dossier:dossier' case.id %}">
+          {% if case.student_instance %}
+            Hervat dossier
+          {% else %}
+            Start casus
+          {% endif %}
+        </a>
+      </footer>
+    </article>
+    {% empty %}
+      <p class="empty-state">Er zijn momenteel geen casussen beschikbaar.</p>
+    {% endfor %}
   </div>
 </main>
 {% endblock %}
