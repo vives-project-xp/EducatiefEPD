@@ -37,11 +37,11 @@
     <form class="editor-form" method="post" action="{% url 'dossier:teacher_case_groups' case.id %}">
       {% csrf_token %}
       {% for group in available_groups %}
-        <div>
-          <input type="checkbox" name="group_ids" id="{{ group.id }}" value="{{ group.id }}" {% if group.assigned %}checked{% endif %}>
-          <label for="{{ group.id }}">
+        <div class="checkbox-row">
+          <label for="group_{{ group.id }}">
             {{ group.name }} ({{ group.members.count }} studenten)
           </label>
+          <input type="checkbox" name="group_ids" id="group_{{ group.id }}" value="{{ group.id }}" {% if group.assigned %}checked{% endif %}>
         </div>
         {% empty %}
           <p class="empty-state">
@@ -53,8 +53,50 @@
     </section>
   <section class="editor-section"><div class="section-heading"><h2>Onderdeel uit bibliotheek</h2><a class="outline" href="{% url 'dossier:library_list' %}">Bibliotheek openen</a></div><form method="post" action="{% url 'dossier:teacher_case_add_template' case.id %}" class="editor-form">{% csrf_token %}<select name="template_id" required>{% for template in available_templates %}<option value="{{ template.id }}">{{ template.title }} (v{{ template.version }})</option>{% endfor %}</select><button class="outline button" {% if not available_templates %}disabled{% endif %}>Als kopie toevoegen</button></form></section>
   <div class="teacher-grid">
-    <section class="editor-section"><div class="section-heading"><div><p class="eyebrow">Vaste structuur</p><h2>Basisdossier</h2></div></div>{% for module in case.modules.all %}<a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}"><span>{{ forloop.counter }}</span><div><small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong><em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em></div><b>›</b></a>{% empty %}<p>De vaste dossierstructuur ontbreekt.</p>{% endfor %}</section>
-    <section class="editor-section"><div class="section-heading"><div><p class="eyebrow">Onderwijsinhoud</p><h2>Opdrachten</h2></div><a class="outline" href="{% url 'dossier:teacher_assignment_create' case.id %}">Opdracht toevoegen</a></div>{% for assignment in case.assignments.all %}<div class="content-row"><span>{{ assignment.position }}</span><div><small>{{ assignment.phase }}</small><strong>{{ assignment.title }}</strong></div><div class="row-actions"><a href="{% url 'dossier:teacher_assignment_edit' case.id assignment.id %}">Bewerk</a><form method="post" action="{% url 'dossier:teacher_assignment_delete' case.id assignment.id %}">{% csrf_token %}<button class="text-button danger">Verwijder</button></form></div></div>{% empty %}<p>Nog geen opdrachten.</p>{% endfor %}</section>
+    <section class="editor-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Vaste structuur</p>
+          <h2>Basisdossier</h2>
+        </div>
+      </div>
+      {% for module in case.modules.all %}
+        <a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}">
+          <span>{{ forloop.counter }}</span>
+          <div>
+            <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
+            <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
+          </div>
+          <b>›</b>
+        </a>{% empty %}<p>De vaste dossierstructuur ontbreekt.</p>
+      {% endfor %}
+      </section>
+    <section class="editor-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Onderwijsinhoud</p>
+          <h2>Opdrachten</h2>
+        </div>
+        <a class="outline" href="{% url 'dossier:teacher_assignment_create' case.id %}">Opdracht toevoegen</a>
+      </div>
+      {% for assignment in case.assignments.all %}
+        <div class="content-row">
+          <span>{{ assignment.position }}</span>
+          <div>
+            <small>{{ assignment.phase }}</small><strong>{{ assignment.title }}</strong>
+          </div>
+          <div class="row-actions">
+            <a href="{% url 'dossier:teacher_assignment_edit' case.id assignment.id %}">Bewerk</a>
+            <form method="post" action="{% url 'dossier:teacher_assignment_delete' case.id assignment.id %}">
+              {% csrf_token %}
+              <button class="text-button danger">Verwijder</button>
+            </form>
+          </div>
+        </div>
+      {% empty %}
+        <p>Nog geen opdrachten.</p>
+      {% endfor %}
+    </section>
   </div>
   <section class="editor-section progress-section"><div class="section-heading"><div><p class="eyebrow">Opvolging</p><h2>Studentenversies</h2></div><span>{{ students|length }} gestart</span></div><div class="progress-table">{% for item in students %}<a href="{% url 'dossier:teacher_student_case' item.id %}"><strong>{{ item.student.get_full_name|default:item.student.username }}</strong><span>{{ item.get_status_display }}</span><span>{{ item.progress }}%</span><time>{{ item.updated_at|date:'d/m/Y H:i' }}</time></a>{% empty %}<p class="empty-state">Nog geen student heeft deze casus gestart.</p>{% endfor %}</div></section>
 </main>
