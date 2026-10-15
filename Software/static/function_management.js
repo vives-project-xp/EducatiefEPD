@@ -1,4 +1,4 @@
-(() => {
+(() => {g
   const root = document.querySelector("[data-function-page]");
   if (!root) return;
 
@@ -57,18 +57,6 @@
     window.setTimeout(() => item.remove(), 4200);
   }
 
-  function dialog(title, message, options = {}) {
-    if (options.input) {
-      const value = window.prompt(`${title}\n${message}`, options.value || "");
-      return Promise.resolve({ confirmed: value !== null, value: value?.trim() || "" });
-    }
-    return Promise.resolve({ confirmed: window.confirm(message), value: "" });
-  }
-
-  async function confirm(message) {
-    return (await dialog(text("confirm"), message)).confirmed;
-  }
-
   function initList() {
     const sortButton = root.querySelector("[data-sort-control]");
     sortButton?.addEventListener("click", () => {
@@ -83,7 +71,7 @@
     });
     root.querySelectorAll("[data-delete-function]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!await confirm(text("deleteFunction", { title: button.dataset.title }))) return;
+        if (!window.confirm(text("deleteFunction", { title: button.dataset.title }))) return;
         try {
           const result = await post(button.dataset.url, { action: "delete" });
           toast(result.message);
@@ -101,7 +89,7 @@
         const message = deleting
           ? text("deletePermanent", { title: button.dataset.title })
           : text("restore");
-        if (deleting && !await confirm(message)) return;
+        if (deleting && !window.confirm(message)) return;
         try {
           const result = await post(url, { action: button.dataset.trashAction, functionId: Number(button.dataset.id) });
           toast(result.message);
@@ -110,7 +98,7 @@
       });
     });
     root.querySelector("[data-empty-trash]")?.addEventListener("click", async (event) => {
-      if (event.currentTarget.disabled || !await confirm(text("emptyTrash"))) return;
+      if (event.currentTarget.disabled || !window.confirm(text("emptyTrash"))) return;
       try {
         const result = await post(url, { action: "empty" });
         toast(result.message);
@@ -168,7 +156,7 @@
     }
     async function discardIfNeeded() {
       if (!isDirty()) return true;
-      if (!await confirm(text("unsavedChanges"))) return false;
+      if (!window.confirm(text("unsavedChanges"))) return false;
       state = structuredClone(saved);
       if (!state.forms.some((form) => form.id === selectedFormId)) {
         selectedFormId = state.forms[0]?.id ?? null;
@@ -264,7 +252,12 @@
         row.append(input, remove);
         rows.append(row);
       });
-      const add = node("button", "outline button", text("add"));
+      const addLabel = {
+        [text("answerOptions")]: text("addOption"),
+        [text("columns")]: text("addColumn"),
+        [text("rows")]: text("addRow"),
+      }[title] || text("add");
+      const add = node("button", "outline button", addLabel);
       add.type = "button";
       add.addEventListener("click", () => { values.push(""); renderEditor(); setDirty(); });
       section.append(rows, add);
@@ -286,8 +279,9 @@
         input.type = "file";
         input.id = `managed-image-${index}`;
         input.accept = "image/png,image/jpeg,image/gif,image/webp";
-        const imageLabel = node("label", "managed-label", text("image"));
+        const imageLabel = node("label", "managed-label");
         imageLabel.htmlFor = input.id;
+        imageLabel.textContent = question.image ? text("imageReplace") : text("imageChoose");
         wrapper.append(imageLabel, input);
         input.addEventListener("change", () => {
           const file = input.files?.[0];
@@ -369,7 +363,7 @@
           setDirty();
         }));
         actionsGroup.append(iconButton("trash", text("delete"), "text-button function-icon-button danger", async () => {
-          if (!await confirm(text("deleteQuestion"))) return;
+          if (!window.confirm(text("deleteQuestion"))) return;
           form.questions.splice(index, 1);
           openQuestion = Math.min(openQuestion, form.questions.length - 1);
           renderEditor();
@@ -492,7 +486,7 @@
         removeForm.disabled = locked;
         removeForm.addEventListener("click", async () => {
           if (!await discardIfNeeded()) return;
-          if (!await confirm(text("deleteForm", { title: form.title || text("unnamedForm") }))) return;
+          if (!window.confirm(text("deleteForm", { title: form.title || text("unnamedForm") }))) return;
           try {
             await post(root.dataset.actionUrl, { action: "delete_form", formId: form.id });
             state.forms = state.forms.filter((item) => item.id !== form.id);
@@ -521,7 +515,7 @@
       editor.querySelectorAll("input,textarea,select,button").forEach((control) => {
         if (control !== saveButton) control.disabled = locked || control.disabled;
       });
-      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked; });
+      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked && !handle.disabled; });
       root.querySelector("[data-new-form]")?.toggleAttribute("disabled", locked);
       renameButton.disabled = locked || data.std;
       lockButton.querySelector("[data-lock-label]").textContent = locked ? text("unlock") : text("lock");
@@ -579,10 +573,14 @@
 
     renameButton.addEventListener("click", async () => {
       if (locked || !await discardIfNeeded()) return;
-      const result = await dialog(text("functionNameTitle"), text("enterNewName"), { input: true, value: state.title });
-      if (!result.confirmed || !result.value || result.value === state.title) return;
+      const proposedTitle = window.prompt(
+        `${text("functionNameTitle")}\n${text("enterNewName")}`,
+        state.title,
+      );
+      const nextTitle = proposedTitle?.trim() || "";
+      if (!nextTitle || nextTitle === state.title) return;
       try {
-        const response = await post(root.dataset.actionUrl, { action: "rename", title: result.value });
+        const response = await post(root.dataset.actionUrl, { action: "rename", title: nextTitle });
         state.title = response.title;
         saved.title = response.title;
         if (standalone && state.forms[0]) {
@@ -613,6 +611,7 @@
       snapshot.forms.forEach((form) => {
         const section = node("section", "editor-section preview-form");
         if (!standalone) section.append(node("h3", "", form.title));
+        if (!form.questions.length) section.append(node("p", "empty-state", text("noQuestions")));
         form.questions.forEach((question) => {
           const questionWrap = node("div", "preview-question");
           const controlId = `preview-${form.id}-${question.id || questionNumber++}`;

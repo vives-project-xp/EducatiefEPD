@@ -1156,12 +1156,6 @@ summary {
   align-items: center;
 }
 
-.function-kind-card h2,
-.function-list-card > h2 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
 .function-tools {
   justify-content: flex-end;
   gap: 10px;
@@ -1310,18 +1304,15 @@ summary {
 
 .danger-outline {
   color: var(--red);
-}
-
-.danger-outline {
   border-color: var(--red) !important;
 }
 
 .function-add {
   display: inline-grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  aspect-ratio: 1;
+  width: 48px;
+  height: 48px;
+  padding: 0;
   font-size: 2.2rem;
   line-height: 1;
 }
@@ -1364,10 +1355,6 @@ summary {
   cursor: not-allowed;
 }
 
-.general-form > h2 {
-  margin: 0 0 24px;
-}
-
 .general-actions {
   display: flex;
   justify-content: flex-end;
@@ -1400,10 +1387,6 @@ summary {
 
 .rename-action {
   margin-left: 2px;
-}
-
-.editor-toolbar .button {
-  min-height: 40px;
 }
 
 .function-editor-grid {

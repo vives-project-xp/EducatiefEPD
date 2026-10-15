@@ -5,6 +5,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
+import base64
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -104,6 +105,8 @@ class EpdWorkflowTests(TestCase):
         response = self.client.get(reverse("dossier:function_management"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item.title for item in response.context["functions"]], ["Alpha", "Zorg", "Zwangerschap"])
+        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        self.assertIn('const sequence = ["az", "za", "oldest"]', script)
         response = self.client.get(reverse("dossier:function_management"), {"sort": "za", "q": "zorg"})
         self.assertEqual([item.title for item in response.context["functions"]], ["Zorg"])
         response = self.client.get(reverse("dossier:function_management"), {"sort": "oldest"})
@@ -230,6 +233,10 @@ class EpdWorkflowTests(TestCase):
             title="Alleen docent", kind=FunctionDefinition.Kind.GROUP
         )
         self.client.login(username="student", password="testpass")
+        self.assertNotContains(
+            self.client.get(reverse("dossier:library_list")),
+            "Functie beheer", status_code=403,
+        )
         urls = [
             reverse("dossier:library_list"),
             reverse("dossier:function_management"),
@@ -349,6 +356,26 @@ class EpdWorkflowTests(TestCase):
         first.refresh_from_db()
         second.refresh_from_db()
         self.assertEqual([second.position, first.position], [0, 1])
+
+    def test_function_image_validation_rejects_wrong_type_and_oversize(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Afbeelding", kind=FunctionDefinition.Kind.GROUP
+        )
+        form = ManagedForm.objects.create(function=function, title="Formulier")
+        url = reverse("dossier:function_action", args=[function.id])
+        images = [
+            "data:image/svg+xml;base64," + base64.b64encode(b"<svg/>").decode(),
+            "data:image/png;base64," + base64.b64encode(b"x" * 300_001).decode(),
+        ]
+        for image in images:
+            response = self.client.post(url, json.dumps({
+                "action": "save_form", "formId": form.id, "title": form.title,
+                "questions": [{"fieldType": "image", "image": image}],
+            }), content_type="application/json")
+            self.assertEqual(response.status_code, 400)
+            self.assertTrue(response.json()["warning"])
+        self.assertEqual(form.questions.count(), 0)
 
     def test_trash_permanent_delete_and_empty(self):
         self.client.login(username="teacher", password="testpass")

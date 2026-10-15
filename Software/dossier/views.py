@@ -11,7 +11,6 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.translation import gettext as _
 from django.views.decorators.http import require_POST
 import base64
 import binascii
@@ -914,9 +913,9 @@ def function_general(request):
     if request.method == "POST":
         title = request.POST.get("title", "").strip()
         if not title:
-            error = _("Geef de functie een naam.")
+            error = FUNCTION_MANAGEMENT_STRINGS["functionNameRequired"]
         elif len(title) > 180:
-            error = _("De naam mag maximaal 180 tekens bevatten.")
+            error = FUNCTION_MANAGEMENT_STRINGS["functionNameMax"]
         else:
             with transaction.atomic():
                 function = FunctionDefinition.objects.create(title=title, kind=kind)
@@ -975,7 +974,7 @@ def function_detail(request, function_id):
 
 
 def function_api_error(message, status=400, warning=False):
-    return JsonResponse({"ok": False, "message": _(message), "warning": warning}, status=status)
+    return JsonResponse({"ok": False, "message": str(message), "warning": warning}, status=status)
 
 
 def clean_string_list(value, max_length=500, max_items=100):
@@ -1196,6 +1195,8 @@ def function_deleted(request):
 def function_trash_action(request):
     require_teacher(request.user)
     purge_expired_functions()
+    if len(request.body) > 1_500_000:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["requestTooLarge"], status=413)
     try:
         payload = json.loads(request.body or "{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
