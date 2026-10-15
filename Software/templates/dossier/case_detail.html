@@ -23,7 +23,7 @@
           {% csrf_token %}
           <input type="hidden" name="assignment" value="{{ selected.id }}">
           <label for="answer">Jouw uitwerking</label>
-          <textarea id="answer" name="answer" rows="10" {% if student_case.locked or selected.status == 'submitted' or selected.status == 'approved' %}disabled{% endif %}>{{ selected.answer }}</textarea>
+          <textarea id="answer" name="answer" class="js-tinymce" rows="10" {% if student_case.locked or selected.status == 'submitted' or selected.status == 'approved' %}disabled{% endif %}>{{ selected.answer }}</textarea>
           {% if selected.feedback %}
             <div class="feedback">
               <strong>Feedback docent</strong>

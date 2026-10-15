@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ student_case.student.username }} | Voortgang{% endblock %}
+{% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
   <header class="page-bar">
@@ -22,7 +22,9 @@
             </div>
             <span class="state status-{{ submission.status }}">{{ submission.get_status_display }}</span>
           </header>
-          <div class="student-answer">{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}</div>
+          <div class="student-answer">
+            {% autoescape off %}{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}{% endautoescape %}
+          </div>
           {% if submission.feedback %}
             <div class="feedback">
               <strong>Eerdere feedback</strong>{{ submission.feedback|linebreaks }}
@@ -31,10 +33,20 @@
           {% if submission.status == 'submitted' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">
               {% csrf_token %}
-              {{ review_form.as_div }}
-              <button class="primary button">Beoordeling bewaren</button>
+              <div class="review-field">
+                {{ review_form.feedback.label_tag }}
+                {{ review_form.feedback }}
+                {{ review_form.feedback.errors }}
+              </div>
+              <div class="review-actions">
+                <div class="review-field">
+                  {{ review_form.status.label_tag }}
+                  {{ review_form.status }}
+                </div>
+                <button class="primary button">Beoordeling bewaren</button>
+              </div>
             </form>
-            {% endif %}
+          {% endif %}
           </article>
       {% endfor %}
     </section>

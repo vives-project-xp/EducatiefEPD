@@ -172,10 +172,12 @@ class LibraryFieldForm(FieldConfigurationForm):
 
 
 class ReviewForm(forms.Form):
+    field_order = ["feedback", "status"]
+
     status = forms.ChoiceField(
         label="Beoordeling",
         choices=[("approved", "Goedgekeurd"), ("resubmit", "Opnieuw inleveren")],
     )
     feedback = forms.CharField(
-        label="Feedback", required=False, widget=forms.Textarea(attrs={"rows": 3})
+        label="Feedback", required=False, widget=forms.Textarea(attrs={"rows": 3, "class": "js-tinymce"})
     )
