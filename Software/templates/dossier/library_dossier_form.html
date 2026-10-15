@@ -42,8 +42,16 @@
       <p>Selecteer één of meer onderdelen die je in dit dossiersjabloon wilt opnemen.</p>
       {{ form.existing_modules.errors }}
       {% if form.existing_modules.field.queryset %}
-        <label class="dossier-existing-modules-label" for="{{ form.existing_modules.id_for_label }}">Beschikbare onderdelen</label>
-        {{ form.existing_modules }}
+        <details class="dossier-existing-dropdown">
+          <summary>Beschikbare onderdelen kiezen</summary>
+          <div class="dossier-existing-modules">
+            {% for checkbox in form.existing_modules %}
+              <label class="dossier-existing-module" for="{{ checkbox.id_for_label }}">
+                <span>{{ checkbox.choice_label }}</span>{{ checkbox.tag }}
+              </label>
+            {% endfor %}
+          </div>
+        </details>
       {% else %}
         <p class="empty-state">Er zijn geen bestaande onderdelen voor deze opleiding.</p>
       {% endif %}

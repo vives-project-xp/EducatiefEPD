@@ -523,6 +523,111 @@ class EpdWorkflowTests(TestCase):
         self.assertContains(education_filtered_page, "Dossier een")
         self.assertContains(education_filtered_page, "Dossier twee")
 
+    def test_library_dashboard_hides_loose_templates_but_dossier_form_keeps_them_available(self):
+        self.client.force_login(self.teacher)
+        dashboard = self.client.get(reverse("dossier:library_list"))
+        self.assertNotContains(dashboard, "Bibliotheekonderdelen")
+        self.assertNotContains(dashboard, "Onderdeel toevoegen")
+
+        for title in ("Anamnese", "Klinisch redeneerplan"):
+            template = LibraryTemplate.objects.get(
+                title=title,
+                education=self.education,
+                status=LibraryTemplate.Status.ACTIVE,
+                is_fixed=True,
+            )
+            self.assertTrue(LibraryTemplate.objects.filter(pk=template.pk).exists())
+
+        dossier_form = self.client.get(reverse("dossier:library_dossier_create"))
+        self.assertContains(dossier_form, "Anamnese")
+        self.assertContains(dossier_form, "Klinisch redeneerplan")
+
+    def test_archived_standard_template_is_available_when_creating_a_dossier(self):
+        self.client.force_login(self.teacher)
+        template = LibraryTemplate.objects.get(
+            title="Anamnese", education=self.education, is_fixed=True
+        )
+        template.status = LibraryTemplate.Status.ARCHIVED
+        template.save(update_fields=["status", "updated_at"])
+
+        create_url = reverse("dossier:library_dossier_create")
+        dossier_form = self.client.get(create_url)
+        self.assertContains(dossier_form, "Anamnese")
+
+        response = self.client.post(create_url, {
+            "title": "Dossier met standaardonderdeel",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(template.id)],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        template.refresh_from_db()
+        self.assertEqual(template.status, LibraryTemplate.Status.ACTIVE)
+        self.assertTrue(
+            LibraryDossier.objects.get(title="Dossier met standaardonderdeel")
+            .modules.filter(pk=template.pk).exists()
+        )
+
+    def test_dossier_form_shows_and_accepts_modules_from_other_educations(self):
+        self.client.force_login(self.teacher)
+        other_education = Education.objects.create(
+            name="Verpleegkunde", slug="verpleegkunde"
+        )
+        template = LibraryTemplate.objects.create(
+            title="Verpleegkundig onderdeel",
+            description="",
+            category=LibraryTemplate.Category.MODULE,
+            education=other_education,
+        )
+        create_url = reverse("dossier:library_dossier_create")
+        form_page = self.client.get(create_url)
+        self.assertContains(form_page, "Verpleegkundig onderdeel")
+
+        response = self.client.post(create_url, {
+            "title": "Vroedkundig dossier met ander onderdeel",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(template.id)],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        dossier = LibraryDossier.objects.get(
+            title="Vroedkundig dossier met ander onderdeel"
+        )
+        self.assertTrue(dossier.modules.filter(pk=template.pk).exists())
+
+    def test_dossier_form_accepts_multiple_existing_modules(self):
+        self.client.force_login(self.teacher)
+        modules = list(LibraryTemplate.objects.filter(
+            title__in=["Anamnese", "Klinisch redeneerplan"],
+            education=self.education,
+            status=LibraryTemplate.Status.ACTIVE,
+        ))
+        self.assertEqual(len(modules), 2)
+
+        create_url = reverse("dossier:library_dossier_create")
+        form_page = self.client.get(create_url)
+        self.assertGreaterEqual(
+            form_page.content.count(b'type="checkbox" name="existing_modules"'),
+            2,
+        )
+        response = self.client.post(create_url, {
+            "title": "Dossier met meerdere bestaande onderdelen",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(module.id) for module in modules],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        dossier = LibraryDossier.objects.get(
+            title="Dossier met meerdere bestaande onderdelen"
+        )
+        self.assertEqual(
+            set(dossier.modules.values_list("id", flat=True)),
+            {module.id for module in modules},
+        )
+
     def test_invalid_library_choice_field_shows_validation_errors(self):
         self.client.login(username="teacher", password="testpass")
         template = LibraryTemplate.objects.get(title="Anamnese")

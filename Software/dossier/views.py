@@ -48,7 +48,7 @@ from .models import (
 )
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
-    module_schema, start_student_case,
+    ensure_default_templates, module_schema, start_student_case,
 )
 
 
@@ -864,21 +864,8 @@ def teacher_review_assignment(request, student_case_id, submission_id):
 @login_required
 def library_list(request):
     require_teacher(request.user)
-    query = request.GET.get("q", "").strip()
-    category = request.GET.get("category", "")
-    education = request.GET.get("education", "").strip()
-    theme = request.GET.get("theme", "").strip()
     dossier_query = request.GET.get("dossier_q", "").strip()
     dossier_education = request.GET.get("dossier_education", "").strip()
-    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("education")
-    if query:
-        templates = templates.filter(Q(title__icontains=query) | Q(description__icontains=query))
-    if category in LibraryTemplate.Category.values:
-        templates = templates.filter(category=category)
-    if education:
-        templates = templates.filter(education__name__icontains=education)
-    if theme:
-        templates = templates.filter(theme__icontains=theme)
     dossiers = LibraryDossier.objects.filter(
         status=LibraryDossier.Status.ACTIVE
     ).select_related("education").prefetch_related(
@@ -910,13 +897,14 @@ def library_list(request):
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)
+    available_templates = LibraryTemplate.objects.filter(
+        status=LibraryTemplate.Status.ACTIVE
+    ).select_related("education")
     return render(request, "dossier/library_list.html", {
-        "templates": templates, "query": query, "category_filter": category,
-        "education_filter": education, "theme_filter": theme,
         "dossier_query": dossier_query, "dossier_education_filter": dossier_education,
-        "categories": LibraryTemplate.Category.choices,
         "dossiers": ordered_dossiers,
         "dossier_educations": dossier_educations,
+        "available_templates": available_templates,
     })
 
 
@@ -924,6 +912,7 @@ def library_list(request):
 @transaction.atomic
 def library_dossier(request, dossier_id=None):
     require_teacher(request.user)
+    ensure_default_templates()
     dossier = None
     if dossier_id is not None:
         dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
@@ -954,13 +943,9 @@ def library_dossier(request, dossier_id=None):
             Q(id__in=education_ids) | Q(id=profile_education_id)
         ).distinct()
     module_queryset = LibraryTemplate.objects.filter(
-        status=LibraryTemplate.Status.ACTIVE
+        Q(status=LibraryTemplate.Status.ACTIVE)
+        | Q(is_fixed=True, seed_key__startswith="vroedkunde-")
     )
-    if not is_admin(request.user):
-        module_queryset = module_queryset.filter(
-            Q(education_id__in=education_queryset.values("id"))
-            | Q(education__isnull=True)
-        )
     form = LibraryDossierForm(
         request.POST or None,
         instance=dossier,
@@ -974,6 +959,10 @@ def library_dossier(request, dossier_id=None):
         item.save()
         LibraryDossierModule.objects.filter(dossier=item).delete()
         selected_modules = list(form.cleaned_data["existing_modules"])
+        for template in selected_modules:
+            if template.status != LibraryTemplate.Status.ACTIVE:
+                template.status = LibraryTemplate.Status.ACTIVE
+                template.save(update_fields=["status", "updated_at"])
         LibraryDossierModule.objects.bulk_create([
             LibraryDossierModule(dossier=item, template=template, position=position)
             for position, template in enumerate(selected_modules)

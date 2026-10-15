@@ -157,7 +157,7 @@ class LibraryDossierForm(forms.ModelForm):
         label="Bestaande bibliotheekonderdelen",
         queryset=LibraryTemplate.objects.none(),
         required=False,
-        widget=forms.SelectMultiple(attrs={"class": "dossier-existing-modules-select"}),
+        widget=forms.CheckboxSelectMultiple,
     )
     new_modules = forms.CharField(
         label="Nieuwe modules",
@@ -187,7 +187,7 @@ class LibraryDossierForm(forms.ModelForm):
         )
         if self.instance.pk:
             self.fields["existing_modules"].initial = self.instance.modules.filter(
-                status=LibraryTemplate.Status.ACTIVE
+                pk__in=self.fields["existing_modules"].queryset.values("pk")
             )
         if not self.is_bound:
             self.initial["new_modules"] = "[]"
@@ -205,16 +205,6 @@ class LibraryDossierForm(forms.ModelForm):
             new_modules = []
         existing_modules = cleaned.get("existing_modules", [])
         existing_titles = {module.title.casefold() for module in existing_modules}
-        education = cleaned.get("education")
-        for module in existing_modules:
-            if module.education_id and (
-                education is None or module.education_id != education.id
-            ):
-                self.add_error(
-                    "existing_modules",
-                    f"'{module.title}' hoort bij een andere opleiding dan dit dossier.",
-                )
-                break
         validated_modules = []
         titles = set()
         for index, module in enumerate(new_modules):
