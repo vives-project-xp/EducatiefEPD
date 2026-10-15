@@ -9,6 +9,7 @@ urlpatterns = [
     path("accounts/logout/", dossier_views.epd_logout, name="logout"),
     path("accounts/noodlogin/", dossier_views.emergency_login, name="emergency_login"),
     path("", include("dossier.urls")),
+    path("tinymce/", include("tinymce.urls")),
 ]
 
 if settings.OIDC_ENABLED:

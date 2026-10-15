@@ -3,7 +3,7 @@
     <label for="field_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
     {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
     {% if field.type == 'long_text' %}
-      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
+      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" class="js-tinymce" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
     {% elif field.type == 'number' %}
       <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="number" step="any" value="{{ field.value }}" {% if locked %}disabled{% endif %}>
     {% elif field.type == 'date' %}

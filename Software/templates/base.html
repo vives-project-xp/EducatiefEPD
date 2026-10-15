@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Educatief EPD{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'epd.css' %}">
+  {% block head %}{% endblock %}
 </head>
 <body>
   {% if messages %}

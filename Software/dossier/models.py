@@ -237,7 +237,8 @@ class FieldDefinition(models.Model):
         DATETIME = "datetime", "Datum en tijd"
         SELECT = "select", "Keuzelijst"
         OBSERVATION = "observation", "Observaties"
-        MATRIX = "matrix", "Matrix"
+        MATRIX = "matrix", "Matrix",
+        RICH_TEXT = "rich_text", "Opgemaakte tekst"
 
     label = models.CharField(max_length=180)
     key = models.SlugField(max_length=80)

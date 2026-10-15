@@ -3,3 +3,4 @@ gunicorn>=23,<24
 whitenoise>=6.9,<7
 mysqlclient>=2.2,<3
 mozilla-django-oidc>=4.0,<5
+django-tinymce>=4.1,<5
