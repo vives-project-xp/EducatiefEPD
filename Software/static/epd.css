@@ -1432,9 +1432,8 @@ summary {
 
 .review-form {
   display: grid;
-  grid-template-columns: 180px 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-  align-items: end;
 }
 
 .review-form > div {
@@ -1448,6 +1447,9 @@ summary {
   border: 1px solid var(--line);
   border-radius: 5px;
   padding: 8px;
+}
+.review-actions {
+  margin: 10px 0px;
 }
 
 .response-detail {

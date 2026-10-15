@@ -33,16 +33,18 @@
           {% if submission.status == 'submitted' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">
               {% csrf_token %}
+              <div class="review-actions">
+                <div class="review-field">
+                    {{ review_form.status.label_tag }}
+                    {{ review_form.status }}
+                  </div>
+                </div>
               <div class="review-field">
                 {{ review_form.feedback.label_tag }}
                 {{ review_form.feedback }}
                 {{ review_form.feedback.errors }}
               </div>
               <div class="review-actions">
-                <div class="review-field">
-                  {{ review_form.status.label_tag }}
-                  {{ review_form.status }}
-                </div>
                 <button class="primary button">Beoordeling bewaren</button>
               </div>
             </form>
