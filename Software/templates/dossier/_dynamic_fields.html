@@ -2,30 +2,41 @@
   <div class="dynamic-field {% if field.required %}required{% endif %}">
     <label for="field_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
     {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
-    {% if field.type == 'long_text' %}
-      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
+    {% if field.invalid_typed_value %}
+      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="text" value="{{ field.value }}" aria-invalid="true" aria-describedby="errors_{{ field.key }}" {% if locked %}disabled{% endif %}>
+    {% elif field.type == 'long_text' %}
+      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
     {% elif field.type == 'number' %}
-      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="number" step="any" value="{{ field.value }}" {% if locked %}disabled{% endif %}>
+      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="number" step="any" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% elif field.type == 'date' %}
-      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="date" value="{{ field.value }}" {% if locked %}disabled{% endif %}>
+      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="date" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% elif field.type == 'datetime' %}
-      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="datetime-local" value="{{ field.value }}" {% if locked %}disabled{% endif %}>
+      <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="datetime-local" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% elif field.type == 'select' %}
-      <select id="field_{{ field.key }}" name="field_{{ field.key }}" {% if locked %}disabled{% endif %}>
+      <select id="field_{{ field.key }}" name="field_{{ field.key }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
         <option value="">Maak een keuze</option>
+        {% if field.invalid_choice %}<option value="{{ field.value }}" selected>{{ field.value }} (ongeldige keuze)</option>{% endif %}
         {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
       </select>
     {% elif field.type == 'matrix' %}
       <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>
-        {% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td><input name="{{ cell.name }}" value="{{ cell.value }}" {% if locked %}disabled{% endif %}></td>{% endfor %}</tr>{% endfor %}
+        {% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td><input name="{{ cell.name }}" value="{{ cell.value }}" aria-label="{{ field.label }}: {{ row.label }}, {{ cell.column }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}></td>{% endfor %}</tr>{% endfor %}
       </tbody></table></div>
     {% elif field.type == 'observation' %}
       <div class="observation-list">
         {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}
       </div>
-      {% if not locked %}<div class="observation-entry"><input type="datetime-local" name="observation_timestamp_{{ field.key }}" aria-label="Tijdstip"><input name="observation_value_{{ field.key }}" placeholder="Waarde of observatie"><input name="observation_note_{{ field.key }}" placeholder="Toelichting"><button class="outline button" name="action" value="add_observation:{{ field.key }}">Observatie toevoegen</button></div>{% endif %}
+      {% if not locked %}
+        <div class="observation-entry">
+          <input type="{% if field.errors %}text{% else %}datetime-local{% endif %}" name="observation_timestamp_{{ field.key }}" value="{{ field.pending_observation.timestamp }}" aria-label="{{ field.label }}: tijdstip" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
+          <input id="field_{{ field.key }}" name="observation_value_{{ field.key }}" value="{{ field.pending_observation.value }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
+          <input name="observation_note_{{ field.key }}" value="{{ field.pending_observation.note }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
+          <button class="outline button" name="action" value="add_observation:{{ field.key }}">Observatie en wijzigingen bewaren</button>
+        </div>
+      {% endif %}
     {% else %}
-      <input id="field_{{ field.key }}" name="field_{{ field.key }}" value="{{ field.value }}" {% if locked %}disabled{% endif %}>
+      <input id="field_{{ field.key }}" name="field_{{ field.key }}" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% endif %}
+    {% if field.errors %}<ul class="errorlist danger" id="errors_{{ field.key }}" role="alert">{% for error in field.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
   </div>
 {% empty %}<p class="empty-state">Dit onderdeel bevat geen invulvelden.</p>{% endfor %}

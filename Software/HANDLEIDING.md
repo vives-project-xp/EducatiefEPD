@@ -110,6 +110,27 @@ huidige lesgroep zijn toegewezen, zijn toegankelijk. Bij de eerste start ontstaa
 persoonlijke kopie. Vul de velden in, bewaar antwoorden en dien opdrachten in. Iedere
 student heeft een afzonderlijk dossier.
 
+### Bewaren, observaties en volledig indienen
+
+- **Bewaren** mag ook wanneer verplichte velden nog leeg zijn. Ingevulde getallen,
+  datums en keuzes moeten wel geldig zijn.
+- Beide bewaarknoppen slaan alle wijzigingen in het huidige dossieronderdeel op,
+  inclusief ingevulde observaties. Een begonnen observatie heeft een geldig tijdstip
+  en een waarde nodig; een volledig lege observatieregel mag leeg blijven.
+- Bij een fout blijft de ingevoerde tekst op het scherm staan en verschijnt een
+  melding bij het betreffende veld. Er wordt dan niets gedeeltelijk opgeslagen.
+  Corrigeer de fout en bewaar opnieuw.
+- **Volledig dossier indienen** controleert alle opgeslagen dossieronderdelen en
+  opdrachten. Verplichte tekst-/keuzevelden moeten ingevuld zijn, een verplichte
+  matrix heeft minstens één ingevulde cel en een verplicht observatieveld minstens
+  één geldige observatie. Bij fouten opent het eerste betrokken onderdeel.
+- Bewaar wijzigingen voordat je naar een ander onderdeel navigeert of het volledige
+  dossier indient. De indienknop controleert de opgeslagen persoonlijke kopie.
+
+Dezelfde bewaarknoppen en foutafhandeling gelden voor het **docentbasisdossier**.
+Een docent mag dat gedeeltelijk voorinvullen; reeds gestarte studentkopieën veranderen
+daardoor niet.
+
 ## Problemen met aanmelden
 
 Een pagina **Geen toegang tot het EPD** betekent dat de aanmelding mislukte of de

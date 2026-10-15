@@ -11,8 +11,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
 
 from .forms import (
     AssignmentForm,
@@ -27,12 +26,12 @@ from .forms import (
     TeachingGroupForm,
 )
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
+from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
     AssignmentSubmission,
     Case,
     Education,
-    FieldDefinition,
     LibraryField,
     LibraryTemplate,
     Module,
@@ -220,13 +219,19 @@ def case_detail(request, case_id):
     })
 
 
-def prepare_schema_fields(schema, data):
+def prepare_schema_fields(schema, data, *, errors=None, pending_observations=None):
     prepared = []
     for field in schema:
         item = dict(field)
         key = item["key"]
         value = data.get(key, [] if item["type"] == "observation" else "")
         item["value"] = value
+        item["errors"] = (errors or {}).get(key, [])
+        item["pending_observation"] = (pending_observations or {}).get(key, {})
+        # Native number/date controls hide malformed values; use text on error
+        # so even an invalid submitted value remains visible and correctable.
+        item["invalid_typed_value"] = bool(item["errors"] and value and item["type"] in {"number", "date", "datetime"})
+        item["invalid_choice"] = bool(item["type"] == "select" and value and value not in item.get("options", []))
         if item["type"] == "matrix":
             matrix_values = value if isinstance(value, dict) else {}
             item["prepared_rows"] = [
@@ -236,8 +241,9 @@ def prepare_schema_fields(schema, data):
                         {
                             "name": f"field_{key}_{row_index}_{column_index}",
                             "value": matrix_values.get(f"{row_index}_{column_index}", ""),
+                            "column": column,
                         }
-                        for column_index, _ in enumerate(item.get("columns", []))
+                        for column_index, column in enumerate(item.get("columns", []))
                     ],
                 }
                 for row_index, row in enumerate(item.get("rows", []))
@@ -246,119 +252,66 @@ def prepare_schema_fields(schema, data):
     return prepared
 
 
-def parsed_module_data(request, schema, current_data):
-    data = dict(current_data)
-    missing = []
-    for field in schema:
-        key = field["key"]
-        field_type = field["type"]
-        if field_type == FieldDefinition.FieldType.OBSERVATION:
-            if field.get("required") and not data.get(key):
-                missing.append(field["label"])
-            continue
-        if field_type == FieldDefinition.FieldType.MATRIX:
-            value = {
-                f"{row_index}_{column_index}": request.POST.get(
-                    f"field_{key}_{row_index}_{column_index}", ""
-                ).strip()
-                for row_index, _ in enumerate(field.get("rows", []))
-                for column_index, _ in enumerate(field.get("columns", []))
-            }
-            has_value = any(value.values())
-        else:
-            value = request.POST.get(f"field_{key}", "").strip()
-            has_value = bool(value)
-            if has_value and field_type == FieldDefinition.FieldType.NUMBER:
-                try:
-                    if not Decimal(value).is_finite():
-                        raise InvalidOperation
-                except InvalidOperation:
-                    missing.append(f"{field['label']} (ongeldig getal)")
-            elif has_value and field_type == FieldDefinition.FieldType.DATE:
-                try:
-                    date.fromisoformat(value)
-                except ValueError:
-                    missing.append(f"{field['label']} (ongeldige datum)")
-            elif has_value and field_type == FieldDefinition.FieldType.DATETIME:
-                try:
-                    datetime.fromisoformat(value)
-                except ValueError:
-                    missing.append(f"{field['label']} (ongeldig tijdstip)")
-            elif has_value and field_type == FieldDefinition.FieldType.SELECT:
-                if value not in field.get("options", []):
-                    missing.append(f"{field['label']} (ongeldige keuze)")
-        if field.get("required") and not has_value:
-            missing.append(field["label"])
-        data[key] = value
-    if missing:
-        return None, missing
-    return data, []
-
-
 @login_required
+@transaction.atomic
 def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
+    if request.method == "POST":
+        student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
     modules = list(student_case.module_responses.all())
     visible_modules = [item for item in modules if query.lower() in item.title.lower()] if query else modules
     selected_id = request.POST.get("module") or request.GET.get("module")
     selected = next((item for item in modules if str(item.id) == selected_id), None)
+    if request.method == "POST" and selected is None:
+        raise Http404
     if selected is None and modules:
         selected = modules[0]
 
+    form_result = None
+    errors = {}
     if request.method == "POST" and selected:
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
-        elif request.POST.get("action", "").startswith("add_observation:"):
-            key = request.POST["action"].split(":", 1)[1]
-            valid_keys = {field["key"] for field in selected.schema if field["type"] == "observation"}
-            if key in valid_keys:
-                data = dict(selected.data)
-                observations = list(data.get(key, []))
-                timestamp = request.POST.get(f"observation_timestamp_{key}", "")
-                value = request.POST.get(f"observation_value_{key}", "").strip()
-                try:
-                    datetime.fromisoformat(timestamp)
-                    valid_timestamp = True
-                except ValueError:
-                    valid_timestamp = False
-                if not valid_timestamp or not value:
-                    messages.error(request, "Geef een geldig tijdstip en een observatie op.")
-                else:
-                    observations.append({
-                        "timestamp": timestamp, "value": value,
-                        "note": request.POST.get(f"observation_note_{key}", "").strip(),
-                    })
-                    data[key] = observations
-                    selected.data = data
-                    selected.save(update_fields=["data", "updated_at"])
-                    messages.success(request, "Observatie toegevoegd.")
         else:
-            data, missing = parsed_module_data(request, selected.schema, selected.data)
-            if missing:
-                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
+            form_result = parse_module_form(request.POST, selected.schema, selected.data)
+            errors = form_result.errors
+            if errors:
+                messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
             else:
-                selected.data = data
+                selected.data = form_result.data
                 selected.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Dossieronderdeel bewaard.")
-                audit(request, "module_response.updated", selected)
-        return redirect(f"{request.path}?module={selected.id}")
+                messages.success(request, "Dossieronderdeel en observaties bewaard." if form_result.added_observations else "Dossieronderdeel bewaard.")
+                audit(request, "module_response.updated", selected, observations_added=len(form_result.added_observations))
+        if not errors:
+            params = {"module": selected.id}
+            if query:
+                params["q"] = query
+            return redirect(f"{request.path}?{urlencode(params)}")
+    elif selected and request.GET.get("validate") == "1":
+        errors = validate_module_data(selected.schema, selected.data, require_complete=True)
 
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": visible_modules,
         "selected": selected, "query": query,
-        "fields": prepare_schema_fields(selected.schema, selected.data) if selected else [],
+        "fields": prepare_schema_fields(
+            selected.schema, form_result.display_data if form_result else selected.data,
+            errors=errors,
+            pending_observations=form_result.pending_observations if form_result else None,
+        ) if selected else [],
     })
 
 
 @login_required
+@transaction.atomic
 def submit_student_case(request, case_id):
     require_post(request)
     if is_teacher(request.user):
         raise PermissionDenied
     _, student_case = get_student_case(request, case_id)
+    student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     if student_case.locked:
         raise PermissionDenied
     incomplete = student_case.assignment_submissions.filter(
@@ -366,12 +319,23 @@ def submit_student_case(request, case_id):
     ).exists()
     if incomplete:
         messages.error(request, "Dien eerst alle opdrachten in.")
-    else:
-        student_case.status = StudentCase.Status.SUBMITTED
-        student_case.submitted_at = timezone.now()
-        student_case.save(update_fields=["status", "submitted_at", "updated_at"])
-        audit(request, "student_case.submitted", student_case)
-        messages.success(request, "Je volledige dossier is ingediend.")
+    invalid_modules = []
+    for module in student_case.module_responses.all():
+        errors = validate_module_data(module.schema, module.data, require_complete=True)
+        if errors:
+            invalid_modules.append(module)
+            labels = ", ".join(field["label"] for field in module.schema if field["key"] in errors)
+            messages.error(request, f"Controleer {module.title}: {labels}.")
+    if invalid_modules:
+        url = redirect("dossier:dossier", case_id=case_id).url
+        return redirect(f"{url}?{urlencode({'module': invalid_modules[0].id, 'validate': '1'})}")
+    if incomplete:
+        return redirect("dossier:case_detail", case_id=case_id)
+    student_case.status = StudentCase.Status.SUBMITTED
+    student_case.submitted_at = timezone.now()
+    student_case.save(update_fields=["status", "submitted_at", "updated_at"])
+    audit(request, "student_case.submitted", student_case)
+    messages.success(request, "Je volledige dossier is ingediend.")
     return redirect("dossier:case_detail", case_id=case_id)
 
 
@@ -690,51 +654,32 @@ def teacher_module_create(request, case_id):
 
 
 @login_required
+@transaction.atomic
 def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
-    schema = module_schema(module)
     if request.method == "POST":
-        if request.POST.get("action", "").startswith("add_observation:"):
-            key = request.POST["action"].split(":", 1)[1]
-            valid_keys = {field["key"] for field in schema if field["type"] == "observation"}
-            if key not in valid_keys:
-                raise PermissionDenied
-            data = dict(module.base_data)
-            observations = list(data.get(key, []))
-            timestamp = request.POST.get(f"observation_timestamp_{key}", "")
-            value = request.POST.get(f"observation_value_{key}", "").strip()
-            try:
-                datetime.fromisoformat(timestamp)
-                valid_timestamp = True
-            except ValueError:
-                valid_timestamp = False
-            if not valid_timestamp or not value:
-                messages.error(request, "Geef een geldig tijdstip en een observatie op.")
-            else:
-                observations.append({
-                    "timestamp": timestamp, "value": value,
-                    "note": request.POST.get(f"observation_note_{key}", "").strip(),
-                })
-                data[key] = observations
-                module.base_data = data
-                module.save(update_fields=["base_data"])
-                audit(request, "base_dossier.observation_added", module)
-                messages.success(request, "Observatie aan het basisdossier toegevoegd.")
+        module = Module.objects.select_for_update().get(pk=module.pk)
+    schema = module_schema(module)
+    form_result = None
+    if request.method == "POST":
+        form_result = parse_module_form(request.POST, schema, module.base_data)
+        if form_result.errors:
+            messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         else:
-            data, missing = parsed_module_data(request, schema, module.base_data)
-            if missing:
-                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
-            else:
-                module.base_data = data
-                module.save(update_fields=["base_data"])
-                audit(request, "base_dossier.updated", module)
-                messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
-        return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
+            module.base_data = form_result.data
+            module.save(update_fields=["base_data"])
+            audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
+            messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
+            return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
-        "fields": prepare_schema_fields(schema, module.base_data),
+        "fields": prepare_schema_fields(
+            schema, form_result.display_data if form_result else module.base_data,
+            errors=form_result.errors if form_result else None,
+            pending_observations=form_result.pending_observations if form_result else None,
+        ),
     })
 
 
