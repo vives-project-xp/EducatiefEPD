@@ -316,6 +316,41 @@ class EpdWorkflowTests(TestCase):
         self.client.post(add_url, {"template_id": template.id})
         self.assertEqual(self.case.modules.filter(source_template=template).count(), 1)
 
+    def test_teacher_can_edit_group_name_and_education(self):
+        self.client.force_login(self.teacher)
+        edit_url = reverse("dossier:group_edit", args=[self.group.id])
+        page = self.client.get(edit_url)
+        self.assertContains(page, "Groepsnaam")
+        self.assertContains(page, "Opleiding")
+
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste lesgroep",
+            "education": self.education.id,
+        })
+        self.assertRedirects(response, reverse("dossier:group_detail", args=[self.group.id]))
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.name, "Aangepaste lesgroep")
+        self.assertEqual(self.group.teacher, self.teacher)
+
+        other_education = Education.objects.create(name="Zorgkunde", slug="zorgkunde")
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste lesgroep",
+            "education": other_education.id,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gekoppelde casussen")
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.education, self.education)
+
+    def test_teacher_can_delete_group_without_deleting_student_dossiers(self):
+        student_case, _ = start_student_case(self.case, self.student)
+        self.client.force_login(self.teacher)
+        response = self.client.post(reverse("dossier:group_delete", args=[self.group.id]))
+        self.assertRedirects(response, reverse("dossier:group_list"))
+        self.assertFalse(TeachingGroup.objects.filter(id=self.group.id).exists())
+        self.assertFalse(self.case.allowed_groups.exists())
+        self.assertTrue(StudentCase.objects.filter(id=student_case.id).exists())
+
     def test_admin_can_create_education_and_teacher_cannot(self):
         url = reverse("dossier:education_create")
         self.client.login(username="student", password="testpass")

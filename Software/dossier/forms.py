@@ -319,6 +319,24 @@ class TeachingGroupForm(forms.ModelForm):
         fields = ["name", "education", "teacher"]
         labels = {"name": "Groepsnaam", "education": "Opleiding", "teacher": "Docent"}
 
+    def clean(self):
+        cleaned_data = super().clean()
+        education = cleaned_data.get("education")
+        if self.instance.pk and education and education.pk != self.instance.education_id:
+            if self.instance.cases.exclude(education=education).exists():
+                self.add_error(
+                    "education",
+                    "Wijzig de opleiding pas nadat alle gekoppelde casussen bij deze opleiding horen.",
+                )
+            if self.instance.members.filter(
+                epd_profile__education__isnull=False
+            ).exclude(epd_profile__education=education).exists():
+                self.add_error(
+                    "education",
+                    "Verwijder eerst studenten van een andere opleiding uit deze lesgroep.",
+                )
+        return cleaned_data
+
 
 class LibraryFieldForm(FieldConfigurationForm):
     class Meta:

@@ -17,6 +17,7 @@ urlpatterns = [
     path("docent/groepen/nieuw/", views.group_edit, name="group_create"),
     path("docent/groepen/<int:group_id>/", views.group_detail, name="group_detail"),
     path("docent/groepen/<int:group_id>/bewerken/", views.group_edit, name="group_edit"),
+    path("docent/groepen/<int:group_id>/verwijderen/", views.group_delete, name="group_delete"),
     path("docent/groepen/<int:group_id>/leden/", views.group_member_add, name="group_member_add"),
     path("docent/groepen/<int:group_id>/leden/<int:student_id>/verwijderen/", views.group_member_remove, name="group_member_remove"),
     path("docent/casus/nieuw/", views.teacher_case_create, name="teacher_case_create"),

@@ -518,8 +518,6 @@ def group_edit(request, group_id=None):
     require_teacher(request.user)
     group = editable_group(request.user, group_id) if group_id else None
     form = TeachingGroupForm(request.POST or None, instance=group)
-    if group:
-        form.fields["education"].disabled = True
     if not is_admin(request.user):
         form.fields.pop("teacher")
     else:
@@ -551,6 +549,17 @@ def group_detail(request, group_id):
     return render(request, "dossier/group_detail.html", {
         "group": group, "available_students": available_students,
     })
+
+
+@login_required
+@require_POST
+def group_delete(request, group_id):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id)
+    audit(request, "group.deleted", group, name=group.name)
+    group.delete()
+    messages.success(request, "De lesgroep is verwijderd. Bestaande studentdossiers blijven bewaard.")
+    return redirect("dossier:group_list")
 
 
 @login_required
