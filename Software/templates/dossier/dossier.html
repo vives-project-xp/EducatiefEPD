@@ -1,21 +1,5 @@
 {% extends 'base.html' %}
 {% block title %}{{ student_case.patient_name }} | Dossier{% endblock %}
-{% block head %}
-<script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js"></script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-  tinymce.init({
-    selector: "textarea.js-tinymce",
-    license_key: "gpl",
-    promotion: false,
-    menubar: false,
-    height: 380,
-    plugins: "lists link",
-    toolbar: "undo redo | bold italic underline | bullist numlist | link | removeformat",
-  });
-});
-</script>
-{% endblock %}
 {% block content %}
 <div class="app">
   <aside class="sidebar">

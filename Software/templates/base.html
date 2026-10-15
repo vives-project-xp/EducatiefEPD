@@ -6,7 +6,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Educatief EPD{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'epd.css' %}">
-  {% block head %}{% endblock %}
+  <script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js"></script>
+  <script>
+  // Laat toe om de rich text editor weer te geven na het laden van content
+  document.addEventListener("DOMContentLoaded", () => {
+    tinymce.init({
+      selector: "textarea.js-tinymce",
+      license_key: "gpl",
+      promotion: false,
+      menubar: false,
+      height: 380,
+      plugins: "lists link",
+      toolbar: "undo redo | bold italic underline | bullist numlist | link | removeformat",
+    });
+  });
+  </script>
 </head>
 <body>
   {% if messages %}
