@@ -1,35 +1,34 @@
 {% extends 'base.html' %}
-{% load static i18n %}
-{% block title %}{{ function.title }} | {% translate "Functies beheer" %}{% endblock %}
+{% load static %}
+{% block title %}{{ function.title }} | Functies beheer{% endblock %}
 {% block content %}
 <main class="teacher-shell function-shell function-editor" data-function-page="editor" data-action-url="{% url 'dossier:function_action' function.id %}" data-standalone="{% if function.kind == 'formulier' %}true{% else %}false{% endif %}" data-locked="{{ function.locked|yesno:'true,false' }}">
   <header class="page-bar function-editor-header">
-    <div class="editor-title-wrap"><p class="eyebrow">{% translate "Functies beheer" %}</p><h1 data-function-title>{{ function.title }}</h1>
-      <button class="text-button function-symbol-button rename-action" type="button" data-rename aria-label="{% translate 'Functienaam wijzigen' %}" {% if function.locked or function.std %}disabled{% endif %}><span class="function-symbol" aria-hidden="true">✎</span></button>
+    <div class="editor-title-wrap"><p class="eyebrow">Functies beheer</p><h1 data-function-title>{{ function.title }}</h1>
+      <button class="icon-action rename-action" type="button" data-rename aria-label="Functienaam wijzigen" {% if function.locked or function.std %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m12.5 4.5 3 3M4 16l3.2-.7L16 6.5 13 3.5l-8.8 8.8L4 16Z"/></svg></button>
     </div>
     <div class="header-actions editor-toolbar">
-      <button class="outline button" type="button" data-lock aria-pressed="{{ function.locked|yesno:'true,false' }}" {% if function.std %}disabled{% endif %}><span class="function-symbol" aria-hidden="true">🔒︎</span><span data-lock-label>{% if function.locked %}{% translate "Ontgrendelen" %}{% else %}{% translate "Vergrendelen" %}{% endif %}</span></button>
-      <button class="outline button" type="button" data-preview aria-pressed="false"><span class="function-symbol" aria-hidden="true">◉</span><span>{% translate "Voorbeeld" %}</span></button>
-      <a class="back" href="{% url 'dossier:function_management' %}" data-editor-back>← {% translate "Ga terug" %}</a>
+      <button class="outline button" type="button" data-lock aria-pressed="{{ function.locked|yesno:'true,false' }}" {% if function.std %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg><span>{% if function.locked %}Ontgrendelen{% else %}Vergrendelen{% endif %}</span></button>
+      <button class="outline button" type="button" data-preview aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M1.8 10s3-5.5 8.2-5.5 8.2 5.5 8.2 5.5-3 5.5-8.2 5.5S1.8 10 1.8 10Z"/><circle cx="10" cy="10" r="2.2"/></svg><span>Voorbeeld</span></button>
+      <a class="back" href="{% url 'dossier:function_management' %}" data-editor-back>← Ga terug</a>
     </div>
   </header>
   <div class="function-editor-grid" data-editor-layout>
     {% if function.kind == 'groep' %}
-    <aside class="editor-section form-navigation" aria-labelledby="forms-heading">
-      <div class="section-heading"><h2 id="forms-heading">{% translate "Formulieren" %}</h2><button class="text-button" type="button" data-new-form {% if function.locked %}disabled{% endif %}>{% translate "Nieuw" %} +</button></div>
+    <aside class="function-card form-navigation" aria-labelledby="forms-heading">
+      <div class="function-card-heading"><h2 id="forms-heading">Formulieren</h2><button class="text-button" type="button" data-new-form {% if function.locked %}disabled{% endif %}>Nieuw +</button></div>
       <ol class="managed-form-list" data-form-list></ol>
     </aside>
     {% endif %}
-    <section class="editor-section editor-form question-editor" aria-label="{% translate 'Formulier bewerken' %}" data-editor-panel>
+    <section class="function-card question-editor" aria-label="Formulier bewerken" data-editor-panel>
       <div class="question-editor-actions" data-form-actions></div>
       <div data-form-editor></div>
     </section>
   </div>
-  <section class="editor-form function-preview" data-preview-panel hidden aria-label="{% translate 'Voorbeeld van de functie' %}"><div data-preview-content></div></section>
-  <div class="messages function-toast-region" aria-live="polite" aria-atomic="true"></div>
-  <form class="function-csrf" hidden>{% csrf_token %}</form>
+  <section class="function-card function-preview" data-preview-panel hidden aria-label="Voorbeeld van de functie"><div data-preview-content></div></section>
+  <div class="function-toast-region" aria-live="polite" aria-atomic="true"></div>
   {{ function_data|json_script:"managed-function-data" }}
-  {{ function_strings|json_script:"function-management-strings" }}
+  <dialog class="function-dialog" data-function-dialog aria-labelledby="dialog-title"><form method="dialog" data-dialog-form><h2 id="dialog-title" data-dialog-title>Bevestigen</h2><p data-dialog-message></p><label class="dialog-input" data-dialog-input-wrap hidden><span>Naam</span><input data-dialog-input maxlength="180"></label><div class="dialog-actions"><button class="outline button" value="cancel">Annuleren</button><button class="primary button" value="confirm" data-dialog-confirm>Bevestigen</button></div></form></dialog>
 </main>
 <script src="{% static 'function_management.js' %}" defer></script>
 {% endblock %}

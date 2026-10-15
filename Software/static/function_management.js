@@ -1,18 +1,20 @@
-(() => {g
+(() => {
   const root = document.querySelector("[data-function-page]");
   if (!root) return;
 
-  const symbols = {
-    trash: "🗑︎", copy: "⧉", up: "↑", down: "↓", drag: "⠿",
-    chevron: "›", warning: "⚠︎", plus: "+",
+  const paths = {
+    trash: ["M3.5 5.5h13m-11.5 0 .8 11h8.4l.8-11M7 5.5V3h6v2.5m-5 3v5m4-5v5"],
+    copy: ["M7 6V3.5h9.5V14H14", "M4 6h10v10H4z"],
+    up: ["m5 12 5-5 5 5"],
+    down: ["m5 8 5 5 5-5"],
+    drag: ["M7 5h.01M7 10h.01M7 15h.01M13 5h.01M13 10h.01M13 15h.01"],
+    chevron: ["m7 4 6 6-6 6"],
+    lock: ["M4 8h12v9H4z", "M6.5 8V5a3.5 3.5 0 0 1 7 0v3"],
+    eye: ["M1.8 10s3-5.5 8.2-5.5 8.2 5.5 8.2 5.5-3 5.5-8.2 5.5S1.8 10 1.8 10Z", "M12.2 10a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0Z"],
+    edit: ["m12.5 4.5 3 3M4 16l3.2-.7L16 6.5 13 3.5l-8.8 8.8L4 16Z"],
+    warning: ["M10 2.5 18 17H2z", "M10 7v4m0 2.5h.01"],
+    plus: ["M10 4v12M4 10h12"],
   };
-  const stringsElement = root.querySelector("#function-management-strings");
-  const strings = stringsElement ? JSON.parse(stringsElement.textContent) : {};
-
-  function text(key, values = {}) {
-    const template = strings[key] || key;
-    return template.replace(/%\((\w+)\)s/g, (_, name) => values[name] ?? "");
-  }
 
   function node(tag, className = "", text = "") {
     const element = document.createElement(tag);
@@ -21,14 +23,22 @@
     return element;
   }
 
-  function symbol(name) {
-    const element = node("span", "function-symbol", symbols[name] || "");
-    element.setAttribute("aria-hidden", "true");
-    return element;
+  function icon(name) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    (paths[name] || []).forEach((d, index) => {
+      const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      shape.setAttribute("d", d);
+      if (name === "copy" && index === 0) shape.setAttribute("fill", "none");
+      svg.append(shape);
+    });
+    return svg;
   }
 
   function csrfToken() {
-    return root.querySelector(".function-csrf [name='csrfmiddlewaretoken']")?.value || "";
+    return document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith("csrftoken="))?.slice(10) || "";
   }
 
   async function post(url, payload) {
@@ -40,7 +50,7 @@
     });
     const result = await response.json();
     if (!response.ok || !result.ok) {
-      const error = new Error(result.message || text("genericError"));
+      const error = new Error(result.message || "Er ging iets mis.");
       error.warning = Boolean(result.warning);
       throw error;
     }
@@ -50,11 +60,39 @@
   function toast(message, warning = false) {
     const region = root.querySelector(".function-toast-region");
     if (!region) return;
-    const item = node("p", `message ${warning ? "warning" : "success"}`);
-    if (warning) item.append(symbol("warning"));
+    const item = node("p", `function-toast${warning ? " warning" : ""}`);
+    if (warning) item.append(icon("warning"));
     item.append(node("span", "", message));
     region.replaceChildren(item);
     window.setTimeout(() => item.remove(), 4200);
+  }
+
+  function dialog(title, message, options = {}) {
+    const element = root.querySelector("[data-function-dialog]");
+    if (!element) return Promise.resolve({ confirmed: window.confirm(message), value: "" });
+    const titleNode = element.querySelector("[data-dialog-title]");
+    const messageNode = element.querySelector("[data-dialog-message]");
+    const inputWrap = element.querySelector("[data-dialog-input-wrap]");
+    const input = element.querySelector("[data-dialog-input]");
+    const confirmButton = element.querySelector("[data-dialog-confirm]");
+    titleNode.textContent = title;
+    messageNode.textContent = message;
+    inputWrap.hidden = !options.input;
+    input.value = options.value || "";
+    confirmButton.textContent = options.confirmText || "Bevestigen";
+    element.showModal();
+    if (options.input) input.focus();
+    else element.querySelector("button[value='cancel']").focus();
+    return new Promise((resolve) => {
+      element.addEventListener("close", () => resolve({
+        confirmed: element.returnValue === "confirm",
+        value: input.value.trim(),
+      }), { once: true });
+    });
+  }
+
+  async function confirm(message, confirmText = "Bevestigen") {
+    return (await dialog("Bevestigen", message, { confirmText })).confirmed;
   }
 
   function initList() {
@@ -67,11 +105,11 @@
       window.location.assign(url);
     });
     root.querySelectorAll("[data-standard-warning]").forEach((button) => {
-      button.addEventListener("click", () => toast(text("standardWarning"), true));
+      button.addEventListener("click", () => toast("Standaardfuncties mogen niet worden bewerkt.", true));
     });
     root.querySelectorAll("[data-delete-function]").forEach((button) => {
       button.addEventListener("click", async () => {
-        if (!window.confirm(text("deleteFunction", { title: button.dataset.title }))) return;
+        if (!await confirm(`Functie \u201c${button.dataset.title}\u201d verwijderen? Je kunt de functie 30 dagen herstellen via Recent verwijderd.`, "Verwijderen")) return;
         try {
           const result = await post(button.dataset.url, { action: "delete" });
           toast(result.message);
@@ -87,9 +125,9 @@
       button.addEventListener("click", async () => {
         const deleting = button.dataset.trashAction === "permanent_delete";
         const message = deleting
-          ? text("deletePermanent", { title: button.dataset.title })
-          : text("restore");
-        if (deleting && !window.confirm(message)) return;
+          ? `Functie \u201c${button.dataset.title}\u201d definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`
+          : "Functie herstellen?";
+        if (deleting && !await confirm(message, "Definitief verwijderen")) return;
         try {
           const result = await post(url, { action: button.dataset.trashAction, functionId: Number(button.dataset.id) });
           toast(result.message);
@@ -98,7 +136,7 @@
       });
     });
     root.querySelector("[data-empty-trash]")?.addEventListener("click", async (event) => {
-      if (event.currentTarget.disabled || !window.confirm(text("emptyTrash"))) return;
+      if (event.currentTarget.disabled || !await confirm("Alle functies uit Recent verwijderd definitief verwijderen? Dit kan niet ongedaan worden gemaakt.", "Prullenbak legen")) return;
       try {
         const result = await post(url, { action: "empty" });
         toast(result.message);
@@ -115,7 +153,10 @@
     update();
   }
 
-  const fieldTypes = strings.fieldTypes || [];
+  const fieldTypes = [
+    { label: "Informatief", options: [["image", "Afbeelding weergeven"], ["link", "Hyperlink"], ["info", "Toelichting"]] },
+    { label: "Interactief", options: [["imageUpload", "Afbeelding uploaden"], ["fileUpload", "Bestand uploaden"], ["date", "Datum"], ["dateTime", "Datum en tijd"], ["number", "Getal"], ["matrix", "Matrix (maximaal 2)"], ["multipleChoice", "Meerkeuze"], ["text", "Tekst"], ["time", "Tijd"]] },
+  ];
   const informative = new Set(["image", "link", "info"]);
 
   function blankQuestion() {
@@ -125,7 +166,7 @@
   function initEditor() {
     let data;
     try { data = JSON.parse(root.querySelector("#managed-function-data").textContent); }
-    catch { toast(text("emptyFunctionData"), true); return; }
+    catch { toast("De functiegegevens konden niet worden gelezen.", true); return; }
     let state = structuredClone(data);
     let saved = structuredClone(data);
     let selectedFormId = state.forms[0]?.id ?? null;
@@ -141,7 +182,7 @@
     const previewContent = root.querySelector("[data-preview-content]");
     const lockButton = root.querySelector("[data-lock]");
     const renameButton = root.querySelector("[data-rename]");
-    const saveButton = node("button", "primary button", text("saveChanges"));
+    const saveButton = node("button", "primary button", "Wijzigingen opslaan");
     saveButton.type = "button";
     saveButton.disabled = true;
     formList?.addEventListener("dragstart", formDragStart);
@@ -154,13 +195,17 @@
       dirty = true;
       saveButton.disabled = locked || !dirty;
     }
+    function markSaved() {
+      saved = structuredClone(state);
+      dirty = false;
+      saveButton.disabled = true;
+      root.dataset.locked = String(locked);
+      renderEditor();
+    }
     async function discardIfNeeded() {
       if (!isDirty()) return true;
-      if (!window.confirm(text("unsavedChanges"))) return false;
+      if (!await confirm("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", "Weggooien")) return false;
       state = structuredClone(saved);
-      if (!state.forms.some((form) => form.id === selectedFormId)) {
-        selectedFormId = state.forms[0]?.id ?? null;
-      }
       dirty = false;
       saveButton.disabled = true;
       return true;
@@ -196,14 +241,14 @@
       button.type = "button";
       button.setAttribute("aria-label", label);
       button.title = label;
-      button.append(symbol(name));
+      button.append(icon(name));
       if (action) button.addEventListener("click", action);
       return button;
     }
 
     function fieldSelect(question, index) {
       const label = node("label", "managed-field field-wide");
-      label.append(node("span", "managed-label", text("questionType")));
+      label.append(node("span", "managed-label", "Veld type"));
       const select = node("select", "managed-input");
       fieldTypes.forEach((group) => {
         const optgroup = node("optgroup");
@@ -221,7 +266,7 @@
           const matrixCount = currentForm().questions.filter((item) => item.fieldType === "matrix").length;
           if (matrixCount >= 2) {
             select.value = question.fieldType;
-            toast(text("matrixLimit"), true);
+            toast("Een formulier mag maximaal 2 matrices bevatten.", true);
             return;
           }
         }
@@ -244,7 +289,7 @@
         input.value = value;
         input.setAttribute("aria-label", `${title} ${index + 1}`);
         input.addEventListener("input", () => { values[index] = input.value; onChange(); });
-          const remove = iconButton("trash", `${text("delete")}: ${title}`, "text-button function-icon-button danger", () => {
+        const remove = iconButton("trash", `${title} verwijderen`, "icon-action danger", () => {
           values.splice(index, 1);
           renderEditor();
           setDirty();
@@ -252,12 +297,7 @@
         row.append(input, remove);
         rows.append(row);
       });
-      const addLabel = {
-        [text("answerOptions")]: text("addOption"),
-        [text("columns")]: text("addColumn"),
-        [text("rows")]: text("addRow"),
-      }[title] || text("add");
-      const add = node("button", "outline button", addLabel);
+      const add = node("button", "outline button", "Toevoegen");
       add.type = "button";
       add.addEventListener("click", () => { values.push(""); renderEditor(); setDirty(); });
       section.append(rows, add);
@@ -268,26 +308,22 @@
       body.append(fieldSelect(question, index));
       const change = () => setDirty();
       if (question.fieldType === "info") {
-        addTextField(body, text("explanation"), question.explanation, (value) => { question.explanation = value; change(); }, { multiline: true, wide: true, rows: 5 });
+        addTextField(body, "Toelichting", question.explanation, (value) => { question.explanation = value; change(); }, { multiline: true, wide: true, rows: 5 });
       } else if (question.fieldType === "link") {
-        addTextField(body, text("title"), question.question, (value) => { question.question = value; change(); }, { wide: true });
-        addTextField(body, text("link"), question.url, (value) => { question.url = value; change(); }, { type: "url" });
-        addTextField(body, text("buttonText"), question.buttonText, (value) => { question.buttonText = value; change(); });
+        addTextField(body, "Titel", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        addTextField(body, "Link (https://…)", question.url, (value) => { question.url = value; change(); }, { type: "url" });
+        addTextField(body, "Knoptekst", question.buttonText, (value) => { question.buttonText = value; change(); });
       } else if (question.fieldType === "image") {
-        const wrapper = node("div", "managed-field field-wide");
+        const wrapper = node("label", "managed-field field-wide");
+        wrapper.append(node("span", "managed-label", "Afbeelding"));
         const input = node("input", "managed-input image-picker");
         input.type = "file";
-        input.id = `managed-image-${index}`;
         input.accept = "image/png,image/jpeg,image/gif,image/webp";
-        const imageLabel = node("label", "managed-label");
-        imageLabel.htmlFor = input.id;
-        imageLabel.textContent = question.image ? text("imageReplace") : text("imageChoose");
-        wrapper.append(imageLabel, input);
         input.addEventListener("change", () => {
           const file = input.files?.[0];
           if (!file) return;
           if (!file.type.startsWith("image/") || file.size > 300_000) {
-            toast(file.size > 300_000 ? text("imageTooLarge") : text("invalidImage"), true);
+            toast(file.size > 300_000 ? "De afbeelding mag maximaal 300 kB groot zijn." : "Kies een afbeeldingsbestand.", true);
             input.value = "";
             return;
           }
@@ -299,25 +335,25 @@
         if (question.image) {
           const image = node("img", "question-image-thumb");
           image.src = question.image;
-          image.alt = text("imagePreviewAlt");
+          image.alt = "Voorbeeld van de gekozen afbeelding";
           wrapper.append(image);
-          const remove = node("button", "text-button danger", text("imageRemove"));
+          const remove = node("button", "text-button danger", "Afbeelding verwijderen");
           remove.type = "button";
           remove.addEventListener("click", () => { question.image = ""; renderEditor(); setDirty(); });
           wrapper.append(remove);
         }
         body.append(wrapper);
-        addTextField(body, text("caption"), question.caption, (value) => { question.caption = value; change(); }, { wide: true });
+        addTextField(body, "Bijschrift", question.caption, (value) => { question.caption = value; change(); }, { wide: true });
       } else if (!informative.has(question.fieldType)) {
-        addTextField(body, text("question"), question.question, (value) => { question.question = value; change(); }, { wide: true });
-        checkboxField(body, text("required"), question.required, (value) => { question.required = value; change(); });
+        addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
         if (["text", "number"].includes(question.fieldType)) {
-          addTextField(body, text("unit"), question.unit, (value) => { question.unit = value; change(); });
+          addTextField(body, "Eenheid", question.unit, (value) => { question.unit = value; change(); });
         }
-        if (question.fieldType === "multipleChoice") listField(body, text("answerOptions"), question.options, change);
+        if (question.fieldType === "multipleChoice") listField(body, "Antwoordopties", question.options, change);
         if (question.fieldType === "matrix") {
-          listField(body, text("columns"), question.columns, change);
-          listField(body, text("rows"), question.rows, change);
+          listField(body, "Kolommen", question.columns, change);
+          listField(body, "Rijen (titel optioneel)", question.rows, change);
         }
       }
     }
@@ -334,42 +370,42 @@
 
     function renderQuestions(form) {
       const section = node("section", "managed-questions");
-      section.append(node("h3", "", text("questions")));
+      section.append(node("h3", "", "Vragen"));
       const list = node("div", "managed-question-list");
       form.questions.forEach((question, index) => {
         const item = node("article", "managed-question");
         item.dataset.questionIndex = String(index);
         const header = node("div", "question-heading");
-        const drag = iconButton("drag", text("dragQuestion"), "drag-handle", null);
+        const drag = iconButton("drag", "Versleep vraag", "drag-handle", null);
         drag.draggable = !locked;
         drag.disabled = locked;
-        drag.setAttribute("aria-label", text("dragQuestion"));
-        const title = node("button", `question-title${question.question ? "" : " is-placeholder"}`, question.question || text("newQuestion"));
+        drag.setAttribute("aria-label", "Vraag verslepen");
+        const title = node("button", `question-title${question.question ? "" : " is-placeholder"}`, question.question || "Nieuwe vraag");
         title.type = "button";
-        title.title = question.question || text("newQuestion");
+        title.title = question.question || "Nieuwe vraag";
         title.addEventListener("click", () => { openQuestion = openQuestion === index ? -1 : index; renderEditor(); });
         const actionsGroup = node("div", "question-actions");
         const reorder = node("div", "reorder-actions");
-        const moveUp = iconButton("up", text("moveQuestionUp"), "text-button function-icon-button", () => reorderQuestions(index, index - 1));
-        const moveDown = iconButton("down", text("moveQuestionDown"), "text-button function-icon-button", () => reorderQuestions(index, index + 1));
+        const moveUp = iconButton("up", "Vraag omhoog", "icon-action", () => reorderQuestions(index, index - 1));
+        const moveDown = iconButton("down", "Vraag omlaag", "icon-action", () => reorderQuestions(index, index + 1));
         moveUp.disabled = locked || index === 0;
         moveDown.disabled = locked || index === form.questions.length - 1;
         reorder.append(moveUp, moveDown);
         actionsGroup.append(reorder);
-        actionsGroup.append(iconButton("copy", text("duplicate"), "text-button function-icon-button", () => {
+        actionsGroup.append(iconButton("copy", "Dupliceren", "icon-action", () => {
           form.questions.splice(index + 1, 0, structuredClone(question));
           openQuestion = index + 1;
           renderEditor();
           setDirty();
         }));
-        actionsGroup.append(iconButton("trash", text("delete"), "text-button function-icon-button danger", async () => {
-          if (!window.confirm(text("deleteQuestion"))) return;
+        actionsGroup.append(iconButton("trash", "Verwijderen", "icon-action danger", async () => {
+          if (!await confirm("Deze vraag verwijderen?", "Verwijderen")) return;
           form.questions.splice(index, 1);
           openQuestion = Math.min(openQuestion, form.questions.length - 1);
           renderEditor();
           setDirty();
         }));
-        const disclosure = iconButton("chevron", openQuestion === index ? text("closeQuestion") : text("openQuestion"), "text-button function-icon-button question-disclosure", () => {
+        const disclosure = iconButton("chevron", openQuestion === index ? "Vraag sluiten" : "Vraag openen", "question-disclosure", () => {
           openQuestion = openQuestion === index ? -1 : index;
           renderEditor();
         });
@@ -397,7 +433,7 @@
         if (target) reorderQuestions(from, Number(target.dataset.questionIndex));
       });
       section.append(list);
-      const add = node("button", "new-question", `${text("newQuestion")} +`);
+      const add = node("button", "new-question", "Nieuwe vraag +");
       add.type = "button";
       add.disabled = locked;
       add.addEventListener("click", () => { form.questions.push(blankQuestion()); openQuestion = form.questions.length - 1; renderEditor(); setDirty(); });
@@ -411,10 +447,10 @@
       state.forms.forEach((form, index) => {
         const item = node("li", `managed-form-row${form.id === selectedFormId ? " selected" : ""}`);
         item.dataset.formId = String(form.id);
-        const drag = iconButton("drag", text("dragForm"), "drag-handle", null);
-        drag.draggable = !locked && form.id !== null;
-        drag.disabled = locked || form.id === null;
-        const select = node("button", "managed-form-select", form.title || text("unnamedForm"));
+        const drag = iconButton("drag", "Formulier verslepen", "drag-handle", null);
+        drag.draggable = !locked;
+        drag.disabled = locked;
+        const select = node("button", "managed-form-select", form.title || "Naamloos formulier");
         select.type = "button";
         select.addEventListener("click", async () => {
           if (form.id === selectedFormId || !await discardIfNeeded()) return;
@@ -423,10 +459,10 @@
           renderEditor();
         });
         const move = node("div", "reorder-actions");
-        const moveUp = iconButton("up", `${text("moveFormUp")}: ${form.title || text("unnamedForm")}`, "text-button function-icon-button", async () => moveForm(index, -1));
-        const moveDown = iconButton("down", `${text("moveFormDown")}: ${form.title || text("unnamedForm")}`, "text-button function-icon-button", async () => moveForm(index, 1));
-        moveUp.disabled = locked || form.id === null || index === 0;
-        moveDown.disabled = locked || form.id === null || index === state.forms.length - 1;
+        const moveUp = iconButton("up", `Formulier omhoog: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, -1));
+        const moveDown = iconButton("down", `Formulier omlaag: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, 1));
+        moveUp.disabled = locked || index === 0;
+        moveDown.disabled = locked || index === state.forms.length - 1;
         select.disabled = locked;
         move.append(moveUp, moveDown);
         item.append(drag, select, move);
@@ -450,10 +486,6 @@
 
     async function reorderForms(sourceId, targetId) {
       if (!await discardIfNeeded()) return;
-      if (state.forms.some((form) => form.id === null)) {
-        toast(text("saveDraftFirst"), true);
-        return;
-      }
       const source = state.forms.findIndex((form) => form.id === sourceId);
       const target = state.forms.findIndex((form) => form.id === targetId);
       if (source < 0 || target < 0 || source === target) return;
@@ -477,23 +509,23 @@
       actions.replaceChildren();
       const form = currentForm();
       if (!form) {
-        editor.append(node("p", "empty-state", text("noForms")));
+        editor.append(node("p", "empty-state", "Nog geen formulieren. Kies Nieuw + om een formulier toe te voegen."));
         return;
       }
-      if (!standalone && form.id !== null) {
-        const removeForm = node("button", "outline button danger-outline", text("delete"));
+      if (!standalone) {
+        const removeForm = node("button", "outline button danger-outline", "Verwijderen");
         removeForm.type = "button";
         removeForm.disabled = locked;
         removeForm.addEventListener("click", async () => {
           if (!await discardIfNeeded()) return;
-          if (!window.confirm(text("deleteForm", { title: form.title || text("unnamedForm") }))) return;
+          if (!await confirm(`Formulier \u201c${form.title || "Naamloos formulier"}\u201d verwijderen?`, "Verwijderen")) return;
           try {
             await post(root.dataset.actionUrl, { action: "delete_form", formId: form.id });
             state.forms = state.forms.filter((item) => item.id !== form.id);
             selectedFormId = state.forms[0]?.id ?? null;
             saved = structuredClone(state);
             renderEditor();
-            toast(text("formRemoved"));
+            toast("Formulier verwijderd");
           } catch (error) { toast(error.message, error.warning); }
         });
         actions.append(removeForm);
@@ -502,11 +534,10 @@
       actions.append(saveButton);
       const fields = node("div", "managed-form-fields");
       if (!standalone) {
-        fields.append(node("h3", "managed-form-name", text("formName")));
-        const title = addTextField(fields, text("name"), form.title, (value) => {
+        const title = addTextField(fields, "Naam van het formulier", form.title, (value) => {
           form.title = value;
           const selected = formList?.querySelector(`[data-form-id="${form.id}"] .managed-form-select`);
-          if (selected) selected.textContent = value || text("unnamedForm");
+          if (selected) selected.textContent = value || "Naamloos formulier";
           setDirty();
         }, { wide: true, maxLength: 180 });
         title.disabled = locked;
@@ -515,10 +546,10 @@
       editor.querySelectorAll("input,textarea,select,button").forEach((control) => {
         if (control !== saveButton) control.disabled = locked || control.disabled;
       });
-      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked && !handle.disabled; });
+      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked; });
       root.querySelector("[data-new-form]")?.toggleAttribute("disabled", locked);
       renameButton.disabled = locked || data.std;
-      lockButton.querySelector("[data-lock-label]").textContent = locked ? text("unlock") : text("lock");
+      lockButton.querySelector("span").textContent = locked ? "Ontgrendelen" : "Vergrendelen";
       lockButton.setAttribute("aria-pressed", String(locked));
     }
 
@@ -526,38 +557,32 @@
       const form = currentForm();
       if (!form || !dirty) return;
       if (!standalone && !form.title.trim()) {
-        toast(text("formNameRequired"), true);
+        toast("Geef het formulier een naam", true);
         return;
       }
       try {
         const result = await post(root.dataset.actionUrl, {
-          action: "save_form", formId: form.id, isNew: form.id === null, title: form.title,
+          action: "save_form", formId: form.id, title: form.title,
           questions: form.questions,
         });
-        form.id = result.formId;
-        form.position = state.forms.indexOf(form);
-        selectedFormId = form.id;
         saved = structuredClone(state);
         dirty = false;
         saveButton.disabled = true;
-        renderEditor();
-        toast(result.message || text("saved"));
+        toast(result.message);
       } catch (error) { toast(error.message, error.warning); }
     }
     saveButton.addEventListener("click", saveCurrentForm);
 
     root.querySelector("[data-new-form]")?.addEventListener("click", async () => {
       if (!await discardIfNeeded()) return;
-      state.forms.push({
-        id: null,
-        title: "",
-        position: state.forms.length,
-        questions: [],
-      });
-      selectedFormId = null;
-      openQuestion = 0;
-      setDirty();
-      renderEditor();
+      try {
+        const result = await post(root.dataset.actionUrl, { action: "create_form" });
+        state.forms.push(result.form);
+        selectedFormId = result.form.id;
+        saved = structuredClone(state);
+        openQuestion = 0;
+        renderEditor();
+      } catch (error) { toast(error.message, error.warning); }
     });
 
     lockButton.addEventListener("click", async () => {
@@ -567,20 +592,16 @@
         locked = result.locked;
         data.locked = locked;
         renderEditor();
-        toast(locked ? text("functionLocked") : text("functionUnlocked"));
+        toast(result.message);
       } catch (error) { toast(error.message, error.warning); }
     });
 
     renameButton.addEventListener("click", async () => {
       if (locked || !await discardIfNeeded()) return;
-      const proposedTitle = window.prompt(
-        `${text("functionNameTitle")}\n${text("enterNewName")}`,
-        state.title,
-      );
-      const nextTitle = proposedTitle?.trim() || "";
-      if (!nextTitle || nextTitle === state.title) return;
+      const result = await dialog("Functienaam wijzigen", "Voer een nieuwe naam in.", { input: true, value: state.title, confirmText: "Opslaan" });
+      if (!result.confirmed || !result.value || result.value === state.title) return;
       try {
-        const response = await post(root.dataset.actionUrl, { action: "rename", title: nextTitle });
+        const response = await post(root.dataset.actionUrl, { action: "rename", title: result.value });
         state.title = response.title;
         saved.title = response.title;
         if (standalone && state.forms[0]) {
@@ -588,9 +609,9 @@
           saved.forms[0].title = response.title;
         }
         root.querySelector("[data-function-title]").textContent = response.title;
-        document.title = `${response.title} | ${text("managementTitle")}`;
+        document.title = `${response.title} | Functies beheer`;
         renderEditor();
-        toast(text("functionRenamed"));
+        toast(response.message);
       } catch (error) { toast(error.message, error.warning); }
     });
 
@@ -607,21 +628,18 @@
     function renderPreview(snapshot) {
       previewContent.replaceChildren();
       previewContent.append(node("h2", "", snapshot.title));
-      let questionNumber = 0;
       snapshot.forms.forEach((form) => {
-        const section = node("section", "editor-section preview-form");
+        const section = node("section", "preview-form");
         if (!standalone) section.append(node("h3", "", form.title));
-        if (!form.questions.length) section.append(node("p", "empty-state", text("noQuestions")));
         form.questions.forEach((question) => {
           const questionWrap = node("div", "preview-question");
-          const controlId = `preview-${form.id}-${question.id || questionNumber++}`;
           if (question.fieldType === "info") {
             questionWrap.append(node("p", "", question.explanation));
           } else if (question.fieldType === "image") {
             if (question.image) {
               const image = node("img", "preview-image");
               image.src = question.image;
-              image.alt = question.caption || question.question || text("image");
+              image.alt = question.caption || question.question || "Afbeelding";
               questionWrap.append(image);
             }
             if (question.caption) questionWrap.append(node("p", "", question.caption));
@@ -629,22 +647,15 @@
             questionWrap.append(node("h4", "", question.question));
             const url = safeHttpUrl(question.url);
             if (url) {
-              const link = node("a", "primary button", question.buttonText || text("open"));
+              const link = node("a", "primary button", question.buttonText || "Openen");
               link.href = url;
               link.target = "_blank";
               link.rel = "noopener";
               questionWrap.append(link);
             }
-          } else if (question.fieldType === "matrix") {
-            questionWrap.append(node("h4", "", question.question || text("question")));
-            questionWrap.append(previewControl(question, controlId));
           } else {
-            const control = previewControl(question, controlId);
-            if (question.fieldType !== "multipleChoice") {
-              const label = node("label", "preview-label", question.question || text("question"));
-              label.htmlFor = controlId;
-              questionWrap.append(label);
-            }
+            questionWrap.append(node("label", "preview-label", question.question || "Vraag"));
+            const control = previewControl(question);
             questionWrap.append(control);
             if (question.unit) questionWrap.append(node("span", "preview-unit", question.unit));
           }
@@ -659,64 +670,37 @@
       catch { return ""; }
     }
 
-    function previewControl(question, controlId) {
+    function previewControl(question) {
       const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time", imageUpload: "file", fileUpload: "file" };
       if (question.fieldType === "multipleChoice") {
         const group = node("fieldset", "preview-options");
-        group.append(node("legend", "", question.question || text("question")));
         question.options.forEach((answer, index) => {
           const label = node("label");
-          const radio = node("input");
-          radio.type = "radio";
-          radio.id = `${controlId}-${index}`;
-          radio.name = controlId;
-          radio.value = answer;
-          radio.required = Boolean(question.required);
-          label.htmlFor = radio.id;
+          const radio = node("input"); radio.type = "radio"; radio.name = `answer-${question.id || index}-${Math.random()}`; radio.value = answer;
           label.append(radio, node("span", "", answer)); group.append(label);
         });
         return group;
       }
       if (question.fieldType === "matrix") {
-        const scroll = node("div", "matrix-wrap");
-        const table = node("table");
-        const head = node("tr");
-        const corner = node("th");
-        corner.scope = "col";
-        head.append(corner);
-        question.columns.forEach((column) => {
-          const heading = node("th", "", column);
-          heading.scope = "col";
-          head.append(heading);
-        });
+        const scroll = node("div", "matrix-scroll");
+        const table = node("table", "preview-matrix");
+        const head = node("tr"); head.append(node("th", "", ""));
+        question.columns.forEach((column) => head.append(node("th", "", column)));
         const thead = node("thead"); thead.append(head); table.append(thead);
         const body = node("tbody");
-        question.rows.forEach((rowTitle, rowIndex) => {
-          const row = node("tr");
-          const heading = node("th", "", rowTitle);
-          heading.scope = "row";
-          row.append(heading);
-          question.columns.forEach((column, columnIndex) => {
-            const cell = node("td");
-            const input = node("input", "managed-input");
-            input.id = `${controlId}-${rowIndex}-${columnIndex}`;
-            input.type = "text";
-            input.required = Boolean(question.required);
-            input.setAttribute("aria-label", `${rowTitle || text("row")}, ${column || text("column", { number: columnIndex + 1 })}`);
-            cell.append(input);
-            row.append(cell);
+        question.rows.forEach((rowTitle) => {
+          const row = node("tr"); row.append(node("th", "", rowTitle));
+          question.columns.forEach((column, index) => {
+            const cell = node("td"); const input = node("input"); input.type = "text"; input.setAttribute("aria-label", `${rowTitle || "Rij"}, ${column || `kolom ${index + 1}`}`); cell.append(input); row.append(cell);
           });
           body.append(row);
         });
-        table.append(body);
-        scroll.append(table);
-        return scroll;
+        table.append(body); scroll.append(table); return scroll;
       }
       const input = node("input", "managed-input");
-      input.id = controlId;
       input.type = typeMap[question.fieldType] || "text";
       input.required = Boolean(question.required);
-      if (question.fieldType === "imageUpload") input.accept = "image/*";
+      if (["imageUpload", "fileUpload"].includes(question.fieldType)) input.accept = question.fieldType === "imageUpload" ? "image/*" : "*/*";
       return input;
     }
 

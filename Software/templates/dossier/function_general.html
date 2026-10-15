@@ -1,19 +1,16 @@
 {% extends 'base.html' %}
-{% load static i18n %}
-{% block title %}{% translate "Nieuwe functie" %} | Educatief EPD{% endblock %}
+{% load static %}
+{% block title %}Nieuwe functie | Educatief EPD{% endblock %}
 {% block content %}
 <main class="teacher-shell function-shell narrow" data-function-page="general">
-  <header class="page-bar"><div><p class="eyebrow">{% translate "Functies beheer" %}</p><h1>{% translate "Nieuwe functie" %}</h1></div><div class="header-actions"><a class="back" href="{% url 'dossier:function_type' %}">← {% translate "Ga terug" %}</a></div></header>
-  <form class="editor-form general-form" method="post">
+  <header class="page-bar"><div><p class="eyebrow">Functies beheer</p><h1>Nieuwe functie</h1></div><div class="header-actions"><a class="back" href="{% url 'dossier:function_type' %}">← Ga terug</a></div></header>
+  <form class="function-card general-form" method="post">
     {% csrf_token %}<input type="hidden" name="kind" value="{{ kind }}">
-    <section class="editor-section">
-      <h2>{% translate "Algemeen" %}</h2>
-      <div><label for="function-name">{% translate "Naam" %}</label><input id="function-name" name="title" value="{{ title }}" maxlength="180" required autofocus data-function-name></div>
-      {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
-      <div class="general-actions"><button class="primary button" type="submit" data-continue disabled>{% translate "Ga verder" %}</button></div>
-    </section>
+    <h2>Algemeen</h2>
+    <label class="floating-field"><span>Naam</span><input name="title" value="{{ title }}" maxlength="180" required autofocus data-function-name></label>
+    {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+    <div class="general-actions"><button class="primary button" type="submit" data-continue disabled>Ga verder</button></div>
   </form>
 </main>
-{{ function_strings|json_script:"function-management-strings" }}
 <script src="{% static 'function_management.js' %}" defer></script>
 {% endblock %}
