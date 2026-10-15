@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% load static i18n %}
+{% block title %}{{ function.title }} | {% translate "Functies beheer" %}{% endblock %}
+{% block content %}
+<main class="teacher-shell function-shell function-editor" data-function-page="editor" data-action-url="{% url 'dossier:function_action' function.id %}" data-standalone="{% if function.kind == 'formulier' %}true{% else %}false{% endif %}" data-locked="{{ function.locked|yesno:'true,false' }}">
+  <header class="page-bar function-editor-header">
+    <div class="editor-title-wrap"><p class="eyebrow">{% translate "Functies beheer" %}</p><h1 data-function-title>{{ function.title }}</h1>
+      <button class="text-button function-symbol-button rename-action" type="button" data-rename aria-label="{% translate 'Functienaam wijzigen' %}" {% if function.locked or function.std %}disabled{% endif %}><span class="function-symbol" aria-hidden="true">✎</span></button>
+    </div>
+    <div class="header-actions editor-toolbar">
+      <button class="outline button" type="button" data-lock aria-pressed="{{ function.locked|yesno:'true,false' }}" {% if function.std %}disabled{% endif %}><span class="function-symbol" aria-hidden="true">🔒︎</span><span data-lock-label>{% if function.locked %}{% translate "Ontgrendelen" %}{% else %}{% translate "Vergrendelen" %}{% endif %}</span></button>
+      <button class="outline button" type="button" data-preview aria-pressed="false"><span class="function-symbol" aria-hidden="true">◉</span><span>{% translate "Voorbeeld" %}</span></button>
+      <a class="back" href="{% url 'dossier:function_management' %}" data-editor-back>← {% translate "Ga terug" %}</a>
+    </div>
+  </header>
+  <div class="function-editor-grid" data-editor-layout>
+    {% if function.kind == 'groep' %}
+    <aside class="editor-section form-navigation" aria-labelledby="forms-heading">
+      <div class="section-heading"><h2 id="forms-heading">{% translate "Formulieren" %}</h2><button class="text-button" type="button" data-new-form {% if function.locked %}disabled{% endif %}>{% translate "Nieuw" %} +</button></div>
+      <ol class="managed-form-list" data-form-list></ol>
+    </aside>
+    {% endif %}
+    <section class="editor-section editor-form question-editor" aria-label="{% translate 'Formulier bewerken' %}" data-editor-panel>
+      <div class="question-editor-actions" data-form-actions></div>
+      <div data-form-editor></div>
+    </section>
+  </div>
+  <section class="editor-form function-preview" data-preview-panel hidden aria-label="{% translate 'Voorbeeld van de functie' %}"><div data-preview-content></div></section>
+  <div class="messages function-toast-region" aria-live="polite" aria-atomic="true"></div>
+  <form class="function-csrf" hidden>{% csrf_token %}</form>
+  {{ function_data|json_script:"managed-function-data" }}
+  {{ function_strings|json_script:"function-management-strings" }}
+</main>
+<script src="{% static 'function_management.js' %}" defer></script>
+{% endblock %}

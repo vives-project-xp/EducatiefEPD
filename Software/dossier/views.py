@@ -9,10 +9,16 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from django.views.decorators.http import require_POST
-from datetime import date, datetime
+import base64
+import binascii
+import json
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
 
 from .forms import (
     AssignmentForm,
@@ -26,6 +32,7 @@ from .forms import (
     ReviewForm,
     TeachingGroupForm,
 )
+from .function_strings import FUNCTION_MANAGEMENT_STRINGS
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
 from .models import (
     Assignment,
@@ -33,11 +40,14 @@ from .models import (
     Case,
     Education,
     FieldDefinition,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
     Module,
     ModuleField,
     ModuleResponse,
+    ManagedForm,
+    ManagedQuestion,
     Profile,
     StudentCase,
     TeachingGroup,
@@ -841,8 +851,383 @@ def library_list(request):
     return render(request, "dossier/library_list.html", {
         "templates": templates, "query": query, "category_filter": category,
         "education_filter": education, "theme_filter": theme,
-        "categories": LibraryTemplate.Category.choices,
+        "categories": LibraryTemplate.Category.choices, "is_admin": is_admin(request.user),
     })
+
+
+def purge_expired_functions():
+    cutoff = timezone.now() - timedelta(days=30)
+    FunctionDefinition.objects.filter(
+        deleted_at__lt=cutoff, std=False
+    ).delete()
+
+
+def function_page_context(**context):
+    return {"function_strings": FUNCTION_MANAGEMENT_STRINGS, **context}
+
+
+@login_required
+def function_management(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    query = request.GET.get("q", "").strip()
+    sort = request.GET.get("sort", "az")
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=True)
+    if query:
+        functions = functions.filter(title__icontains=query)
+    if sort == "za":
+        functions = functions.order_by("-title", "-id")
+    elif sort == "oldest":
+        functions = functions.order_by("created_at", "id")
+    else:
+        sort = "az"
+        functions = functions.order_by("title", "id")
+    return render(request, "dossier/function_management.html", function_page_context(
+        functions=functions,
+        query=query,
+        sort=sort,
+        deleted_count=FunctionDefinition.objects.filter(
+            deleted_at__isnull=False, std=False
+        ).count(),
+    ))
+
+
+@login_required
+def function_type(request):
+    require_teacher(request.user)
+    if request.method == "POST":
+        kind = request.POST.get("kind")
+        if kind not in FunctionDefinition.Kind.values:
+            raise Http404
+        return redirect(f"{reverse('dossier:function_general')}?kind={kind}")
+    return render(request, "dossier/function_type.html", function_page_context())
+
+
+@login_required
+def function_general(request):
+    require_teacher(request.user)
+    kind = request.GET.get("kind", request.POST.get("kind", ""))
+    if kind not in FunctionDefinition.Kind.values:
+        return redirect("dossier:function_type")
+    error = ""
+    title = ""
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()
+        if not title:
+            error = _("Geef de functie een naam.")
+        elif len(title) > 180:
+            error = _("De naam mag maximaal 180 tekens bevatten.")
+        else:
+            with transaction.atomic():
+                function = FunctionDefinition.objects.create(title=title, kind=kind)
+                if kind == FunctionDefinition.Kind.FORM:
+                    ManagedForm.objects.create(function=function, title=title)
+                audit(request, "function.created", function, kind=kind)
+            return redirect("dossier:function_detail", function_id=function.id)
+    return render(request, "dossier/function_general.html", function_page_context(
+        kind=kind, title=title, error=error,
+    ))
+
+
+def managed_function_payload(function):
+    return {
+        "id": function.id,
+        "title": function.title,
+        "kind": function.kind,
+        "locked": function.locked,
+        "std": function.std,
+        "forms": [{
+            "id": form.id,
+            "title": form.title,
+            "position": form.position,
+            "questions": [{
+                "id": question.id,
+                "fieldType": question.field_type,
+                "question": question.question,
+                "unit": question.unit,
+                "required": question.required,
+                "options": question.options,
+                "columns": question.columns,
+                "rows": question.rows,
+                "url": question.url,
+                "buttonText": question.button_text,
+                "image": question.image,
+                "caption": question.caption,
+                "explanation": question.explanation,
+            } for question in form.questions.all()],
+        } for form in function.forms.all()],
+    }
+
+
+@login_required
+def function_detail(request, function_id):
+    require_teacher(request.user)
+    function = get_object_or_404(
+        FunctionDefinition.objects.prefetch_related("forms__questions"),
+        id=function_id, deleted_at__isnull=True,
+    )
+    if function.std:
+        raise PermissionDenied
+    return render(request, "dossier/function_editor.html", function_page_context(
+        function=function,
+        function_data=managed_function_payload(function),
+    ))
+
+
+def function_api_error(message, status=400, warning=False):
+    return JsonResponse({"ok": False, "message": _(message), "warning": warning}, status=status)
+
+
+def clean_string_list(value, max_length=500, max_items=100):
+    if not isinstance(value, list) or len(value) > max_items:
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidAnswerList"])
+    result = []
+    for item in value:
+        if not isinstance(item, str) or len(item) > max_length:
+            raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidAnswer"])
+        result.append(item.strip())
+    return result
+
+
+def clean_question_text(item, key, max_length):
+    value = item.get(key, "")
+    if not isinstance(value, str) or len(value) > max_length:
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidQuestionField"])
+    return value
+
+
+def validate_function_image(value):
+    if not value:
+        return ""
+    if not isinstance(value, str) or len(value) > 420_000:
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["imageTooLarge"])
+    if not value.startswith(("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/gif;base64,", "data:image/webp;base64,")):
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidImage"])
+    try:
+        decoded = base64.b64decode(value.split(",", 1)[1], validate=True)
+    except (binascii.Error, ValueError, IndexError):
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidImage"]) from None
+    if len(decoded) > 300_000:
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["imageTooLarge"])
+    mime_type = value.split(";", 1)[0][5:]
+    valid_signature = {
+        "image/png": decoded.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": decoded.startswith(b"\xff\xd8\xff"),
+        "image/gif": decoded.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": decoded.startswith(b"RIFF") and decoded[8:12] == b"WEBP",
+    }
+    if not valid_signature.get(mime_type, False):
+        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidImage"])
+    return value
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_action(request, function_id):
+    require_teacher(request.user)
+    if len(request.body) > 1_500_000:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["requestTooLarge"], status=413)
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidRequest"])
+    if not isinstance(payload, dict):
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidRequest"])
+    function = FunctionDefinition.objects.select_for_update().filter(
+        id=function_id, deleted_at__isnull=True
+    ).first()
+    if not function:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["functionNotFound"], status=404)
+    action = payload.get("action")
+    if function.std:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["standardWarning"], 403, warning=True)
+
+    if action == "toggle_lock":
+        function.locked = not function.locked
+        function.save(update_fields=["locked"])
+        message = FUNCTION_MANAGEMENT_STRINGS["functionLocked" if function.locked else "functionUnlocked"]
+        return JsonResponse({"ok": True, "locked": function.locked, "message": message})
+    if action == "delete":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["lockedDelete"], 423)
+        function.deleted_at = timezone.now()
+        function.save(update_fields=["deleted_at"])
+        audit(request, "function.deleted", function)
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": FUNCTION_MANAGEMENT_STRINGS["deleteMoved"]})
+    if action == "rename":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["functionLocked"], 423)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if not title or len(title) > 180:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidFunctionName"])
+        function.title = title
+        function.save(update_fields=["title"])
+        if function.kind == FunctionDefinition.Kind.FORM:
+            function.forms.update(title=title)
+        return JsonResponse({"ok": True, "title": title, "message": FUNCTION_MANAGEMENT_STRINGS["functionRenamed"]})
+    if action == "reorder_forms":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["functionLocked"], 423)
+        form_ids = payload.get("formIds")
+        forms = list(function.forms.all())
+        if (
+            not isinstance(form_ids, list)
+            or any(type(form_id) is not int for form_id in form_ids)
+            or len(form_ids) != len(forms)
+            or set(form_ids) != {form.id for form in forms}
+        ):
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidFormOrder"])
+        for position, form_id in enumerate(form_ids):
+            ManagedForm.objects.filter(id=form_id, function=function).update(position=position)
+        return JsonResponse({"ok": True})
+    if action == "delete_form":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["functionLocked"], 423)
+        if function.kind != FunctionDefinition.Kind.GROUP:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["wrongFormKind"])
+        form_id = payload.get("formId")
+        if type(form_id) is not int:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidFormId"])
+        form = function.forms.filter(id=form_id).first()
+        if not form:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["formNotFound"], status=404)
+        form.delete()
+        for position, item in enumerate(function.forms.all()):
+            ManagedForm.objects.filter(id=item.id).update(position=position)
+        return JsonResponse({"ok": True, "message": FUNCTION_MANAGEMENT_STRINGS["formRemoved"]})
+    if action == "save_form":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["functionLocked"], 423)
+        is_new = payload.get("isNew") is True
+        form_id = payload.get("formId")
+        if is_new:
+            if function.kind != FunctionDefinition.Kind.GROUP or form_id is not None:
+                return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidNewForm"])
+            form = ManagedForm(
+                function=function, position=function.forms.count()
+            )
+        else:
+            if type(form_id) is not int:
+                return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidFormId"])
+            form = function.forms.filter(id=form_id).first()
+            if not form:
+                return function_api_error(FUNCTION_MANAGEMENT_STRINGS["formNotFound"], status=404)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if function.kind == FunctionDefinition.Kind.GROUP and not title:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["formNameRequired"], warning=True)
+        if len(title) > 180:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["formNameMax"])
+        if function.kind == FunctionDefinition.Kind.FORM:
+            title = function.title
+        incoming = payload.get("questions")
+        if not isinstance(incoming, list) or len(incoming) > 200:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidQuestionList"])
+        valid_types = set(ManagedQuestion.FieldType.values)
+        prepared = []
+        try:
+            for position, item in enumerate(incoming):
+                if (
+                    not isinstance(item, dict)
+                    or not isinstance(item.get("fieldType"), str)
+                    or item["fieldType"] not in valid_types
+                ):
+                    raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidFieldType"])
+                field_type = item["fieldType"]
+                if not isinstance(item.get("required", False), bool):
+                    raise ValueError(FUNCTION_MANAGEMENT_STRINGS["invalidRequired"])
+                question_text = clean_question_text(item, "question", 500)
+                unit = clean_question_text(item, "unit", 120)
+                button_text = clean_question_text(item, "buttonText", 180)
+                caption = clean_question_text(item, "caption", 280)
+                explanation = clean_question_text(item, "explanation", 10_000)
+                url = clean_question_text(item, "url", 1000)
+                if url:
+                    parsed_url = urlparse(url)
+                    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                        raise ValueError(FUNCTION_MANAGEMENT_STRINGS["httpOnlyURL"])
+                image = validate_function_image(item.get("image", "")) if field_type == ManagedQuestion.FieldType.IMAGE else ""
+                prepared.append(ManagedQuestion(
+                    form=form,
+                    position=position,
+                    field_type=field_type,
+                    question=question_text,
+                    unit=unit,
+                    required=bool(item.get("required", False)),
+                    options=clean_string_list(item.get("options", []), max_items=100),
+                    columns=clean_string_list(item.get("columns", []), max_items=50),
+                    rows=clean_string_list(item.get("rows", []), max_items=50),
+                    url=url,
+                    button_text=button_text,
+                    image=image,
+                    caption=caption,
+                    explanation=explanation,
+                ))
+        except ValueError as error:
+            return function_api_error(str(error), warning=True)
+        if sum(question.field_type == ManagedQuestion.FieldType.MATRIX for question in prepared) > 2:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["matrixLimit"], warning=True)
+        form.title = title
+        form.save()
+        if not is_new:
+            form.questions.all().delete()
+        ManagedQuestion.objects.bulk_create(prepared)
+        audit(request, "function.form_saved", function, form_id=form.id)
+        return JsonResponse({"ok": True, "formId": form.id, "message": FUNCTION_MANAGEMENT_STRINGS["saved"]})
+    return function_api_error(FUNCTION_MANAGEMENT_STRINGS["unknownAction"])
+
+
+@login_required
+def function_deleted(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).order_by("-deleted_at")
+    now = timezone.now()
+    for function in functions:
+        function.days_left = max(0, 30 - (now - function.deleted_at).days)
+    return render(request, "dossier/function_deleted.html", function_page_context(
+        functions=functions,
+    ))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_trash_action(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidRequest"])
+    if not isinstance(payload, dict):
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidRequest"])
+    action = payload.get("action")
+    if action == "empty":
+        if FunctionDefinition.objects.filter(
+            deleted_at__isnull=False, std=False, locked=True
+        ).exists():
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["lockedTrashEmpty"], 423)
+        FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": FUNCTION_MANAGEMENT_STRINGS["trashEmptied"]})
+    function_id = payload.get("functionId")
+    if type(function_id) is not int:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["invalidFunctionId"])
+    function = FunctionDefinition.objects.select_for_update().filter(
+        id=function_id, deleted_at__isnull=False, std=False,
+    ).first()
+    if not function:
+        return function_api_error(FUNCTION_MANAGEMENT_STRINGS["deletedFunctionNotFound"], status=404)
+    if action == "restore":
+        function.deleted_at = None
+        function.save(update_fields=["deleted_at"])
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": FUNCTION_MANAGEMENT_STRINGS["functionRestored"]})
+    if action == "permanent_delete":
+        if function.locked:
+            return function_api_error(FUNCTION_MANAGEMENT_STRINGS["lockedPermanentDelete"], 423)
+        function.delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": FUNCTION_MANAGEMENT_STRINGS["permanentDeleted"]})
+    return function_api_error(FUNCTION_MANAGEMENT_STRINGS["unknownAction"])
 
 
 @login_required

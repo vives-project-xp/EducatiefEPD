@@ -1,8 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.core.exceptions import SuspiciousOperation
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 from .models import (
@@ -11,8 +15,11 @@ from .models import (
     Case,
     Education,
     ExternalIdentity,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
+    ManagedForm,
+    ManagedQuestion,
     Patient,
     Profile,
     StudentCase,
@@ -20,6 +27,7 @@ from .models import (
 )
 from .auth import EpdOIDCAuthenticationBackend
 from .services import create_case_structure, ensure_default_templates, start_student_case
+from .function_strings import FUNCTION_MANAGEMENT_STRINGS
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -83,6 +91,284 @@ class EpdWorkflowTests(TestCase):
         self.client.login(username="teacher", password="testpass")
         response = self.client.get(reverse("dossier:teacher_module_create", args=[self.case.id]))
         self.assertEqual(response.status_code, 403)
+
+    def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
+        self.client.login(username="teacher", password="testpass")
+        oldest = FunctionDefinition.objects.create(title="Zorg", kind=FunctionDefinition.Kind.GROUP)
+        middle = FunctionDefinition.objects.create(title="Alpha", kind=FunctionDefinition.Kind.GROUP)
+        newest = FunctionDefinition.objects.create(title="Zwangerschap", kind=FunctionDefinition.Kind.FORM)
+        FunctionDefinition.objects.filter(id=oldest.id).update(created_at=timezone.now() - timedelta(days=3))
+        FunctionDefinition.objects.filter(id=middle.id).update(created_at=timezone.now() - timedelta(days=2))
+        FunctionDefinition.objects.filter(id=newest.id).update(created_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.get(reverse("dossier:function_management"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item.title for item in response.context["functions"]], ["Alpha", "Zorg", "Zwangerschap"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "za", "q": "zorg"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "oldest"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg", "Alpha", "Zwangerschap"])
+
+    def test_teacher_entry_and_creation_wizard_create_empty_records(self):
+        self.client.login(username="teacher", password="testpass")
+        library = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(library, reverse("dossier:function_management"))
+        self.assertContains(library, "Functie beheer")
+        self.assertEqual(FunctionDefinition.objects.count(), 0)
+
+        response = self.client.post(reverse("dossier:function_type"), {"kind": "formulier"})
+        self.assertRedirects(response, f"{reverse('dossier:function_general')}?kind=formulier")
+        response = self.client.post(reverse("dossier:function_general"), {
+            "kind": "formulier", "title": "Intake",
+        })
+        function = FunctionDefinition.objects.get(title="Intake")
+        self.assertRedirects(response, reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(function.forms.count(), 1)
+        self.assertEqual(function.forms.get().title, "Intake")
+        self.assertEqual(function.forms.get().questions.count(), 0)
+
+        self.client.post(reverse("dossier:function_type"), {"kind": "groep"})
+        self.client.post(reverse("dossier:function_general"), {
+            "kind": "groep", "title": "Zorggroep",
+        })
+        group = FunctionDefinition.objects.get(title="Zorggroep")
+        self.assertEqual(group.forms.count(), 0)
+
+    def test_recently_deleted_page_shows_retention_and_is_teacher_only(self):
+        function = FunctionDefinition.objects.create(
+            title="Verwijderd item", kind=FunctionDefinition.Kind.GROUP,
+            deleted_at=timezone.now(),
+        )
+        self.client.login(username="teacher", password="testpass")
+        response = self.client.get(reverse("dossier:function_deleted"))
+        self.assertContains(response, "Verwijderd item")
+        self.assertContains(response, "Nog 30 dagen te herstellen.")
+        self.client.logout()
+        self.client.login(username="student", password="testpass")
+        self.assertEqual(self.client.get(reverse("dossier:function_deleted")).status_code, 403)
+
+    def test_standard_function_cannot_be_changed_or_deleted(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Standaard", kind=FunctionDefinition.Kind.GROUP, std=True
+        )
+        url = reverse("dossier:function_action", args=[function.id])
+        for payload in [
+            {"action": "toggle_lock"},
+            {"action": "rename", "title": "Aangepast"},
+            {"action": "delete"},
+            {"action": "create_form"},
+            {"action": "reorder_forms", "formIds": []},
+            {"action": "save_form", "formId": 1, "title": "Naam", "questions": []},
+            {"action": "delete_form", "formId": 1},
+        ]:
+            response = self.client.post(url, json.dumps(payload), content_type="application/json")
+            self.assertEqual(response.status_code, 403, payload)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        self.assertFalse(function.locked)
+        self.assertEqual(function.title, "Standaard")
+        self.assertEqual(
+            self.client.get(reverse("dossier:function_detail", args=[function.id])).status_code,
+            403,
+        )
+        self.assertContains(self.client.get(reverse("dossier:function_management")), "data-standard-warning")
+
+    def test_function_soft_delete_restore_and_expired_purge(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Herstelbaar", kind=FunctionDefinition.Kind.GROUP)
+        action_url = reverse("dossier:function_action", args=[function.id])
+        response = self.client.post(action_url, json.dumps({"action": "delete"}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNotNone(function.deleted_at)
+        response = self.client.post(
+            reverse("dossier:function_trash_action"),
+            json.dumps({"action": "restore", "functionId": function.id}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        FunctionDefinition.objects.filter(id=function.id).update(
+            deleted_at=timezone.now() - timedelta(days=31)
+        )
+        self.client.get(reverse("dossier:function_management"))
+        self.assertFalse(FunctionDefinition.objects.filter(id=function.id).exists())
+
+    def test_function_form_rejects_a_third_matrix(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Matrices", kind=FunctionDefinition.Kind.GROUP)
+        form = ManagedForm.objects.create(function=function, title="Invoer")
+        questions = [{"fieldType": ManagedQuestion.FieldType.MATRIX} for _ in range(3)]
+        response = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "save_form", "formId": form.id, "title": form.title, "questions": questions}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json()["warning"])
+        self.assertEqual(form.questions.count(), 0)
+
+    def test_editor_includes_unsaved_change_guard_and_initially_disabled_save(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Concept", kind=FunctionDefinition.Kind.FORM)
+        ManagedForm.objects.create(function=function, title=function.title)
+        response = self.client.get(reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "function_management.js")
+        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        self.assertIn("saveButton.disabled = true", script)
+        self.assertIn("saveButton.disabled = locked || !dirty", script)
+        self.assertIn('text("unsavedChanges")', script)
+        self.assertEqual(
+            FUNCTION_MANAGEMENT_STRINGS["unsavedChanges"],
+            "Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?",
+        )
+
+    def test_management_pages_and_actions_are_teacher_only(self):
+        function = FunctionDefinition.objects.create(
+            title="Alleen docent", kind=FunctionDefinition.Kind.GROUP
+        )
+        self.client.login(username="student", password="testpass")
+        urls = [
+            reverse("dossier:library_list"),
+            reverse("dossier:function_management"),
+            reverse("dossier:function_type"),
+            reverse("dossier:function_general"),
+            reverse("dossier:function_detail", args=[function.id]),
+            reverse("dossier:function_deleted"),
+        ]
+        for url in urls:
+            self.assertEqual(self.client.get(url).status_code, 403, url)
+        self.assertEqual(
+            self.client.post(
+                reverse("dossier:function_action", args=[function.id]),
+                json.dumps({"action": "delete"}), content_type="application/json",
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("dossier:function_trash_action"),
+                json.dumps({"action": "empty"}), content_type="application/json",
+            ).status_code,
+            403,
+        )
+
+    def test_function_api_requires_csrf_token(self):
+        function = FunctionDefinition.objects.create(
+            title="CSRF", kind=FunctionDefinition.Kind.GROUP
+        )
+        client = Client(enforce_csrf_checks=True)
+        client.login(username="teacher", password="testpass")
+        url = reverse("dossier:function_action", args=[function.id])
+        self.assertEqual(
+            client.post(url, json.dumps({"action": "toggle_lock"}), content_type="application/json").status_code,
+            403,
+        )
+        page = client.get(reverse("dossier:function_management"))
+        token = client.cookies["csrftoken"].value
+        self.assertContains(page, "csrfmiddlewaretoken")
+        response = client.post(
+            url, json.dumps({"action": "toggle_lock"}), content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_locked_functions_reject_all_content_mutations(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Vergrendeld", kind=FunctionDefinition.Kind.GROUP, locked=True
+        )
+        form = ManagedForm.objects.create(function=function, title="Bestaand")
+        url = reverse("dossier:function_action", args=[function.id])
+        payloads = [
+            {"action": "delete"},
+            {"action": "rename", "title": "Nieuw"},
+            {"action": "save_form", "formId": None, "isNew": True, "title": "Nieuw", "questions": []},
+            {"action": "reorder_forms", "formIds": [form.id]},
+            {"action": "save_form", "formId": form.id, "title": form.title, "questions": []},
+            {"action": "delete_form", "formId": form.id},
+        ]
+        for payload in payloads:
+            response = self.client.post(url, json.dumps(payload), content_type="application/json")
+            self.assertEqual(response.status_code, 423, payload)
+            self.assertTrue(response.json()["message"])
+        function.refresh_from_db()
+        self.assertTrue(function.locked)
+        self.assertEqual(function.title, "Vergrendeld")
+        self.assertEqual(function.forms.count(), 1)
+
+    def test_group_form_is_created_only_after_valid_save(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Groep", kind=FunctionDefinition.Kind.GROUP
+        )
+        url = reverse("dossier:function_action", args=[function.id])
+        response = self.client.post(url, json.dumps({
+            "action": "save_form", "formId": None, "isNew": True,
+            "title": "", "questions": [],
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(function.forms.count(), 0)
+        response = self.client.post(url, json.dumps({
+            "action": "save_form", "formId": None, "isNew": True,
+            "title": "Eerste formulier", "questions": [],
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(function.forms.get().title, "Eerste formulier")
+        self.assertEqual(response.json()["formId"], function.forms.get().id)
+
+    def test_function_validation_returns_json_and_persists_form_order(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Valideren", kind=FunctionDefinition.Kind.GROUP
+        )
+        first = ManagedForm.objects.create(function=function, title="Eerste", position=0)
+        second = ManagedForm.objects.create(function=function, title="Tweede", position=1)
+        url = reverse("dossier:function_action", args=[function.id])
+        bad_payloads = [
+            {"action": "save_form", "formId": first.id, "title": first.title, "questions": [{"fieldType": []}]},
+            {"action": "save_form", "formId": first.id, "title": first.title, "questions": [{"fieldType": "link", "url": "ftp://example.org"}]},
+            {"action": "save_form", "formId": first.id, "title": first.title, "questions": [{"fieldType": "text", "question": "x" * 501}]},
+            {"action": "save_form", "formId": 999999, "title": "Naam", "questions": []},
+        ]
+        for payload in bad_payloads:
+            response = self.client.post(url, json.dumps(payload), content_type="application/json")
+            self.assertIn(response.status_code, {400, 404})
+            self.assertFalse(response["Content-Type"].startswith("text/html"))
+            self.assertTrue(response.json()["message"])
+        response = self.client.post(url, json.dumps({
+            "action": "reorder_forms", "formIds": [second.id, second.id],
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        response = self.client.post(url, json.dumps({
+            "action": "reorder_forms", "formIds": [second.id, first.id],
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual([second.position, first.position], [0, 1])
+
+    def test_trash_permanent_delete_and_empty(self):
+        self.client.login(username="teacher", password="testpass")
+        first = FunctionDefinition.objects.create(
+            title="Permanent", kind=FunctionDefinition.Kind.GROUP, deleted_at=timezone.now()
+        )
+        second = FunctionDefinition.objects.create(
+            title="Empty", kind=FunctionDefinition.Kind.GROUP, deleted_at=timezone.now()
+        )
+        url = reverse("dossier:function_trash_action")
+        response = self.client.post(url, json.dumps({
+            "action": "permanent_delete", "functionId": first.id,
+        }), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(FunctionDefinition.objects.filter(id=first.id).exists())
+        response = self.client.post(
+            url, json.dumps({"action": "empty"}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(FunctionDefinition.objects.filter(id=second.id).exists())
 
     def test_new_case_receives_all_fixed_dossier_sections(self):
         self.assertEqual(

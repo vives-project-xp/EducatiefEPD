@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% load static i18n %}
+{% block title %}{% translate "Functies beheer" %} | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell function-shell" data-function-page="list">
+  <header class="page-bar">
+    <div>
+      <p class="eyebrow">{% translate "Bibliotheek" %}</p>
+      <h1>{% translate "Functies beheer" %}</h1>
+    </div>
+    <div class="header-actions"><a class="back" href="{% url 'dossier:library_list' %}">← {% translate "Ga terug" %}</a></div>
+  </header>
+  <section class="editor-section function-list-card" aria-labelledby="function-list-heading">
+    <div class="section-heading">
+      <h2 id="function-list-heading">{% translate "Functies" %}</h2>
+      <div class="function-tools">
+        <form class="function-search editor-form" method="get" role="search">
+          <label class="search-field">
+            <span>{% translate "Zoeken" %}</span>
+            <input type="search" name="q" value="{{ query }}" autocomplete="off" aria-label="{% translate 'Zoeken' %}">
+            <span class="function-search-symbol" aria-hidden="true">⌕</span>
+          </label>
+          <input type="hidden" name="sort" value="{{ sort }}">
+        </form>
+        <a class="outline button" href="{% url 'dossier:function_deleted' %}">
+          <span class="function-symbol" aria-hidden="true">↶</span>
+          {% translate "Recent verwijderd" %}{% if deleted_count %} ({{ deleted_count }}){% endif %}
+        </a>
+        <a class="primary button function-add" href="{% url 'dossier:function_type' %}" aria-label="{% translate 'Nieuwe functie' %}">+</a>
+      </div>
+    </div>
+    <div class="function-list-head">
+      <button type="button" class="function-sort" data-sort-control data-sort="{{ sort }}">
+        <span>{% translate "Titel" %}</span><span class="sort-indicator" aria-hidden="true">{% if sort == 'az' %}↑{% elif sort == 'za' %}↓{% endif %}</span>
+      </button>
+      <span>{% translate "Verwijderen" %}</span>
+    </div>
+    <div class="teacher-list function-list" data-function-list>
+      {% for item in functions %}
+      <div class="teacher-row function-row {% if item.std %}is-standard{% endif %}" data-function-row data-standard="{{ item.std|yesno:'true,false' }}">
+        {% if item.std %}
+        <button type="button" class="function-row-title is-locked" data-standard-warning aria-label="{% blocktranslate with title=item.title %}{{ title }}: standaardfunctie{% endblocktranslate %}">
+          <span>{{ item.title }}</span>
+        </button>
+        <span class="function-row-remove locked-indicator" aria-label="{% translate 'Standaardfunctie kan niet worden verwijderd' %}">
+          <span class="function-symbol" aria-hidden="true">🔒︎</span>
+        </span>
+        {% else %}
+        <a class="function-row-title" href="{% url 'dossier:function_detail' item.id %}"><span>{{ item.title }}</span></a>
+        <button type="button" class="text-button function-symbol-button danger" data-delete-function data-url="{% url 'dossier:function_action' item.id %}" data-title="{{ item.title }}" aria-label="{% blocktranslate with title=item.title %}Verwijderen: {{ title }}{% endblocktranslate %}">
+          <span class="function-symbol" aria-hidden="true">🗑︎</span>
+        </button>
+        {% endif %}
+      </div>
+      {% empty %}
+      <p class="empty-state">{% if query %}{% translate "Geen functies gevonden." %}{% else %}{% translate "Er zijn nog geen functies. Maak een functie aan om te beginnen." %}{% endif %}</p>
+      {% endfor %}
+    </div>
+  </section>
+  <div class="messages function-toast-region" aria-live="polite" aria-atomic="true"></div>
+  <form class="function-csrf" hidden>{% csrf_token %}</form>
+  {{ function_strings|json_script:"function-management-strings" }}
+</main>
+<script src="{% static 'function_management.js' %}" defer></script>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+{% load static i18n %}
+{% block title %}{% translate "Nieuwe functie" %} | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell function-shell" data-function-page="type">
+  <header class="page-bar"><div><p class="eyebrow">{% translate "Functies beheer" %}</p><h1>{% translate "Nieuwe functie" %}</h1></div><div class="header-actions"><a class="back" href="{% url 'dossier:function_management' %}">← {% translate "Ga terug" %}</a></div></header>
+  <p class="function-prompt">{% translate "Wat voor functie wil je maken?" %}</p>
+  <div class="function-kind-grid">
+    <form class="editor-section function-kind-card" method="post">
+      {% csrf_token %}<input type="hidden" name="kind" value="formulier">
+      <div><h2>{% translate "Formulier" %}</h2><p>{% translate "Deze functie bestaat uit één formulier." %}</p></div>
+      <div class="kind-card-footer"><span></span><button class="primary button" type="submit">{% translate "Aanmaken" %}</button></div>
+    </form>
+    <form class="editor-section function-kind-card" method="post">
+      {% csrf_token %}<input type="hidden" name="kind" value="groep">
+      <div><h2>{% translate "Formulierengroep" %}</h2><p>{% translate "Bij deze functie kun je meerdere formulieren koppelen." %}</p></div>
+      <div class="kind-card-footer"><span></span><button class="primary button" type="submit">{% translate "Aanmaken" %}</button></div>
+    </form>
+  </div>
+</main>
+{% endblock %}
