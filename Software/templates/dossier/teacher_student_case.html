@@ -27,7 +27,7 @@
           </div>
           {% if submission.feedback %}
             <div class="feedback">
-              <strong>Eerdere feedback</strong>{{ submission.feedback|linebreaks }}
+              <strong>Eerdere feedback</strong>{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}
             </div>
           {% endif %}
           {% if submission.status == 'submitted' %}

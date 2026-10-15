@@ -27,7 +27,7 @@
           {% if selected.feedback %}
             <div class="feedback">
               <strong>Feedback docent</strong>
-              {{ selected.feedback|linebreaks }}
+              {% autoescape off %}{{ selected.feedback|linebreaks }}{% endautoescape %}
             </div>
           {% endif %}
           {% if not student_case.locked and selected.status != 'submitted' and selected.status != 'approved' %}
