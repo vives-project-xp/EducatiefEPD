@@ -713,6 +713,29 @@ def teacher_case_transition(request, case_id):
 
 
 @login_required
+@require_POST
+@transaction.atomic
+def teacher_case_delete(request, case_id):
+    if user_role(request.user) != Profile.Role.TEACHER:
+        raise PermissionDenied
+    case = get_object_or_404(
+        teacher_cases(request.user).select_for_update(), id=case_id
+    )
+    if case.status != Case.Status.ARCHIVED:
+        raise PermissionDenied
+    if case.student_cases.exists():
+        messages.error(
+            request,
+            "Deze gearchiveerde casus kan niet worden verwijderd zolang er studentendossiers aan gekoppeld zijn.",
+        )
+        return redirect("dossier:teacher_case", case_id=case.id)
+    audit(request, "case.deleted", case, title=case.title)
+    case.delete()
+    messages.success(request, "De gearchiveerde casus is verwijderd.")
+    return redirect("dossier:teacher_dashboard")
+
+
+@login_required
 def teacher_assignment(request, case_id, assignment_id=None):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)

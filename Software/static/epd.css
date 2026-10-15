@@ -71,3 +71,7 @@ button,input,textarea,select{font:inherit}.button{border:0;cursor:pointer}.outli
 .group-member-empty{color:var(--muted)}
 @media(max-width:900px){.group-detail-shell>.page-bar{flex-wrap:wrap}.group-header-actions{flex-wrap:nowrap;justify-content:flex-start}}
 @media(max-width:520px){.group-header-actions{flex-wrap:wrap}}
+.lifecycle-action-buttons{display:flex;align-items:center;gap:12px}
+.lifecycle-action-buttons form{margin:0}
+.lifecycle-action-buttons .lifecycle-delete-button{background:transparent!important}
+@media(max-width:580px){.lifecycle-action-buttons{flex-wrap:wrap}}

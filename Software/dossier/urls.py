@@ -28,6 +28,7 @@ urlpatterns = [
     path("docent/casus/<int:case_id>/dossiersjabloon/", views.teacher_case_add_dossier, name="teacher_case_add_dossier"),
     path("docent/casus/<int:case_id>/bewerken/", views.teacher_case_edit, name="teacher_case_edit"),
     path("docent/casus/<int:case_id>/status/", views.teacher_case_transition, name="teacher_case_transition"),
+    path("docent/casus/<int:case_id>/verwijderen/", views.teacher_case_delete, name="teacher_case_delete"),
     path("docent/casus/<int:case_id>/opdracht/nieuw/", views.teacher_assignment, name="teacher_assignment_create"),
     path("docent/casus/<int:case_id>/opdracht/<int:assignment_id>/", views.teacher_assignment, name="teacher_assignment_edit"),
     path("docent/casus/<int:case_id>/opdracht/<int:assignment_id>/verwijderen/", views.teacher_assignment_delete, name="teacher_assignment_delete"),

@@ -193,6 +193,48 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(self.case.status, Case.Status.ARCHIVED)
         self.assertIsNotNone(self.case.archived_at)
 
+    def test_teacher_can_delete_archived_case_without_student_dossiers(self):
+        self.client.force_login(self.teacher)
+        self.case.archive()
+        self.case.save()
+        self.assertContains(
+            self.client.get(reverse("dossier:teacher_case", args=[self.case.id])),
+            "Casus verwijderen",
+        )
+
+        response = self.client.post(
+            reverse("dossier:teacher_case_delete", args=[self.case.id])
+        )
+        self.assertRedirects(response, reverse("dossier:teacher_dashboard"))
+        self.assertFalse(Case.objects.filter(id=self.case.id).exists())
+
+    def test_only_teacher_can_delete_archived_case_and_student_data_is_preserved(self):
+        student_case, _ = start_student_case(self.case, self.student)
+        self.case.archive()
+        self.case.save()
+        delete_url = reverse("dossier:teacher_case_delete", args=[self.case.id])
+
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
+        self.client.force_login(self.student)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
+        self.client.force_login(self.teacher)
+        response = self.client.post(delete_url, follow=True)
+        self.assertRedirects(
+            response, reverse("dossier:teacher_case", args=[self.case.id])
+        )
+        self.assertContains(response, "studentendossiers aan gekoppeld")
+        self.assertTrue(Case.objects.filter(id=self.case.id).exists())
+        self.assertTrue(StudentCase.objects.filter(id=student_case.id).exists())
+
+    def test_teacher_cannot_delete_case_that_is_not_archived(self):
+        self.client.force_login(self.teacher)
+        response = self.client.post(
+            reverse("dossier:teacher_case_delete", args=[self.case.id])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Case.objects.filter(id=self.case.id).exists())
+
     def test_teacher_can_review_student_assignment(self):
         self.case.publish()
         self.case.save()
