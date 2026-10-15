@@ -503,6 +503,7 @@ class EpdWorkflowTests(TestCase):
         page = self.client.get(reverse("dossier:library_list"))
         self.assertContains(page, "Dossier een")
         self.assertContains(page, "Dossier twee")
+        self.assertNotContains(page, "Open om de modules te bekijken")
         self.assertEqual(
             [item.title for item in page.context["dossiers"]],
             ["Dossier twee", "Dossier een"],
@@ -527,7 +528,25 @@ class EpdWorkflowTests(TestCase):
         self.client.force_login(self.teacher)
         dashboard = self.client.get(reverse("dossier:library_list"))
         self.assertNotContains(dashboard, "Bibliotheekonderdelen")
-        self.assertNotContains(dashboard, "Onderdeel toevoegen")
+        self.assertContains(dashboard, "Beschikbare onderdelen beheren")
+        self.assertContains(
+            dashboard, '<details class="library-component-management-details">',
+            html=True,
+        )
+        self.assertNotContains(
+            dashboard,
+            '<details class="library-component-management-details" open>',
+            html=True,
+        )
+        anamnese = LibraryTemplate.objects.get(title="Anamnese")
+        self.assertContains(dashboard, anamnese.title)
+        self.assertContains(
+            dashboard, reverse("dossier:library_detail", args=[anamnese.id])
+        )
+        self.assertContains(
+            dashboard, reverse("dossier:library_archive", args=[anamnese.id])
+        )
+        self.assertContains(dashboard, "Onderdeel toevoegen")
 
         for title in ("Anamnese", "Klinisch redeneerplan"):
             template = LibraryTemplate.objects.get(

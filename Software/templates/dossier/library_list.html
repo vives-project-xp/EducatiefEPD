@@ -37,7 +37,7 @@
             <span class="eyebrow">{{ dossier.education|default:'Alle opleidingen' }} · {{ dossier.module_entries.all|length }} modules</span>
             <h2>{{ dossier.title }}</h2>
             <p>{{ dossier.description }}</p>
-            <span class="dossier-expand-hint">Open om de modules te bekijken</span>
+            <span class="library-card-meta"><span>{{ dossier.education|default:'Alle opleidingen' }}</span><span>Dossiersjabloon</span></span>
           </summary>
           <div class="dossier-module-list">
             {% for entry in dossier.module_entries.all %}
@@ -51,7 +51,6 @@
             {% endfor %}
           </div>
         </details>
-        <footer><span>{{ dossier.education|default:'Alle opleidingen' }}</span><span>Dossiersjabloon</span></footer>
         <div class="row-actions library-card-actions">
           <a href="{% url 'dossier:library_dossier_edit' dossier.id %}">Bewerk</a>
           <form method="post" action="{% url 'dossier:library_dossier_copy' dossier.id %}">
@@ -68,6 +67,39 @@
       <p class="empty-state">Er zijn nog geen dossiersjablonen.</p>
       {% endfor %}
     </div>
+  </section>
+  <section class="editor-section library-component-management">
+    <details class="library-component-management-details">
+      <summary>
+        <span><span class="eyebrow">Bibliotheekbeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
+        <span class="library-toggle-arrow" aria-hidden="true">↓</span>
+      </summary>
+      <div class="section-heading">
+        <p>Wijzig een onderdeel of verwijder het uit de beschikbare lijst. Bestaande casuskopieën blijven behouden.</p>
+        <a class="outline inline-action" href="{% url 'dossier:library_create' %}">Onderdeel toevoegen</a>
+      </div>
+      <div class="library-grid">
+        {% for item in available_templates %}
+        <article class="library-card">
+          <div class="library-card-content">
+            <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · standaard{% endif %}</span>
+            <h2>{{ item.title }}</h2>
+            <p>{{ item.description }}</p>
+          </div>
+          <footer><span>{{ item.education|default:'Alle opleidingen' }}</span><span>{{ item.theme }}</span></footer>
+          <div class="row-actions library-card-actions">
+            <a href="{% url 'dossier:library_detail' item.id %}">Bewerk</a>
+            <form method="post" action="{% url 'dossier:library_archive' item.id %}" onsubmit="return confirm('Dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
+              {% csrf_token %}
+              <button class="text-button danger" type="submit" aria-label="{{ item.title }} verwijderen">Verwijderen</button>
+            </form>
+          </div>
+        </article>
+        {% empty %}
+        <p class="empty-state">Er zijn geen actieve onderdelen.</p>
+        {% endfor %}
+      </div>
+    </details>
   </section>
 </main>
 {% endblock %}
