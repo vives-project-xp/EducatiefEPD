@@ -4,8 +4,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+import json
 
 from django.core.exceptions import PermissionDenied
+from .matrix import empty_values, validate_values
 
 
 def valid_observation(value):
@@ -39,6 +41,15 @@ def validate_module_data(schema, data, *, require_complete=False):
             else:
                 has_value = bool(value)
         elif field_type == "matrix":
+            if field.get("matrix_definition"):
+                _, matrix_errors, has_value = validate_values(
+                    field["matrix_definition"], data.get(key, empty_values()), complete=require_complete,
+                )
+                if require_complete and field.get("required") and not has_value:
+                    matrix_errors.append("Vul minstens één bewerkbare cel in.")
+                if matrix_errors:
+                    errors[key] = matrix_errors
+                continue
             value = data.get(key, {})
             if not isinstance(value, dict):
                 error = "De matrix bevat ongeldige gegevens."
@@ -90,7 +101,7 @@ class ModuleFormResult:
     added_observations: list
 
 
-def parse_module_form(post, schema, current_data):
+def parse_module_form(post, schema, current_data, *, edit_readonly=False):
     """Prepare one all-or-nothing draft save, including pending observations.
 
     Raw form values remain separate from normalized storage values so an invalid
@@ -124,6 +135,20 @@ def parse_module_form(post, schema, current_data):
                     added.append(key)
             continue
         if field_type == "matrix":
+            if field.get("matrix_definition"):
+                stored = current_data.get(key, empty_values())
+                raw = post.get(f"matrix_{key}")
+                try:
+                    values = json.loads(raw) if raw is not None else deepcopy(stored)
+                except (ValueError, TypeError, RecursionError):
+                    pending_errors[key] = ["De matrixinvoer is ongeldig of te groot. Kopieer uw invoer en herlaad de pagina."]
+                    continue
+                normalized, matrix_errors, _ = validate_values(field["matrix_definition"], values, current=None if edit_readonly else stored)
+                display_data[key] = values
+                data[key] = normalized
+                if matrix_errors:
+                    pending_errors[key] = matrix_errors
+                continue
             stored = current_data.get(key, {})
             stored = stored if isinstance(stored, dict) else {}
             raw = {

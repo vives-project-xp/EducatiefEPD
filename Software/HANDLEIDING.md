@@ -122,7 +122,7 @@ student heeft een afzonderlijk dossier.
   Corrigeer de fout en bewaar opnieuw.
 - **Volledig dossier indienen** controleert alle opgeslagen dossieronderdelen en
   opdrachten. Verplichte tekst-/keuzevelden moeten ingevuld zijn, een verplichte
-  matrix heeft minstens één ingevulde cel en een verplicht observatieveld minstens
+  matrix heeft minstens één ingevulde antwoordcel en een verplicht observatieveld minstens
   één geldige observatie. Bij fouten opent het eerste betrokken onderdeel.
 - Bewaar wijzigingen voordat je naar een ander onderdeel navigeert of het volledige
   dossier indient. De indienknop controleert de opgeslagen persoonlijke kopie.
@@ -130,6 +130,75 @@ student heeft een afzonderlijk dossier.
 Dezelfde bewaarknoppen en foutafhandeling gelden voor het **docentbasisdossier**.
 Een docent mag dat gedeeltelijk voorinvullen; reeds gestarte studentkopieën veranderen
 daardoor niet.
+
+## Een flexibele matrix maken
+
+1. Open een bibliotheekonderdeel, voeg een veld toe en kies **Matrix**. Er verschijnt
+   direct een raster van zes rijen en vier kolommen. Je hoeft geen rijenlijst te typen.
+2. Klik een cel aan en kies rechts **Celtype**. Iedere cel mag een eigen type hebben:
+   tekst, lange tekst, getal, datum, tijd, datum/tijd, ja/nee, selectievakje, keuzelijst,
+   meerdere keuzes of vaste tekst. **Vaste tekst** is bijvoorbeeld een kop of instructie;
+   studenten kunnen die niet overschrijven.
+3. Dubbelklik, typ of druk Enter om de cel te bewerken. In ontwerpmodus is invoer in
+   een antwoordcel een **standaardantwoord**. Laat dit leeg als de student zelf moet
+   invullen. Stel eventueel verplichte invoer, alleen-lezen, keuzes, grenzen of hulptekst in.
+4. Selecteer meerdere cellen met Shift+klik, Shift+pijlen of slepen om het type of de
+   opmaak tegelijk aan te passen. Kopknoppen selecteren een hele rij of kolom. De
+   instellingen tonen de actieve cel; elke aangepaste instelling geldt voor de selectie.
+5. Gebruik **Rij bewerken** en **Kolom bewerken** om bij de actieve cel in te voegen,
+   te dupliceren, te verplaatsen of te verwijderen. Rechts kun je de rij-/kolomkop
+   en hoogte/breedte aanpassen. Verplaatsen houdt antwoorden bij dezelfde cel.
+6. Probeer **Studentvoorbeeld**. Voorbeeldantwoorden zijn tijdelijk. Ga terug naar
+   het ontwerp en kies **Bewaren** om de indeling en standaardantwoorden op te slaan.
+
+Vet, cursief, tekstkleur, achtergrond, uitlijning, tekstterugloop en randen zijn per
+cel of selectie instelbaar. Getallen ondersteunen eenheden en weergave als decimalen,
+percentage of valuta. Weergaveafronding verandert het opgeslagen getal niet.
+Bij percentage betekent invoer `12,5` de waarde `12,5%`; er is geen automatische
+vermenigvuldiging met honderd. Zowel een decimale komma als punt is toegestaan,
+zonder duizendtalscheiding. Datum/tijd is lokale kloktijd, zonder tijdzoneconversie.
+
+### Kopiëren, plakken en corrigeren
+
+- Selecteer een bereik en gebruik Ctrl/Cmd+C of V om waarden met Excel uit te
+  wisselen. Voorloopnullen in tekstcellen en tekst met meerdere regels blijven behouden.
+  Bij meerdere keuzes scheid je opties met een puntkomma; bij ja/nee gebruik je
+  `ja`/`nee`, `true`/`false` of `1`/`0`. Excel moet datums als `JJJJ-MM-DD` leveren
+  en tijden als `UU:MM`; niet-herkende datumweergaven worden gemeld.
+- Plakken past alleen binnen bestaande rijen/kolommen. Voeg zo nodig eerst ruimte
+  toe. Bij een ongeldige of beschermde cel wordt niets gedeeltelijk geplakt.
+  Formules blijven tekst en worden niet uitgevoerd; Excel-opmaak wordt niet geïmporteerd.
+- Enter bewerkt/bevestigt een cel; Tab gaat verder; Escape annuleert celinvoer.
+  In lange tekst voegt Enter een nieuwe regel toe en bevestigt Ctrl/Cmd+Enter de cel.
+  Pijlen navigeren buiten celbewerking. Delete wist de geselecteerde inhoud.
+- **Ongedaan maken** / **Opnieuw** bewaren maximaal 40 lokale toestanden. De
+  geschiedenis vervalt na bewaren/herladen. Bij onbewaarde wijzigingen waarschuwt
+  de browser vóór vertrek. Dit is geen automatisch opslaan.
+
+Een matrix is begrensd tot 100 rijen, 40 kolommen en 2.000 cellen. Een cel bevat
+maximaal 10.000 tekens; de gehele indeling of antwoordset maximaal ongeveer 500 kB.
+Samenvoegen, herhaalbare secties, volledige werkmapimport en uploads zijn vervolgstappen.
+
+### Voorinvulling, studenten en bestaande matrices
+
+Voeg het bibliotheekonderdeel toe aan een casus en vul desgewenst het **basisdossier**
+in. Daar kan de docent ook antwoordcellen voorinvullen die alleen-lezen zijn voor
+studenten. Vaste tekst wijzig je in het ontwerp. Bestaande rechten blijven gelden:
+docenten beheren bibliotheekvelden; alleen een EPD-beheerder wijzigt de structuur
+van een casuskopie.
+
+Studenten vullen hetzelfde raster in. Concepten mogen onvolledig zijn. Bij volledig
+indienen worden ook afzonderlijk verplichte cellen gecontroleerd; `0` en `Nee` zijn
+geldige antwoorden. Vaste tekst en alleen-lezen voorinvulling tellen niet als
+antwoord voor de algemene instelling **Verplicht**. Een fout noemt rij en kolom;
+ingevoerde waarden blijven zichtbaar. De docent ziet bij beoordeling hetzelfde raster.
+
+Oude matrices blijven bruikbaar. Pas wanneer je een bronveld in de nieuwe ontwerper
+bewaart, wordt het omgezet. Bestaande casusvoorinvulling wordt daarbij meegenomen;
+een wijziging die ingevulde cellen zou verwijderen wordt geweigerd. Maak die waarden
+eerst bewust leeg in het basisdossier. Reeds gestarte studenten houden altijd hun
+eigen indeling. Als iemand hetzelfde bronveld intussen heeft aangepast, moet je je
+invoer apart bewaren en herladen; een verouderde editor overschrijft geen nieuwere versie.
 
 ## Problemen met aanmelden
 

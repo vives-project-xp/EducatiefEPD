@@ -19,9 +19,13 @@
         {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
       </select>
     {% elif field.type == 'matrix' %}
+      {% if field.matrix_payload %}
+        {% include 'dossier/_matrix.html' %}
+      {% else %}
       <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>
         {% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td><input name="{{ cell.name }}" value="{{ cell.value }}" aria-label="{{ field.label }}: {{ row.label }}, {{ cell.column }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}></td>{% endfor %}</tr>{% endfor %}
       </tbody></table></div>
+      {% endif %}
     {% elif field.type == 'observation' %}
       <div class="observation-list">
         {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}

@@ -190,6 +190,7 @@ def create_case_structure(case):
                         field_type=field.field_type, help_text=field.help_text,
                         required=field.required, position=field.position,
                         options=field.options, rows=field.rows, columns=field.columns,
+                        matrix_definition=deepcopy(field.matrix_definition),
                     )
                     for field in template.fields.all()
                 ])
@@ -260,6 +261,7 @@ def copy_template_to_case(template, case):
             field_type=field.field_type, help_text=field.help_text,
             required=field.required, position=field.position,
             options=field.options, rows=field.rows, columns=field.columns,
+            matrix_definition=deepcopy(field.matrix_definition),
         )
         for field in template.fields.all()
     ])

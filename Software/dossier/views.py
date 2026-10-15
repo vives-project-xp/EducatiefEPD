@@ -219,7 +219,7 @@ def case_detail(request, case_id):
     })
 
 
-def prepare_schema_fields(schema, data, *, errors=None, pending_observations=None):
+def prepare_schema_fields(schema, data, *, errors=None, pending_observations=None, edit_readonly=False):
     prepared = []
     for field in schema:
         item = dict(field)
@@ -233,6 +233,27 @@ def prepare_schema_fields(schema, data, *, errors=None, pending_observations=Non
         item["invalid_typed_value"] = bool(item["errors"] and value and item["type"] in {"number", "date", "datetime"})
         item["invalid_choice"] = bool(item["type"] == "select" and value and value not in item.get("options", []))
         if item["type"] == "matrix":
+            if item.get("matrix_definition"):
+                from .matrix import cell_spec, empty_values, value_for
+                item["matrix_payload"] = {
+                    "definition": item["matrix_definition"],
+                    "values": data.get(key, empty_values()),
+                    "label": item["label"],
+                    "errors": item["errors"],
+                    "editReadonly": edit_readonly,
+                }
+                item["matrix_display_rows"] = []
+                for row in item["matrix_definition"]["rows"]:
+                    display_cells = []
+                    for column in item["matrix_definition"]["columns"]:
+                        spec = cell_spec(item["matrix_definition"], row["id"], column["id"])
+                        cell = spec.get("text", "") if spec.get("type") == "label" else value_for(data.get(key, empty_values()), spec, row["id"], column["id"])
+                        if type(cell) is bool:
+                            cell = "Ja" if cell else "Nee"
+                        elif isinstance(cell, list):
+                            cell = "; ".join(str(entry) for entry in cell)
+                        display_cells.append(cell)
+                    item["matrix_display_rows"].append({"label": row["label"], "cells": display_cells})
             matrix_values = value if isinstance(value, dict) else {}
             item["prepared_rows"] = [
                 {
@@ -664,7 +685,7 @@ def teacher_module(request, case_id, module_id):
     schema = module_schema(module)
     form_result = None
     if request.method == "POST":
-        form_result = parse_module_form(request.POST, schema, module.base_data)
+        form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
         if form_result.errors:
             messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         else:
@@ -676,7 +697,7 @@ def teacher_module(request, case_id, module_id):
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
         "fields": prepare_schema_fields(
-            schema, form_result.display_data if form_result else module.base_data,
+            schema, form_result.display_data if form_result else module.base_data, edit_readonly=True,
             errors=form_result.errors if form_result else None,
             pending_observations=form_result.pending_observations if form_result else None,
         ),
@@ -684,22 +705,27 @@ def teacher_module(request, case_id, module_id):
 
 
 @login_required
+@transaction.atomic
 def teacher_module_field(request, case_id, module_id, field_id=None):
     require_teacher(request.user)
     if not is_admin(request.user):
         raise PermissionDenied
     case = editable_case(request.user, case_id)
-    module = get_object_or_404(case.modules, id=module_id)
+    modules = case.modules.select_for_update() if request.method == "POST" else case.modules.all()
+    module = get_object_or_404(modules, id=module_id)
     field = get_object_or_404(module.fields, id=field_id) if field_id else None
     form = ModuleFieldForm(request.POST or None, instance=field, parent=module)
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         item.module = module
         item.save()
+        if form.converted_base is not None:
+            module.base_data = {**module.base_data, item.key: form.converted_base}
+            module.save(update_fields=["base_data"])
         audit(request, "module_field.updated" if field else "module_field.created", item)
         messages.success(request, "Veld bewaard.")
         return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
-    return render(request, "dossier/teacher_item_form.html", {
+    return render(request, "dossier/field_editor.html", {
         "form": form, "case": case, "module": module,
         "title": "Veld aanpassen" if field else "Veld toevoegen",
     })
@@ -730,10 +756,7 @@ def teacher_student_case(request, student_case_id):
     )
     editable_case(request.user, student_case.case_id)
     for module in student_case.module_responses.all():
-        module.display_values = [
-            {"label": field["label"], "value": module.data.get(field["key"], "")}
-            for field in module.schema
-        ]
+        module.display_values = prepare_schema_fields(module.schema, module.data)
     return render(request, "dossier/teacher_student_case.html", {
         "student_case": student_case, "review_form": ReviewForm(),
     })
@@ -839,7 +862,7 @@ def library_field(request, template_id, field_id=None):
         audit(request, "library_field.updated" if field else "library_field.created", item)
         messages.success(request, "Templateveld bewaard.")
         return redirect("dossier:library_detail", template_id=template.id)
-    return render(request, "dossier/teacher_item_form.html", {
+    return render(request, "dossier/field_editor.html", {
         "form": form, "title": "Templateveld aanpassen" if field else "Templateveld toevoegen",
         "library_item": template,
     })
