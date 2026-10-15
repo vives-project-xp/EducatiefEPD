@@ -363,6 +363,42 @@ class EpdWorkflowTests(TestCase):
         )
         self.assertTrue(Education.objects.filter(slug="zorgkunde").exists())
 
+    def test_admin_can_edit_and_delete_unused_education(self):
+        self.client.force_login(self.admin)
+        education = Education.objects.create(name="Testopleiding", slug="testopleiding")
+
+        edit_url = reverse("dossier:education_edit", args=[education.id])
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste opleiding",
+            "slug": "aangepaste-opleiding",
+        })
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        education.refresh_from_db()
+        self.assertEqual(education.name, "Aangepaste opleiding")
+
+        list_page = self.client.get(reverse("dossier:education_list"))
+        self.assertContains(list_page, "Aangepaste opleiding")
+        self.assertContains(
+            list_page,
+            reverse("dossier:education_delete", args=[education.id]),
+        )
+        response = self.client.post(
+            reverse("dossier:education_delete", args=[education.id])
+        )
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        self.assertFalse(Education.objects.filter(id=education.id).exists())
+
+    def test_education_delete_requires_admin_and_preserves_linked_education(self):
+        url = reverse("dossier:education_delete", args=[self.education.id])
+
+        self.client.force_login(self.teacher)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.admin)
+        response = self.client.post(url, follow=True)
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        self.assertContains(response, "kan niet worden verwijderd", status_code=200)
+        self.assertTrue(Education.objects.filter(id=self.education.id).exists())
+
     def test_teacher_can_edit_fixed_library_template_without_teaching_group(self):
         self.group.delete()
         self.client.login(username="teacher", password="testpass")

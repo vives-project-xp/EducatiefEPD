@@ -13,6 +13,7 @@ urlpatterns = [
     path("beheer/opleidingen/", views.education_list, name="education_list"),
     path("beheer/opleidingen/nieuw/", views.education_edit, name="education_create"),
     path("beheer/opleidingen/<int:education_id>/", views.education_edit, name="education_edit"),
+    path("beheer/opleidingen/<int:education_id>/verwijderen/", views.education_delete, name="education_delete"),
     path("docent/groepen/", views.group_list, name="group_list"),
     path("docent/groepen/nieuw/", views.group_edit, name="group_create"),
     path("docent/groepen/<int:group_id>/", views.group_detail, name="group_detail"),

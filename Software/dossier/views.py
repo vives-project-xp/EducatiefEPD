@@ -505,6 +505,30 @@ def education_edit(request, education_id=None):
 
 
 @login_required
+@require_POST
+def education_delete(request, education_id):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    education = get_object_or_404(Education, id=education_id)
+    if (
+        education.groups.exists()
+        or education.cases.exists()
+        or education.templates.exists()
+        or education.library_dossiers.exists()
+    ):
+        messages.error(
+            request,
+            "Deze opleiding kan niet worden verwijderd zolang er lesgroepen, casussen "
+            "of bibliotheekitems aan gekoppeld zijn.",
+        )
+        return redirect("dossier:education_list")
+    audit(request, "education.deleted", education, name=education.name)
+    education.delete()
+    messages.success(request, "De opleiding is verwijderd.")
+    return redirect("dossier:education_list")
+
+
+@login_required
 def group_list(request):
     require_teacher(request.user)
     groups = TeachingGroup.objects.select_related("education", "teacher").prefetch_related("members")

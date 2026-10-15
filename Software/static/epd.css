@@ -50,6 +50,11 @@ button,input,textarea,select{font:inherit}.button{border:0;cursor:pointer}.outli
 .library-component-management-details .section-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:16px 0}
 .library-component-management-details .section-heading p{margin:0;color:var(--muted)}
 .library-component-management-details .section-heading .inline-action{flex:0 0 auto;margin:0}
+.education-row{align-items:center}
+.education-row>a{display:flex;flex-direction:column;gap:6px;color:var(--ink);text-decoration:none}
+.education-row>a:hover strong{color:var(--blue)}
+.education-row form{margin:0}
+.education-row .button{white-space:nowrap}
 .group-detail-shell{max-width:1080px}
 .group-header-actions{flex-wrap:nowrap;justify-content:flex-end}
 .group-header-actions form{margin:0;flex:0 0 auto}
