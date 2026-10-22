@@ -79,6 +79,7 @@ EducatiefEPD/
 | <img src="https://github.com/EwoudBoutje.png" width="64" alt="Ewoud Bouttelisier"> | Ewoud Bouttelisier | Ontwikkelaar |
 | <img src="https://github.com/Mathiss-Rambour.png" width="64" alt="Mathiss Rambour"> | Mathiss Rambour | Ontwikkelaar |
 | <img src="https://github.com/bhavninderpalsingh-tech.png" width="64" alt="Bhavninder Pal Singh"> | Bhavninder Pal Singh | Ontwikkelaar |
+| <img src="https://github.com/simonheja.png" width="64" alt="Simon Moyaert"> | Simon Moyaert | Ontwikkelaar |
 
 
 <img src="./media/Poster P.E. Educatief EPD.png">

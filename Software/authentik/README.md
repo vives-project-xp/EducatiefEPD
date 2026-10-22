@@ -28,6 +28,23 @@ gebruikt een invalidation flow die ook de Authentik-sessie beëindigt. Beheerder
 groepen en accounts daarna in de Authentik-beheerinterface op `http://localhost:9000/`
 aanpassen. De standaard profile scope bevat de groepsnamen in de `groups`-claim.
 
+## Nieuwe gebruikers en EPD-rollen beheren
+
+Voor dagelijkse gebruikers gebruik je de Authentik-beheerinterface, niet het
+testaccount-bootstrapcommando. Maak een gebruiker aan onder **Directory > Users**
+en voeg die via de **Groups**-tab toe aan `epd-studenten` of `epd-docenten`.
+De huidige EPD-koppeling leest deze groepsnamen uit de OIDC-`groups`-claim:
+studenten openen `/`, docenten openen `/docent/`.
+
+Na de eerste geslaagde login bestaat het account automatisch in het EPD.
+Studenten hebben vervolgens een EPD-lesgroep en casustoewijzing nodig om dossiers
+te zien. Een rolwissel gaat in na afmelden en opnieuw aanmelden.
+
+De volledige stappen voor accountaanmaak, wachtwoord, groepskeuze en rolwissels
+staan in [de handleiding](../HANDLEIDING.md#nieuwe-gebruikers-en-rollen-via-authentik).
+De **Roles**-tab voor Authentiks eigen beheerrechten is een andere instelling dan
+de EPD-groepen die deze koppeling gebruikt.
+
 ## EPD verbinden op Windows met Docker Desktop
 
 Vul `Software/.env` aan en gebruik het client secret uit `authentik/.env`. De browser gebruikt

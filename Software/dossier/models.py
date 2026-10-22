@@ -181,6 +181,7 @@ class LibraryTemplate(models.Model):
     instructions = models.TextField(blank=True)
     version = models.PositiveIntegerField(default=1)
     seed_key = models.SlugField(max_length=80, unique=True, null=True, blank=True, editable=False)
+    functions = models.JSONField(default=list, blank=True)
     is_fixed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(
@@ -245,6 +246,52 @@ class LibraryDossierModule(models.Model):
                 fields=["dossier", "template"], name="unique_dossier_library_template"
             )
         ]
+class ManagedForm(models.Model):
+    function = models.ForeignKey(
+        FunctionDefinition, on_delete=models.CASCADE, related_name="forms"
+    )
+    title = models.CharField(max_length=180, blank=True)
+    position = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["position", "id"]
+
+    def __str__(self):
+        return self.title or "Naamloos formulier"
+
+
+class ManagedQuestion(models.Model):
+    class FieldType(models.TextChoices):
+        IMAGE = "image", "Afbeelding weergeven"
+        LINK = "link", "Hyperlink"
+        INFO = "info", "Toelichting"
+        IMAGE_UPLOAD = "imageUpload", "Afbeelding uploaden"
+        FILE_UPLOAD = "fileUpload", "Bestand uploaden"
+        DATE = "date", "Datum"
+        DATETIME = "dateTime", "Datum en tijd"
+        NUMBER = "number", "Getal"
+        MATRIX = "matrix", "Matrix (maximaal 2)"
+        MULTIPLE_CHOICE = "multipleChoice", "Meerkeuze"
+        TEXT = "text", "Tekst"
+        TIME = "time", "Tijd"
+
+    form = models.ForeignKey(ManagedForm, on_delete=models.CASCADE, related_name="questions")
+    position = models.PositiveIntegerField(default=0)
+    field_type = models.CharField(max_length=24, choices=FieldType.choices, default=FieldType.TEXT)
+    question = models.CharField(max_length=500, blank=True)
+    unit = models.CharField(max_length=120, blank=True)
+    required = models.BooleanField(default=False)
+    options = models.JSONField(default=list, blank=True)
+    columns = models.JSONField(default=list, blank=True)
+    rows = models.JSONField(default=list, blank=True)
+    url = models.URLField(max_length=1000, blank=True)
+    button_text = models.CharField(max_length=180, blank=True)
+    image = models.TextField(blank=True)
+    caption = models.CharField(max_length=280, blank=True)
+    explanation = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["position", "id"]
 
 
 class Module(models.Model):

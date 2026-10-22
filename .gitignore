@@ -3,3 +3,5 @@ backups/
 __pycache__/
 *.pyc
 plan.md
+AGENTS.md
+MEMORY.md
