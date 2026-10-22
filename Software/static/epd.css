@@ -293,6 +293,14 @@ body {
   color: var(--ink);
 }
 
+.dossier-content-grid .dynamic-field > label {
+  line-height: 1.35;
+}
+
+.dossier-content-grid .dynamic-field textarea.js-tinymce {
+  min-height: 160px;
+}
+
 .assignment-content {
   font-size: 1.1rem;
   line-height: 1.55;
@@ -583,6 +591,7 @@ body {
   line-height: 1.35;
   padding: 15px 25px;
   border-radius: 4px;
+  min-height: 44px;
 }
 
 .nav-toggle {
@@ -603,16 +612,24 @@ body {
   font-weight: 400;
 }
 
+.nav-toggle[aria-expanded="true"] b {
+  transform: rotate(180deg);
+}
+
 .nav-subitems {
-  margin: -5px 10px 10px 25px;
+  margin: -4px 10px 12px 25px;
+  padding: 4px 0 4px 10px;
   border-left: 1px solid currentColor;
+  opacity: .82;
 }
 
 .nav-subitem {
   display: block;
   color: inherit;
   text-decoration: none;
-  padding: 7px 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
   font-size: .92rem;
 }
@@ -621,6 +638,15 @@ body {
 .nav-subitem:hover {
   background: var(--blue-dark);
   border-radius: 4px;
+  opacity: 1;
+}
+
+.nav-item:focus-visible,
+.nav-subitem:focus-visible,
+.back:focus-visible,
+.form-navigation-item:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
 }
 
 .printer {
@@ -674,6 +700,15 @@ body {
   align-items: start;
 }
 
+.dossier-content-grid > .module-form {
+  min-width: 0;
+  margin-top: 0;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
 .form-navigation {
   align-self: start;
   padding: 20px 16px;
@@ -720,6 +755,35 @@ body {
 
 .function-form[hidden] {
   display: none !important;
+}
+
+.function-snapshot-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.function-snapshot-card + .function-snapshot-card {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.function-snapshot-card .work-title {
+  margin-bottom: 8px;
+}
+
+.function-snapshot-card .work-title h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.function-snapshot-card .function-form {
+  min-width: 0;
+}
+
+.function-snapshot-card .function-form .dynamic-field:last-child {
+  border-bottom: 0;
 }
 
 .work-title {
@@ -942,6 +1006,9 @@ select {
 }
 
 .matrix-wrap {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 5px;
   overflow: auto;
 }
 
@@ -954,12 +1021,30 @@ select {
 .matrix-wrap th,
 .matrix-wrap td {
   border: 1px solid var(--line);
-  padding: 9px;
+  padding: 11px 12px;
   text-align: left;
+}
+
+.matrix-wrap th {
+  background: var(--surface-selected);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .matrix-wrap input {
   min-width: 130px;
+}
+
+.dossier-content-grid > .module-form > .primary.button {
+  justify-self: start;
+  margin-top: 20px;
+}
+
+.dossier-content-grid > .module-form > .empty-state,
+.function-snapshot-card > .empty-state,
+.function-snapshot-card .function-form > .empty-state {
+  margin: 0;
+  padding: 24px 0;
 }
 
 .login-shell {
@@ -2268,7 +2353,7 @@ summary {
 .dynamic-field {
   display: grid;
   gap: 7px;
-  padding: 17px 0;
+  padding: 20px 0;
   border-bottom: 1px solid var(--line);
 }
 
