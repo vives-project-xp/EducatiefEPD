@@ -9,10 +9,15 @@ from django.db import connection, transaction
 from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
-from datetime import date, datetime
+import base64
+import binascii
+import json
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
 
 from .forms import (
     AssignmentForm,
@@ -33,11 +38,14 @@ from .models import (
     Case,
     Education,
     FieldDefinition,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
     Module,
     ModuleField,
     ModuleResponse,
+    ManagedForm,
+    ManagedQuestion,
     Profile,
     StudentCase,
     TeachingGroup,
@@ -841,8 +849,335 @@ def library_list(request):
     return render(request, "dossier/library_list.html", {
         "templates": templates, "query": query, "category_filter": category,
         "education_filter": education, "theme_filter": theme,
-        "categories": LibraryTemplate.Category.choices,
+        "categories": LibraryTemplate.Category.choices, "is_admin": is_admin(request.user),
     })
+
+
+def purge_expired_functions():
+    cutoff = timezone.now() - timedelta(days=30)
+    FunctionDefinition.objects.filter(
+        deleted_at__lt=cutoff, std=False
+    ).delete()
+
+
+@login_required
+def function_management(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    query = request.GET.get("q", "").strip()
+    sort = request.GET.get("sort", "az")
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=True)
+    if query:
+        functions = functions.filter(title__icontains=query)
+    if sort == "za":
+        functions = functions.order_by("-title", "-id")
+    elif sort == "oldest":
+        functions = functions.order_by("created_at", "id")
+    else:
+        sort = "az"
+        functions = functions.order_by("title", "id")
+    return render(request, "dossier/function_management.html", {
+        "functions": functions,
+        "query": query,
+        "sort": sort,
+        "deleted_count": FunctionDefinition.objects.filter(
+            deleted_at__isnull=False, std=False
+        ).count(),
+    })
+
+
+@login_required
+def function_type(request):
+    require_teacher(request.user)
+    if request.method == "POST":
+        kind = request.POST.get("kind")
+        if kind not in FunctionDefinition.Kind.values:
+            raise Http404
+        return redirect(f"{reverse('dossier:function_general')}?kind={kind}")
+    return render(request, "dossier/function_type.html")
+
+
+@login_required
+def function_general(request):
+    require_teacher(request.user)
+    kind = request.GET.get("kind", request.POST.get("kind", ""))
+    if kind not in FunctionDefinition.Kind.values:
+        return redirect("dossier:function_type")
+    error = ""
+    title = ""
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()
+        if not title:
+            error = "Geef de functie een naam."
+        elif len(title) > 180:
+            error = "De naam mag maximaal 180 tekens bevatten."
+        else:
+            with transaction.atomic():
+                function = FunctionDefinition.objects.create(title=title, kind=kind)
+                if kind == FunctionDefinition.Kind.FORM:
+                    ManagedForm.objects.create(function=function, title=title)
+                audit(request, "function.created", function, kind=kind)
+            return redirect("dossier:function_detail", function_id=function.id)
+    return render(request, "dossier/function_general.html", {
+        "kind": kind, "title": title, "error": error,
+    })
+
+
+def managed_function_payload(function):
+    return {
+        "id": function.id,
+        "title": function.title,
+        "kind": function.kind,
+        "locked": function.locked,
+        "std": function.std,
+        "forms": [{
+            "id": form.id,
+            "title": form.title,
+            "position": form.position,
+            "questions": [{
+                "id": question.id,
+                "fieldType": question.field_type,
+                "question": question.question,
+                "unit": question.unit,
+                "required": question.required,
+                "options": question.options,
+                "columns": question.columns,
+                "rows": question.rows,
+                "url": question.url,
+                "buttonText": question.button_text,
+                "image": question.image,
+                "caption": question.caption,
+                "explanation": question.explanation,
+            } for question in form.questions.all()],
+        } for form in function.forms.all()],
+    }
+
+
+@login_required
+def function_detail(request, function_id):
+    require_teacher(request.user)
+    function = get_object_or_404(
+        FunctionDefinition.objects.prefetch_related("forms__questions"),
+        id=function_id, deleted_at__isnull=True,
+    )
+    if function.std:
+        raise PermissionDenied
+    return render(request, "dossier/function_editor.html", {
+        "function": function,
+        "function_data": managed_function_payload(function),
+        "field_types": ManagedQuestion.FieldType.choices,
+    })
+
+
+def function_api_error(message, status=400, warning=False):
+    return JsonResponse({"ok": False, "message": message, "warning": warning}, status=status)
+
+
+def clean_string_list(value, max_length=500):
+    if not isinstance(value, list):
+        raise ValueError("Ongeldige lijst met antwoorden.")
+    result = []
+    for item in value:
+        if not isinstance(item, str) or len(item) > max_length:
+            raise ValueError("Een antwoord is ongeldig of te lang.")
+        result.append(item.strip())
+    return result
+
+
+def validate_function_image(value):
+    if not value:
+        return ""
+    if not isinstance(value, str) or len(value) > 420_000:
+        raise ValueError("De afbeelding mag maximaal 300 kB groot zijn.")
+    if not value.startswith(("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/gif;base64,", "data:image/webp;base64,")):
+        raise ValueError("Kies een geldig afbeeldingsbestand.")
+    try:
+        decoded = base64.b64decode(value.split(",", 1)[1], validate=True)
+    except (binascii.Error, ValueError, IndexError):
+        raise ValueError("Kies een geldig afbeeldingsbestand.") from None
+    if len(decoded) > 300_000:
+        raise ValueError("De afbeelding mag maximaal 300 kB groot zijn.")
+    mime_type = value.split(";", 1)[0][5:]
+    valid_signature = {
+        "image/png": decoded.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": decoded.startswith(b"\xff\xd8\xff"),
+        "image/gif": decoded.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": decoded.startswith(b"RIFF") and decoded[8:12] == b"WEBP",
+    }
+    if not valid_signature.get(mime_type, False):
+        raise ValueError("Kies een geldig afbeeldingsbestand.")
+    return value
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_action(request, function_id):
+    require_teacher(request.user)
+    function = get_object_or_404(
+        FunctionDefinition.objects.select_for_update(), id=function_id, deleted_at__isnull=True
+    )
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action") if isinstance(payload, dict) else None
+    if function.std:
+        return function_api_error("Standaardfuncties mogen niet worden bewerkt.", 403, warning=True)
+
+    if action == "toggle_lock":
+        function.locked = not function.locked
+        function.save(update_fields=["locked"])
+        message = "Functie vergrendeld" if function.locked else "Functie ontgrendeld"
+        return JsonResponse({"ok": True, "locked": function.locked, "message": message})
+    if action == "delete":
+        function.deleted_at = timezone.now()
+        function.save(update_fields=["deleted_at"])
+        audit(request, "function.deleted", function)
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})
+    if action == "rename":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if not title or len(title) > 180:
+            return function_api_error("Geef een geldige naam van maximaal 180 tekens.")
+        function.title = title
+        function.save(update_fields=["title"])
+        if function.kind == FunctionDefinition.Kind.FORM:
+            function.forms.update(title=title)
+        return JsonResponse({"ok": True, "title": title, "message": "Naam gewijzigd"})
+    if action == "create_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        if function.kind != FunctionDefinition.Kind.GROUP:
+            return function_api_error("Een formulier kan alleen aan een formulierengroep worden toegevoegd.")
+        form = ManagedForm.objects.create(
+            function=function, title="", position=function.forms.count()
+        )
+        return JsonResponse({"ok": True, "form": {"id": form.id, "title": form.title, "position": form.position, "questions": []}})
+    if action == "reorder_forms":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        form_ids = payload.get("formIds")
+        forms = list(function.forms.all())
+        if (
+            not isinstance(form_ids, list)
+            or any(type(form_id) is not int for form_id in form_ids)
+            or set(form_ids) != {form.id for form in forms}
+        ):
+            return function_api_error("De formulier-volgorde is ongeldig.")
+        for position, form_id in enumerate(form_ids):
+            ManagedForm.objects.filter(id=form_id, function=function).update(position=position)
+        return JsonResponse({"ok": True})
+    if action == "delete_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        if function.kind != FunctionDefinition.Kind.GROUP:
+            return function_api_error("Dit formulier kan niet afzonderlijk worden verwijderd.")
+        form = get_object_or_404(ManagedForm, id=payload.get("formId"), function=function)
+        form.delete()
+        for position, item in enumerate(function.forms.all()):
+            ManagedForm.objects.filter(id=item.id).update(position=position)
+        return JsonResponse({"ok": True, "message": "Formulier verwijderd"})
+    if action == "save_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        form = get_object_or_404(ManagedForm, id=payload.get("formId"), function=function)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if function.kind == FunctionDefinition.Kind.GROUP and not title:
+            return function_api_error("Geef het formulier een naam", warning=True)
+        if len(title) > 180:
+            return function_api_error("De formuliernaam mag maximaal 180 tekens bevatten.")
+        if function.kind == FunctionDefinition.Kind.FORM:
+            title = function.title
+        incoming = payload.get("questions")
+        if not isinstance(incoming, list):
+            return function_api_error("Ongeldige vragenlijst.")
+        if sum(1 for item in incoming if isinstance(item, dict) and item.get("fieldType") == ManagedQuestion.FieldType.MATRIX) > 2:
+            return function_api_error("Een formulier mag maximaal 2 matrices bevatten.", warning=True)
+        valid_types = set(ManagedQuestion.FieldType.values)
+        prepared = []
+        try:
+            for position, item in enumerate(incoming):
+                if not isinstance(item, dict) or item.get("fieldType") not in valid_types:
+                    raise ValueError("Kies een geldig veldtype.")
+                if not isinstance(item.get("required", False), bool):
+                    raise ValueError("De instelling voor verplicht antwoord is ongeldig.")
+                url = item.get("url", "")
+                if not isinstance(url, str):
+                    raise ValueError("Vul een geldige http(s)-link in.")
+                if url:
+                    parsed_url = urlparse(url)
+                    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                        raise ValueError("Gebruik een geldige http(s)-link.")
+                field_type = item["fieldType"]
+                image = validate_function_image(item.get("image", "")) if field_type == ManagedQuestion.FieldType.IMAGE else ""
+                prepared.append(ManagedQuestion(
+                    form=form,
+                    position=position,
+                    field_type=field_type,
+                    question=str(item.get("question", ""))[:500],
+                    unit=str(item.get("unit", ""))[:120],
+                    required=bool(item.get("required", False)),
+                    options=clean_string_list(item.get("options", [])),
+                    columns=clean_string_list(item.get("columns", [])),
+                    rows=clean_string_list(item.get("rows", [])),
+                    url=url[:1000],
+                    button_text=str(item.get("buttonText", ""))[:180],
+                    image=image,
+                    caption=str(item.get("caption", ""))[:280],
+                    explanation=str(item.get("explanation", "")),
+                ))
+        except ValueError as error:
+            return function_api_error(str(error), warning=True)
+        form.title = title
+        form.save(update_fields=["title"])
+        form.questions.all().delete()
+        ManagedQuestion.objects.bulk_create(prepared)
+        audit(request, "function.form_saved", function, form_id=form.id)
+        return JsonResponse({"ok": True, "message": "Wijzigingen opgeslagen"})
+    return function_api_error("Onbekende actie.")
+
+
+@login_required
+def function_deleted(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).order_by("-deleted_at")
+    now = timezone.now()
+    for function in functions:
+        function.days_left = max(0, 30 - (now - function.deleted_at).days)
+    return render(request, "dossier/function_deleted.html", {
+        "functions": functions,
+    })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_trash_action(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action") if isinstance(payload, dict) else None
+    if action == "empty":
+        FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Prullenbak geleegd"})
+    function = get_object_or_404(
+        FunctionDefinition.objects.select_for_update(), id=payload.get("functionId"),
+        deleted_at__isnull=False, std=False,
+    )
+    if action == "restore":
+        function.deleted_at = None
+        function.save(update_fields=["deleted_at"])
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie hersteld"})
+    if action == "permanent_delete":
+        function.delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie definitief verwijderd"})
+    return function_api_error("Onbekende actie.")
 
 
 @login_required
@@ -853,6 +1188,38 @@ def library_template(request, template_id=None):
     if request.method == "POST":
         templates = templates.select_for_update()
     template = get_object_or_404(templates, id=template_id) if template_id else None
+    action = request.POST.get("action")
+
+    if template and action in {"add_function", "remove_function"}:
+        if not is_admin(request.user):
+            raise PermissionDenied
+        functions = list(template.functions or [])
+        if action == "add_function":
+            new_name = request.POST.get("new_function", "").strip()
+            if not new_name:
+                messages.error(request, "Geef de nieuwe functie een naam.")
+            elif any(item.casefold() == new_name.casefold() for item in functions):
+                messages.error(request, "Deze functie bestaat al.")
+            else:
+                functions.append(new_name)
+                template.functions = functions
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.function_added", template, title=new_name)
+                messages.success(request, "Functie toegevoegd.")
+        elif action == "remove_function":
+            remove_name = request.POST.get("remove_function", "").strip()
+            filtered = [item for item in functions if item.casefold() != remove_name.casefold()]
+            if filtered != functions:
+                template.functions = filtered
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.function_removed", template, title=remove_name)
+                messages.success(request, "Functie verwijderd.")
+            else:
+                messages.error(request, "Functie niet gevonden.")
+        return redirect("dossier:library_detail", template_id=template.id)
+
     form = LibraryTemplateForm(request.POST or None, instance=template)
     if not is_admin(request.user):
         form.fields.pop("is_fixed")
@@ -869,6 +1236,7 @@ def library_template(request, template_id=None):
     if template:
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
+            "can_manage_functions": is_admin(request.user),
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,

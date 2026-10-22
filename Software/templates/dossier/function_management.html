@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Functies beheer | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell function-shell" data-function-page="list">
+  <header class="page-bar">
+    <div>
+      <p class="eyebrow">Bibliotheek</p>
+      <h1>Functies beheer</h1>
+    </div>
+    <div class="header-actions"><a class="back" href="{% url 'dossier:library_list' %}">← Ga terug</a></div>
+  </header>
+  <section class="function-card" aria-labelledby="function-list-heading">
+    <div class="function-card-heading">
+      <h2 id="function-list-heading">Functies</h2>
+      <div class="function-tools">
+        <form class="function-search" method="get" role="search">
+          <label class="search-field">
+            <span>Zoeken</span>
+            <input type="search" name="q" value="{{ query }}" autocomplete="off" aria-label="Zoeken">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>
+          </label>
+          <input type="hidden" name="sort" value="{{ sort }}">
+        </form>
+        <a class="outline button" href="{% url 'dossier:function_deleted' %}">
+          <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 3v7l4 2M17 10a7 7 0 1 1-2-4.95"/></svg>
+          Recent verwijderd{% if deleted_count %} ({{ deleted_count }}){% endif %}
+        </a>
+        <a class="function-add" href="{% url 'dossier:function_type' %}" aria-label="Nieuwe functie">+</a>
+      </div>
+    </div>
+    <div class="function-list-head">
+      <button type="button" class="function-sort" data-sort-control data-sort="{{ sort }}">
+        <span>Titel</span><span class="sort-indicator" aria-hidden="true">{% if sort == 'az' %}↑{% elif sort == 'za' %}↓{% endif %}</span>
+      </button>
+      <span>Verwijderen</span>
+    </div>
+    <div class="function-list" data-function-list>
+      {% for item in functions %}
+      <div class="function-row {% if item.std %}is-standard{% endif %}" data-function-row data-standard="{{ item.std|yesno:'true,false' }}">
+        {% if item.std %}
+        <button type="button" class="function-row-title is-locked" data-standard-warning aria-label="{{ item.title }}: standaardfunctie">
+          <span>{{ item.title }}</span>
+        </button>
+        <span class="function-row-remove locked-indicator" aria-label="Standaardfunctie kan niet worden verwijderd">
+          <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg>
+        </span>
+        {% else %}
+        <a class="function-row-title" href="{% url 'dossier:function_detail' item.id %}"><span>{{ item.title }}</span></a>
+        <button type="button" class="icon-action danger" data-delete-function data-url="{% url 'dossier:function_action' item.id %}" data-title="{{ item.title }}" aria-label="Verwijderen: {{ item.title }}">
+          <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3.5 5.5h13m-11.5 0 .8 11h8.4l.8-11M7 5.5V3h6v2.5m-5 3v5m4-5v5"/></svg>
+        </button>
+        {% endif %}
+      </div>
+      {% empty %}
+      <p class="empty-state">{% if query %}Geen functies gevonden.{% else %}Er zijn nog geen functies. Maak een functie aan om te beginnen.{% endif %}</p>
+      {% endfor %}
+    </div>
+  </section>
+  <div class="function-toast-region" aria-live="polite" aria-atomic="true"></div>
+  <dialog class="function-dialog" data-function-dialog aria-labelledby="dialog-title">
+    <form method="dialog" data-dialog-form>
+      <h2 id="dialog-title" data-dialog-title>Bevestigen</h2>
+      <p data-dialog-message></p>
+      <label class="dialog-input" data-dialog-input-wrap hidden><span>Naam</span><input data-dialog-input maxlength="180"></label>
+      <div class="dialog-actions">
+        <button class="outline button" value="cancel">Annuleren</button>
+        <button class="primary button" value="confirm" data-dialog-confirm>Bevestigen</button>
+      </div>
+    </form>
+  </dialog>
+</main>
+<script src="{% static 'function_management.js' %}" defer></script>
+{% endblock %}

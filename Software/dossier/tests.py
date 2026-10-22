@@ -3,6 +3,10 @@ from django.db import IntegrityError
 from django.core.exceptions import SuspiciousOperation
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
+import json
+from pathlib import Path
 from unittest.mock import patch
 
 from .models import (
@@ -11,8 +15,11 @@ from .models import (
     Case,
     Education,
     ExternalIdentity,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
+    ManagedForm,
+    ManagedQuestion,
     Patient,
     Profile,
     StudentCase,
@@ -83,6 +90,162 @@ class EpdWorkflowTests(TestCase):
         self.client.login(username="teacher", password="testpass")
         response = self.client.get(reverse("dossier:teacher_module_create", args=[self.case.id]))
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_manage_functions_in_section(self):
+        self.client.login(username="admin", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel met functies",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Functies")
+
+        response = self.client.post(
+            reverse("dossier:library_detail", args=[template.id]),
+            {"action": "add_function", "new_function": "Medicatiecheck"},
+        )
+        self.assertEqual(response.status_code, 302)
+        template.refresh_from_db()
+        self.assertIn("Medicatiecheck", template.functions)
+
+    def test_teacher_cannot_manage_functions_in_section(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel zonder functiemanagement",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Functies")
+
+        response = self.client.post(
+            reverse("dossier:library_detail", args=[template.id]),
+            {"action": "add_function", "new_function": "Medicatiecheck"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
+        self.client.login(username="teacher", password="testpass")
+        oldest = FunctionDefinition.objects.create(title="Zorg", kind=FunctionDefinition.Kind.GROUP)
+        middle = FunctionDefinition.objects.create(title="Alpha", kind=FunctionDefinition.Kind.GROUP)
+        newest = FunctionDefinition.objects.create(title="Zwangerschap", kind=FunctionDefinition.Kind.FORM)
+        FunctionDefinition.objects.filter(id=oldest.id).update(created_at=timezone.now() - timedelta(days=3))
+        FunctionDefinition.objects.filter(id=middle.id).update(created_at=timezone.now() - timedelta(days=2))
+        FunctionDefinition.objects.filter(id=newest.id).update(created_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.get(reverse("dossier:function_management"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item.title for item in response.context["functions"]], ["Alpha", "Zorg", "Zwangerschap"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "za", "q": "zorg"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "oldest"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg", "Alpha", "Zwangerschap"])
+
+    def test_teacher_entry_and_creation_wizard_create_empty_records(self):
+        self.client.login(username="teacher", password="testpass")
+        library = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(library, reverse("dossier:function_management"))
+        self.assertContains(library, "Functie beheer")
+        self.assertEqual(FunctionDefinition.objects.count(), 0)
+
+        response = self.client.post(reverse("dossier:function_type"), {"kind": "formulier"})
+        self.assertRedirects(response, f"{reverse('dossier:function_general')}?kind=formulier")
+        response = self.client.post(reverse("dossier:function_general"), {
+            "kind": "formulier", "title": "Intake",
+        })
+        function = FunctionDefinition.objects.get(title="Intake")
+        self.assertRedirects(response, reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(function.forms.count(), 1)
+        self.assertEqual(function.forms.get().title, "Intake")
+        self.assertEqual(function.forms.get().questions.count(), 0)
+
+        self.client.post(reverse("dossier:function_type"), {"kind": "groep"})
+        self.client.post(reverse("dossier:function_general"), {
+            "kind": "groep", "title": "Zorggroep",
+        })
+        group = FunctionDefinition.objects.get(title="Zorggroep")
+        self.assertEqual(group.forms.count(), 0)
+
+    def test_recently_deleted_page_shows_retention_and_is_teacher_only(self):
+        function = FunctionDefinition.objects.create(
+            title="Verwijderd item", kind=FunctionDefinition.Kind.GROUP,
+            deleted_at=timezone.now(),
+        )
+        self.client.login(username="teacher", password="testpass")
+        response = self.client.get(reverse("dossier:function_deleted"))
+        self.assertContains(response, "Verwijderd item")
+        self.assertContains(response, "Nog 30 dagen te herstellen.")
+        self.client.logout()
+        self.client.login(username="student", password="testpass")
+        self.assertEqual(self.client.get(reverse("dossier:function_deleted")).status_code, 403)
+
+    def test_standard_function_cannot_be_changed_or_deleted(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Standaard", kind=FunctionDefinition.Kind.GROUP, std=True
+        )
+        response = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "delete"}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        self.assertEqual(
+            self.client.get(reverse("dossier:function_detail", args=[function.id])).status_code,
+            403,
+        )
+        self.assertContains(self.client.get(reverse("dossier:function_management")), "data-standard-warning")
+
+    def test_function_soft_delete_restore_and_expired_purge(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Herstelbaar", kind=FunctionDefinition.Kind.GROUP)
+        action_url = reverse("dossier:function_action", args=[function.id])
+        response = self.client.post(action_url, json.dumps({"action": "delete"}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNotNone(function.deleted_at)
+        response = self.client.post(
+            reverse("dossier:function_trash_action"),
+            json.dumps({"action": "restore", "functionId": function.id}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        FunctionDefinition.objects.filter(id=function.id).update(
+            deleted_at=timezone.now() - timedelta(days=31)
+        )
+        self.client.get(reverse("dossier:function_management"))
+        self.assertFalse(FunctionDefinition.objects.filter(id=function.id).exists())
+
+    def test_function_form_rejects_a_third_matrix(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Matrices", kind=FunctionDefinition.Kind.GROUP)
+        form = ManagedForm.objects.create(function=function, title="Invoer")
+        questions = [{"fieldType": ManagedQuestion.FieldType.MATRIX} for _ in range(3)]
+        response = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "save_form", "formId": form.id, "title": form.title, "questions": questions}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json()["warning"])
+        self.assertEqual(form.questions.count(), 0)
+
+    def test_editor_includes_unsaved_change_guard_and_initially_disabled_save(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Concept", kind=FunctionDefinition.Kind.FORM)
+        ManagedForm.objects.create(function=function, title=function.title)
+        response = self.client.get(reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "function_management.js")
+        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        self.assertIn("saveButton.disabled = true", script)
+        self.assertIn("saveButton.disabled = locked || !dirty", script)
+        self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
     def test_new_case_receives_all_fixed_dossier_sections(self):
         self.assertEqual(
