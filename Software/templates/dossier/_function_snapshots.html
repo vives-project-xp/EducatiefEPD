@@ -3,23 +3,21 @@
     <div class="work-title">
       <div>
         <p class="eyebrow">{{ function.kind }}</p>
-        <h3>{{ function.title }}</h3>
+        <h3 id="function-heading-{{ function.id }}">{{ function.title }}</h3>
       </div>
     </div>
     {% for form in function.forms %}
-      <section class="function-form" data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+      <section class="function-form" aria-labelledby="function-heading-{{ function.id }}" data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
         {% for field in form.fields %}
           {% if field.type == 'long_text' %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
               <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
               <textarea id="function_{{ field.key }}" name="function_{{ field.key }}" rows="5" class="js-tinymce" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
             </div>
-          {% elif field.type == 'matrix' %}
+          {% elif field.type == 'matrix' and field.matrix_payload %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
               <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>
-                {% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td><input name="{{ cell.name }}" value="{{ cell.value }}" {% if locked %}disabled{% endif %}></td>{% endfor %}</tr>{% endfor %}
-              </tbody></table></div>
+              {% include 'dossier/_matrix.html' with locked=locked %}
             </div>
           {% elif field.type == 'select' %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
@@ -35,11 +33,6 @@
             <div class="function-information">{{ field.explanation|linebreaks }}</div>
           {% elif field.type == 'link' %}
             <p class="function-information"><a href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p>
-          {% elif field.type == 'imageUpload' or field.type == 'fileUpload' %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="file" {% if field.type == 'imageUpload' %}accept="image/*"{% endif %} {% if locked %}disabled{% endif %}>
-            </div>
           {% else %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
               <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>

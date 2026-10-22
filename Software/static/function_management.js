@@ -155,7 +155,7 @@
 
   const fieldTypes = [
     { label: "Informatief", options: [["image", "Afbeelding weergeven"], ["link", "Hyperlink"], ["info", "Toelichting"]] },
-    { label: "Interactief", options: [["imageUpload", "Afbeelding uploaden"], ["fileUpload", "Bestand uploaden"], ["date", "Datum"], ["dateTime", "Datum en tijd"], ["number", "Getal"], ["matrix", "Matrix (maximaal 2)"], ["multipleChoice", "Meerkeuze"], ["text", "Tekst"], ["time", "Tijd"]] },
+    { label: "Interactief", options: [["date", "Datum"], ["dateTime", "Datum en tijd"], ["number", "Getal"], ["matrix", "Matrix (maximaal 2)"], ["multipleChoice", "Meerkeuze"], ["text", "Tekst"], ["time", "Tijd"]] },
   ];
   const informative = new Set(["image", "link", "info"]);
 
@@ -664,7 +664,7 @@
     }
 
     function previewControl(question) {
-      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time", imageUpload: "file", fileUpload: "file" };
+      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time" };
       if (question.fieldType === "multipleChoice") {
         const group = node("fieldset", "preview-options");
         const groupName = `answer-${question.id ?? "new"}-${Math.random()}`;
@@ -694,7 +694,6 @@
       const input = node("input", "managed-input");
       input.type = typeMap[question.fieldType] || "text";
       input.required = Boolean(question.required);
-      if (["imageUpload", "fileUpload"].includes(question.fieldType)) input.accept = question.fieldType === "imageUpload" ? "image/*" : "*/*";
       return input;
     }
 

@@ -15,6 +15,7 @@ from .models import (
     ModuleResponse,
     StudentCase,
 )
+from .matrix import legacy_definition
 
 
 def client_ip(request):
@@ -64,6 +65,39 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def build_function_hierarchy(functions):
+    return [{
+        "id": function["id"],
+        "title": function["title"],
+        "kind": function["kind"],
+        "forms": [
+            {"id": form["id"], "title": form["title"] or "Naamloos formulier"}
+            for form in function.get("forms", [])
+        ],
+    } for function in functions]
+
+
+def build_library_structure(module_entries):
+    structure = []
+    for entry in module_entries:
+        functions = build_function_hierarchy([{
+            "id": link.function_id,
+            "title": link.function.title,
+            "kind": "Formulierengroep" if link.function.kind == "groep" else "Formulier",
+            "forms": [
+                {"id": form.id, "title": form.title}
+                for form in link.function.forms.all()
+            ],
+        } for link in entry.template.function_links.all()])
+        structure.append({
+            "title": entry.template.title,
+            "template_id": entry.template_id,
+            "kind": entry.template.get_category_display(),
+            "functions": functions,
+        })
+    return structure
+
+
 def build_sidebar_structure(module_responses, query=""):
     query = query.casefold()
     structure = []
@@ -72,20 +106,17 @@ def build_sidebar_structure(module_responses, query=""):
         functions = []
         for snapshot in snapshots:
             definition = snapshot.definition or {}
-            forms = [
-                {
-                    "id": form.get("id", form.get("position", 0)),
-                    "title": form.get("title") or "Naamloos formulier",
-                }
-                for form in definition.get("forms", [])
-            ]
             functions.append({
-                "id": snapshot.id,
-                "title": snapshot.title,
+                "id": snapshot.id, "title": snapshot.title,
                 "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
-                "forms": forms,
-                "url": f"?module={response.id}&function={snapshot.id}",
+                "forms": [
+                    {"id": form.get("id", form.get("position", 0)), "title": form.get("title", "")}
+                    for form in definition.get("forms", [])
+                ],
             })
+        functions = build_function_hierarchy(functions)
+        for function in functions:
+            function["url"] = f"?module={response.id}&function={function['id']}"
         searchable = " ".join(
             [response.title, *(item["title"] for item in functions)]
         ).casefold()
@@ -335,6 +366,9 @@ def snapshot_template_functions(module, template):
                                 "options": question.options,
                                 "columns": question.columns,
                                 "rows": question.rows,
+                                "matrixDefinition": legacy_definition(
+                                    question.rows, question.columns
+                                ) if question.field_type == "matrix" else {},
                                 "url": question.url,
                                 "buttonText": question.button_text,
                                 "image": question.image,

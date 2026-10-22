@@ -305,8 +305,6 @@ class ManagedQuestion(models.Model):
         IMAGE = "image", "Afbeelding weergeven"
         LINK = "link", "Hyperlink"
         INFO = "info", "Toelichting"
-        IMAGE_UPLOAD = "imageUpload", "Afbeelding uploaden"
-        FILE_UPLOAD = "fileUpload", "Bestand uploaden"
         DATE = "date", "Datum"
         DATETIME = "dateTime", "Datum en tijd"
         NUMBER = "number", "Getal"

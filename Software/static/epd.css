@@ -658,7 +658,7 @@ body {
 }
 
 .main {
-  max-width: 1000px;
+  max-width: 1400px;
   flex: 1;
   padding: 55px clamp(24px, 6vw, 85px);
 }
@@ -2722,6 +2722,43 @@ summary {
 
 .library-dossier-form section {
   width: 100%;
+}
+
+.library-structure-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.library-structure-item {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.library-structure-function {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding-left: 16px;
+}
+
+.library-structure-form {
+  overflow-wrap: anywhere;
+  padding-left: 16px;
+}
+
+.library-module-hierarchy {
+  align-items: start;
+}
+
+.library-module-hierarchy > div {
+  min-width: 0;
+}
+
+.library-module-hierarchy > a {
+  align-self: start;
 }
 
 .dossier-details-fields {

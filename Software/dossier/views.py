@@ -41,6 +41,7 @@ from .forms import (
     TeachingGroupForm,
 )
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
+from .matrix import convert_base_values, empty_values, legacy_definition, validate_values
 from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
@@ -63,7 +64,8 @@ from .models import (
 )
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
-    build_sidebar_structure, ensure_default_templates, module_schema,
+    build_library_structure, build_sidebar_structure,
+    ensure_default_templates, module_schema,
     start_student_case, clean_html,
 )
 
@@ -381,6 +383,8 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "multipleChoice": "select",
                     "matrix": "matrix",
                 }.get(field_type, field_type)
+                if mapped_type in {"imageUpload", "fileUpload"}:
+                    continue
                 value = function_data.get(key, {} if mapped_type == "matrix" else "")
                 item = {
                     "key": key,
@@ -399,22 +403,21 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "explanation": question.get("explanation", ""),
                 }
                 if mapped_type == "matrix":
-                    matrix_values = value if isinstance(value, dict) else {}
-                    item["prepared_rows"] = [
-                        {
-                            "label": row,
-                            "cells": [
-                                {
-                                    "name": f"function_{key}_{row_index}_{column_index}",
-                                    "value": matrix_values.get(
-                                        f"{row_index}_{column_index}", ""
-                                    ),
-                                }
-                                for column_index, _ in enumerate(item["columns"])
-                            ],
-                        }
-                        for row_index, row in enumerate(item["rows"])
-                    ]
+                    definition = question.get("matrixDefinition") or legacy_definition(
+                        item["rows"], item["columns"]
+                    )
+                    if isinstance(value, dict) and value.get("version") != 2:
+                        value = convert_base_values(
+                            {"rows": item["rows"], "columns": item["columns"]},
+                            definition,
+                            value,
+                        )
+                    item["matrix_payload"] = {
+                        "definition": definition,
+                        "values": value if isinstance(value, dict) else empty_values(),
+                        "label": item["label"],
+                        "errors": [],
+                    }
                 fields.append(item)
             forms.append({
                 "id": form.get("id", form.get("position", 0)),
@@ -452,40 +455,37 @@ def parsed_function_data(request, snapshots, current_data):
                 key = f"{snapshot.id}_{form_id}_{question_id}"
                 prefix = f"function_{key}"
                 if field_type == "matrix":
-                    value = {
-                        f"{row_index}_{column_index}": request.POST.get(
-                            f"{prefix}_{row_index}_{column_index}", ""
-                        ).strip()
-                        for row_index, _ in enumerate(question.get("rows", []))
-                        for column_index, _ in enumerate(question.get("columns", []))
-                    }
-                    has_value = any(value.values())
+                    definition = question.get("matrixDefinition") or legacy_definition(
+                        question.get("rows", []), question.get("columns", [])
+                    )
+                    current_value = function_data.get(key, empty_values())
+                    if isinstance(current_value, dict) and current_value.get("version") != 2:
+                        current_value = convert_base_values(
+                            {"rows": question.get("rows", []), "columns": question.get("columns", [])},
+                            definition,
+                            current_value,
+                        )
+                    raw = request.POST.get(f"matrix_{key}")
+                    try:
+                        values = json.loads(raw) if raw is not None else current_value
+                    except (TypeError, ValueError, RecursionError):
+                        missing.append(question.get("question", "Matrix") + " (ongeldige matrix)")
+                        continue
+                    normalized, errors, _ = validate_values(
+                        definition, values, current=current_value
+                    )
+                    if errors:
+                        missing.extend(errors)
+                    value = normalized
+                    has_value = any(
+                        bool(cell)
+                        for row in value.get("cells", {}).values()
+                        for cell in row.values()
+                    )
+                elif field_type in {"imageUpload", "fileUpload"}:
+                    continue
                 elif field_type in {"image", "info", "link"}:
                     continue
-                elif field_type in {"imageUpload", "fileUpload"}:
-                    upload = request.FILES.get(prefix)
-                    if upload:
-                        max_size = 300_000 if field_type == "imageUpload" else 5_000_000
-                        if upload.size > max_size:
-                            missing.append(question.get("question", "Bestand") + " (bestand is te groot)")
-                        raw = upload.read()
-                        if field_type == "imageUpload":
-                            encoded = base64.b64encode(raw).decode("ascii")
-                            try:
-                                validate_function_image(
-                                    f"data:{upload.content_type};base64,{encoded}"
-                                )
-                            except ValueError as error:
-                                missing.append(str(error))
-                        value = {
-                            "name": upload.name[:180],
-                            "content_type": upload.content_type or "application/octet-stream",
-                            "data": base64.b64encode(raw).decode("ascii"),
-                        }
-                        has_value = True
-                    else:
-                        value = function_data.get(key, {})
-                        has_value = bool(value)
                 else:
                     value = request.POST.get(prefix, "").strip()
                     has_value = bool(value)
@@ -518,7 +518,8 @@ def parsed_function_data(request, snapshots, current_data):
                         has_value = bool(value.strip())
                 if question.get("required") and not has_value:
                     missing.append(question.get("question", "Dit veld"))
-                function_data[key] = value
+                if field_type not in {"imageUpload", "fileUpload"}:
+                    function_data[key] = value
     data["_functions"] = function_data
     return (None, missing) if missing else (data, [])
 
@@ -567,6 +568,7 @@ def dossier(request, case_id):
 
     form_result = None
     errors = {}
+    missing = []
     if request.method == "POST" and selected:
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
@@ -610,7 +612,12 @@ def dossier(request, case_id):
         "case": case, "student_case": student_case, "modules": sidebar,
         "sidebar": sidebar,
         "selected": selected, "query": query,
-        "fields": prepare_schema_fields(selected.schema, selected.data) if selected else [],
+        "fields": prepare_schema_fields(
+            selected.schema,
+            form_result.display_data if form_result else selected.data,
+            errors=form_result.errors if form_result else errors,
+            pending_observations=form_result.pending_observations if form_result else None,
+        ) if selected else [],
         "function_forms": function_forms,
         "selected_function_id": selected_function_id,
         "show_form_navigation": show_form_navigation,
@@ -1204,7 +1211,9 @@ def library_list(request):
             "module_entries",
             queryset=LibraryDossierModule.objects.filter(
                 template__status=LibraryTemplate.Status.ACTIVE
-            ).select_related("template"),
+            ).select_related("template").prefetch_related(
+                "template__function_links__function__forms"
+            ),
         )
     ).order_by("-created_at", "-id")
     dossier_educations = dossiers.exclude(education__isnull=True).order_by().values_list(
@@ -1215,6 +1224,8 @@ def library_list(request):
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)
+    for dossier in ordered_dossiers:
+        dossier.structure = build_library_structure(dossier.module_entries.all())
     available_templates = LibraryTemplate.objects.filter(
         status=LibraryTemplate.Status.ACTIVE
     ).select_related("education")
@@ -1312,6 +1323,7 @@ def function_general(request):
 
 
 def managed_function_payload(function):
+    valid_types = set(ManagedQuestion.FieldType.values)
     return {
         "id": function.id,
         "title": function.title,
@@ -1331,12 +1343,15 @@ def managed_function_payload(function):
                 "options": question.options,
                 "columns": question.columns,
                 "rows": question.rows,
+                "matrixDefinition": legacy_definition(
+                    question.rows, question.columns
+                ) if question.field_type == ManagedQuestion.FieldType.MATRIX else {},
                 "url": question.url,
                 "buttonText": question.button_text,
                 "image": question.image,
                 "caption": question.caption,
                 "explanation": question.explanation,
-            } for question in form.questions.all()],
+            } for question in form.questions.all() if question.field_type in valid_types],
         } for form in function.forms.all()],
     }
 
@@ -1527,7 +1542,7 @@ def function_action(request, function_id):
             return function_api_error(str(error), warning=True)
         form.title = title
         form.save(update_fields=["title"])
-        form.questions.all().delete()
+        form.questions.filter(field_type__in=valid_types).delete()
         ManagedQuestion.objects.bulk_create(prepared)
         audit(request, "function.form_saved", function, form_id=form.id)
         return JsonResponse({"ok": True, "message": "Wijzigingen opgeslagen"})
@@ -1667,6 +1682,11 @@ def library_dossier(request, dossier_id=None):
         "dossier": dossier,
         "field_types": FieldDefinition.FieldType.choices,
         "module_categories": LibraryTemplate.Category.choices,
+        "dossier_structure": build_library_structure(
+            dossier.module_entries.select_related("template").prefetch_related(
+                "template__function_links__function__forms"
+            ).all()
+        ) if dossier else [],
     })
 
 

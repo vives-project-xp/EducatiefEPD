@@ -38,6 +38,25 @@
     </section>
     <section>
       <h2>Modules</h2>
+      {% if dossier_structure %}
+      <div class="library-structure">
+        <h3>Basisstructuur dossier</h3>
+        <ol class="library-structure-list">
+          {% for module in dossier_structure %}
+          <li class="library-structure-item">
+            <strong>{{ module.title }}</strong>
+            {% for function in module.functions %}
+            <div class="library-structure-function">
+              <span class="library-card-meta">{{ function.kind }}</span>
+              <strong>{{ function.title }}</strong>
+              {% for form in function.forms %}<span class="library-structure-form">{{ form.title }}</span>{% endfor %}
+            </div>
+            {% empty %}<span class="muted">Geen functies</span>{% endfor %}
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% endif %}
       <h3>Bestaande bibliotheekonderdelen</h3>
       <p>Selecteer één of meer onderdelen die je in dit dossiersjabloon wilt opnemen.</p>
       {{ form.existing_modules.errors }}
