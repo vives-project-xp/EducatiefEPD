@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "dossier.apps.DossierConfig",
+    "tinymce",
 ]
 
 OIDC_ENABLED = env_bool("OIDC_ENABLED", False)
@@ -66,6 +67,15 @@ TEMPLATES = [{
     ]},
 }]
 WSGI_APPLICATION = "config.wsgi.application"
+
+TINYMCE_DEFAULT_CONFIG = {
+    "menubar": False,
+    "plugins": "lists link table",
+    "toolbar": "undo redo | blocks | bold italic underline strikethrough | "
+               "bullist numlist outdent indent | link table | removeformat",
+    "height": 380,
+    "promotion": False,
+}
 
 MYSQL_REQUIRED_SETTINGS = ["MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_HOST"]
 missing_mysql_settings = [name for name in MYSQL_REQUIRED_SETTINGS if not os.getenv(name)]

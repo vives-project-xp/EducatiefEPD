@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ student_case.student.username }} | Voortgang{% endblock %}
+{% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
   <header class="page-bar">
@@ -22,19 +22,33 @@
             </div>
             <span class="state status-{{ submission.status }}">{{ submission.get_status_display }}</span>
           </header>
-          <div class="student-answer">{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}</div>
+          <div class="student-answer">
+            {% autoescape off %}{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}{% endautoescape %}
+          </div>
           {% if submission.feedback %}
             <div class="feedback">
-              <strong>Eerdere feedback</strong>{{ submission.feedback|linebreaks }}
+              <strong>Eerdere feedback</strong>{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}
             </div>
           {% endif %}
           {% if submission.status == 'submitted' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">
               {% csrf_token %}
-              {{ review_form.as_div }}
-              <button class="primary button">Beoordeling bewaren</button>
+              <div class="review-actions">
+                <div class="review-field">
+                  {{ submission.review_form.status.label_tag }}
+                  {{ submission.review_form.status }}
+                </div>
+              </div>
+              <div class="review-field">
+                {{ submission.review_form.feedback.label_tag }}
+                {{ submission.review_form.feedback }}
+                {{ submission.review_form.feedback.errors }}
+              </div>
+              <div class="review-actions">
+                <button class="primary button">Beoordeling bewaren</button>
+              </div>
             </form>
-            {% endif %}
+          {% endif %}
           </article>
       {% endfor %}
     </section>
@@ -49,6 +63,7 @@
               {% include 'dossier/_matrix.html' with locked=True %}
             {% elif field.type == 'matrix' %}
               <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+            {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
             {% else %}<pre>{{ field.value }}</pre>{% endif %}
           </div>
         {% empty %}

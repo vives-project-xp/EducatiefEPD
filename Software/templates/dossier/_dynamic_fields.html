@@ -4,8 +4,8 @@
     {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
     {% if field.invalid_typed_value %}
       <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="text" value="{{ field.value }}" aria-invalid="true" aria-describedby="errors_{{ field.key }}" {% if locked %}disabled{% endif %}>
-    {% elif field.type == 'long_text' %}
-      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
+    {% elif field.type == 'long_text' or field.type == 'rich_text' %}
+      <textarea id="field_{{ field.key }}" name="field_{{ field.key }}" rows="5" class="js-tinymce" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
     {% elif field.type == 'number' %}
       <input id="field_{{ field.key }}" name="field_{{ field.key }}" type="number" step="any" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% elif field.type == 'date' %}

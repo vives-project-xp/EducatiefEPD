@@ -5,3 +5,7 @@ __pycache__/
 staticfiles/
 backups/
 *.sqlite3
+plan.md
+AGENTS.md
+MEMORY.md
+tests/

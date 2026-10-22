@@ -8,6 +8,25 @@
   <link rel="stylesheet" href="{% static 'epd.css' %}">
   <link rel="stylesheet" href="{% static 'matrix.css' %}">
   <script type="module" src="{% static 'matrix-editor.js' %}"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js"></script>
+  <script src="{% static 'epd-editor.js' %}"></script>
+  <!--
+  <script>
+  // Laat toe om de rich text editor weer te geven na het laden van content
+  document.addEventListener("DOMContentLoaded", () => {
+    tinymce.init({
+      selector: "textarea.js-tinymce",
+      license_key: "gpl",
+      promotion: false,
+      menubar: true,
+      height: 380,
+      plugins: "lists link",
+      toolbar: "undo redo h1 h2 bold italic underline subscript superscript alignleft aligncenter alignright bullist numlist forecolor backcolor", 
+      color_cols: 5
+    });
+  });
+  </script>
+  -->
 </head>
 <body>
   {% if messages %}

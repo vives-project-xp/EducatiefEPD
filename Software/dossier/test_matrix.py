@@ -15,9 +15,9 @@ from .matrix import (
     convert_base_values, empty_values, fingerprint, legacy_definition,
     normalize_definition, normalize_value, validate_values,
 )
-from .models import Assignment, AssignmentSubmission, Case, Education, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
+from .models import Assignment, AssignmentSubmission, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
 from .module_data import parse_module_form
-from .services import copy_template_to_case, create_case_structure, start_student_case
+from .services import copy_library_dossier_to_case, copy_template_to_case, start_student_case
 
 
 def sheet():
@@ -161,14 +161,17 @@ class MatrixWorkflowTests(TestCase):
         field = field or self.field
         return {"label": field.label, "field_type": "matrix", "position": 0, "required": "on", "matrix_definition": json.dumps(definition or sheet()), "revision": fingerprint(field)}
 
-    def test_both_template_copy_paths_include_matrix_definition(self):
+    def test_template_and_dossier_bundle_copy_include_matrix_definition(self):
         self.assertEqual(self.module.fields.get(key="sheet").matrix_definition, sheet())
-        self.template.is_fixed = True; self.template.save()
-        new_case = Case.objects.create(title="Adoptie", education=self.education, patient=Patient.objects.create(name="Adoptie", reference="MATRIX-ADOPT"), created_by=self.teacher)
-        adopted = Module.objects.create(case=new_case, title=self.template.title)
-        create_case_structure(new_case)
-        adopted.refresh_from_db()
-        self.assertEqual(adopted.fields.get(key="sheet").matrix_definition, sheet())
+        new_case = Case.objects.create(title="Sjabloonkopie", education=self.education, patient=Patient.objects.create(name="Fictief", reference="MATRIX-BUNDLE"), created_by=self.teacher)
+        dossier = LibraryDossier.objects.create(title="Matrixsjabloon", education=self.education, created_by=self.teacher)
+        LibraryDossierModule.objects.create(dossier=dossier, template=self.template, position=0)
+        self.assertFalse(new_case.modules.exists())
+        copied = copy_library_dossier_to_case(dossier, new_case)[0]
+        self.assertEqual(copied.fields.get(key="sheet").matrix_definition, sheet())
+        self.assertEqual(copy_library_dossier_to_case(dossier, new_case)[0].pk, copied.pk)
+        student_case, _ = start_student_case(new_case, self.other)
+        self.assertEqual(student_case.module_responses.get().schema[0]["matrix_definition"], sheet())
 
     def test_two_student_snapshots_remain_independent_after_source_changes(self):
         self.module.fields.filter(key="sheet").update(matrix_definition=legacy_definition(["Nieuw"], ["Nieuw"]))
@@ -238,6 +241,64 @@ class MatrixWorkflowTests(TestCase):
         self.assertContains(result, "Temperatuur")
         self.assertContains(result, "A; C")
         self.assertNotContains(result, '<input type="hidden" name="matrix_sheet"')
+
+    def test_matrix_and_rich_text_save_together_and_survive_validation_errors(self):
+        rich_field = ModuleField.objects.create(
+            module=self.module, key="rich", label="Opgemaakte toelichting", field_type="rich_text"
+        )
+        self.response.schema.append(rich_field.as_schema())
+        self.response.save()
+        self.client.force_login(self.student)
+        rich_text = "<p><strong>Toelichting</strong> bij de meting</p>"
+        self.assertEqual(self.client.post(self.url, self.post_data(field_rich=rich_text)).status_code, 302)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data["rich"], rich_text)
+        self.assertEqual(self.response.data["sheet"]["cells"]["r0"]["c1"], "36.75")
+        invalid = values()
+        invalid["cells"]["r0"]["c1"] = "geen getal"
+        result = self.client.post(self.url, self.post_data(invalid, field_rich="<p>Nieuwe tekst</p>"))
+        self.assertContains(result, 'class="js-tinymce"')
+        self.assertContains(result, "&lt;p&gt;Nieuwe tekst&lt;/p&gt;")
+        self.assertEqual(result.context["fields"][0]["matrix_payload"]["values"], invalid)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data["rich"], rich_text)
+
+    def test_review_combines_matrix_rich_text_and_prefilled_assignment_feedback(self):
+        rich_schema = {"key": "rich", "label": "Toelichting", "type": "rich_text"}
+        self.response.schema.append(rich_schema)
+        self.response.data = {
+            "sheet": values(), "other": "<strong>Gewone tekst</strong>",
+            "rich": '<p><strong>Opgemaakt</strong><script>alert(1)</script></p>',
+        }
+        self.response.save()
+        submission = self.student_case.assignment_submissions.get()
+        submission.answer = "Antwoord voor feedback"
+        submission.status = "submitted"
+        submission.save()
+        self.client.force_login(self.teacher)
+        result = self.client.get(reverse("dossier:teacher_student_case", args=[self.student_case.pk]))
+        self.assertContains(result, 'data-readonly="true"')
+        self.assertContains(result, "<strong>Opgemaakt</strong>", html=True)
+        self.assertContains(result, "&lt;strong&gt;Gewone tekst&lt;/strong&gt;")
+        self.assertNotContains(result, "<script>alert(1)</script>")
+        # Read from the prefetched instances that the view decorated.
+        displayed_submission = list(result.context["student_case"].assignment_submissions.all())[0]
+        self.assertEqual(displayed_submission.review_form.initial["feedback"], submission.answer)
+
+    def test_empty_required_flexible_matrix_can_be_prefilled_and_published(self):
+        self.client.force_login(self.teacher)
+        result = self.client.post(self.base_url, self.post_data(empty_values()), follow=True)
+        self.assertContains(result, "Voorinvullen is optioneel.")
+        self.module.refresh_from_db()
+        self.assertEqual(self.module.base_data["sheet"]["cells"]["r0"]["c1"], "")
+        self.case.move_to_draft()
+        self.case.save()
+        result = self.client.post(
+            reverse("dossier:teacher_case_transition", args=[self.case.pk]), {"action": "publish"}, follow=True
+        )
+        self.assertContains(result, "Casus gepubliceerd voor studenten.")
+        self.case.refresh_from_db()
+        self.assertEqual(self.case.status, Case.Status.PUBLISHED)
 
     def test_stale_authoring_form_rejected_without_overwriting_new_version(self):
         self.client.force_login(self.teacher)

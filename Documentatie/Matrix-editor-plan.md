@@ -176,8 +176,10 @@ De centrale servervalidatie staat in [matrix.py](../Software/dossier/matrix.py).
 Alle opslag-/indienroutes blijven de centrale [module_data.py](../Software/dossier/module_data.py)
 gebruiken. Schemawijziging en omzetting van casusvoorinvulling gebeuren in één transactie
 met een modulelock. Het bronformulier heeft een schemafingerprint tegen verouderde
-opslag. Beide bibliotheekkopieerpaden dragen matrixmetadata over; studentstart kopieert
-die naar de eigen snapshot. Legacy-indexwaarden worden alleen bij bewuste bronbewerking
+opslag. Expliciet kopiëren van een onderdeel en kopiëren via een dossiersjabloon dragen
+matrixmetadata over; studentstart kopieert die naar de eigen snapshot. De vroegere
+automatische vaste casusopbouw is verwijderd overeenkomstig de nieuwere main-workflow.
+Legacy-indexwaarden worden alleen bij bewuste bronbewerking
 omgezet, met behoud van hun oorspronkelijke rij-/kolomidentiteit.
 
 ### Verificatie
@@ -188,6 +190,10 @@ De regressies staan in [test_matrix.py](../Software/dossier/test_matrix.py),
 een geïsoleerde lokale testserver op poort 8017 en de afgeschermde testfixtures in
 [matrix_browser_seed.py](../Software/tests/matrix_browser_seed.py).
 
-De definitieve resultaten en resterende testgrenzen staan in MEMORY.md, hoofdstuk 25.
+De oorspronkelijke resultaten staan in MEMORY.md, hoofdstuk 25; de gecombineerde
+verificatie met main staat in hoofdstuk 31. Migratie `0012_merge_matrix_main` verbindt
+de matrixmigratie met main-migratie `0011_record_existing_rich_text_choices`.
+De flexibele editor blijft onderdeel van bibliotheekvelden en dossiers. Het afzonderlijke
+matrixvraagtype in Functiebeheer wordt door deze integratie niet vervangen.
 De migratie is alleen op een tijdelijke testdatabase uitgevoerd; deployment van de
 nieuwe code vereist de gebruikelijke migratiestap op de bedoelde applicatiedatabase.
