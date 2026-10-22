@@ -7,12 +7,16 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
 from django.db.models import Q
-from django.http import Http404, JsonResponse
+from django.http import Http404, JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+import mammoth
+import io
+from docx import Document
+from htmldocx import HtmlToDocx
 
 from .forms import (
     AssignmentForm,
@@ -43,7 +47,7 @@ from .models import (
     TeachingGroup,
 )
 from .services import (
-    audit, copy_template_to_case, create_case_structure, module_schema, start_student_case,
+    audit, copy_template_to_case, create_case_structure, module_schema, start_student_case, clean_html,
 )
 
 
@@ -932,3 +936,36 @@ def library_field_delete(request, template_id, field_id):
     template.save(update_fields=["version", "updated_at"])
     messages.success(request, "Onderdeel verwijderd. Bestaande casuskopieën blijven behouden.")
     return redirect("dossier:library_detail", template_id=template.id)
+
+
+MAX_DOCX_BYTES = 5 * 1024 * 1024
+
+@login_required
+@require_POST
+def import_docx(request):
+    upload = request.FILES.get("file")
+    if not upload or not upload.name.lower().endswith(".docx"):
+        return JsonResponse({"error": "Geen geldig .docx-bestand."}, status=400)
+    if upload.size > MAX_DOCX_BYTES:
+        return JsonResponse({"error": "Bestand is te groot (max 5 MB)."}, status=400)
+    try:
+        result = mammoth.convert_to_html(upload)
+    except Exception:
+        return JsonResponse({"error": "Het bestand kon niet gelezen worden."}, status=400)
+    return JsonResponse({"html": clean_html(result.value)})
+
+
+@login_required
+@require_POST
+def export_docx(request):
+    html = clean_html(request.POST.get("html", ""))
+    document = Document()
+    HtmlToDocx().add_html_to_document(html, document)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    response["Content-Disposition"] = 'attachment; filename="dossier.docx"'
+    return response

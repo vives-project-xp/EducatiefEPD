@@ -4,6 +4,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils.text import slugify
 
+import nh3
+
 from .models import (
     AssignmentSubmission,
     AuditEvent,
@@ -264,3 +266,10 @@ def copy_template_to_case(template, case):
         for field in template.fields.all()
     ])
     return module
+
+
+ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
+                "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote"}
+
+def clean_html(value):
+    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}}, url_schemes={"http", "https", "mailto"})

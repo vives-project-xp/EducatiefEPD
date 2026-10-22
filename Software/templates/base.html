@@ -7,6 +7,8 @@
   <title>{% block title %}Educatief EPD{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'epd.css' %}">
   <script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js"></script>
+  <script src="{% static 'epd-editor.js' %}"></script>
+  <!--
   <script>
   // Laat toe om de rich text editor weer te geven na het laden van content
   document.addEventListener("DOMContentLoaded", () => {
@@ -22,6 +24,7 @@
     });
   });
   </script>
+  -->
 </head>
 <body>
   {% if messages %}
