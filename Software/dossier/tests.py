@@ -1,8 +1,12 @@
+import json
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from django.core.exceptions import SuspiciousOperation
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
+from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from .models import (
@@ -11,8 +15,12 @@ from .models import (
     Case,
     Education,
     ExternalIdentity,
+    LibraryDossier,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
+    ManagedForm,
+    ManagedQuestion,
     Patient,
     Profile,
     StudentCase,
@@ -83,6 +91,162 @@ class EpdWorkflowTests(TestCase):
         self.client.login(username="teacher", password="testpass")
         response = self.client.get(reverse("dossier:teacher_module_create", args=[self.case.id]))
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_manage_functions_in_section(self):
+        self.client.login(username="admin", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel met functies",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Functies")
+
+        response = self.client.post(
+            reverse("dossier:library_detail", args=[template.id]),
+            {"action": "add_function", "new_function": "Medicatiecheck"},
+        )
+        self.assertEqual(response.status_code, 302)
+        template.refresh_from_db()
+        self.assertIn("Medicatiecheck", template.functions)
+
+    def test_teacher_cannot_manage_functions_in_section(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel zonder functiemanagement",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Functies")
+
+        response = self.client.post(
+            reverse("dossier:library_detail", args=[template.id]),
+            {"action": "add_function", "new_function": "Medicatiecheck"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
+        self.client.login(username="teacher", password="testpass")
+        oldest = FunctionDefinition.objects.create(title="Zorg", kind=FunctionDefinition.Kind.GROUP)
+        middle = FunctionDefinition.objects.create(title="Alpha", kind=FunctionDefinition.Kind.GROUP)
+        newest = FunctionDefinition.objects.create(title="Zwangerschap", kind=FunctionDefinition.Kind.FORM)
+        FunctionDefinition.objects.filter(id=oldest.id).update(created_at=timezone.now() - timedelta(days=3))
+        FunctionDefinition.objects.filter(id=middle.id).update(created_at=timezone.now() - timedelta(days=2))
+        FunctionDefinition.objects.filter(id=newest.id).update(created_at=timezone.now() - timedelta(days=1))
+
+        response = self.client.get(reverse("dossier:function_management"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item.title for item in response.context["functions"]], ["Alpha", "Zorg", "Zwangerschap"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "za", "q": "zorg"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg"])
+        response = self.client.get(reverse("dossier:function_management"), {"sort": "oldest"})
+        self.assertEqual([item.title for item in response.context["functions"]], ["Zorg", "Alpha", "Zwangerschap"])
+
+    def test_teacher_entry_and_creation_wizard_create_empty_records(self):
+        self.client.login(username="teacher", password="testpass")
+        library = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(library, reverse("dossier:function_management"))
+        self.assertContains(library, "Functie beheer")
+        self.assertEqual(FunctionDefinition.objects.count(), 0)
+
+        response = self.client.post(reverse("dossier:function_type"), {"kind": "formulier"})
+        self.assertRedirects(response, f"{reverse('dossier:function_general')}?kind=formulier")
+        response = self.client.post(reverse("dossier:function_general"), {
+            "kind": "formulier", "title": "Intake",
+        })
+        function = FunctionDefinition.objects.get(title="Intake")
+        self.assertRedirects(response, reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(function.forms.count(), 1)
+        self.assertEqual(function.forms.get().title, "Intake")
+        self.assertEqual(function.forms.get().questions.count(), 0)
+
+        self.client.post(reverse("dossier:function_type"), {"kind": "groep"})
+        self.client.post(reverse("dossier:function_general"), {
+            "kind": "groep", "title": "Zorggroep",
+        })
+        group = FunctionDefinition.objects.get(title="Zorggroep")
+        self.assertEqual(group.forms.count(), 0)
+
+    def test_recently_deleted_page_shows_retention_and_is_teacher_only(self):
+        function = FunctionDefinition.objects.create(
+            title="Verwijderd item", kind=FunctionDefinition.Kind.GROUP,
+            deleted_at=timezone.now(),
+        )
+        self.client.login(username="teacher", password="testpass")
+        response = self.client.get(reverse("dossier:function_deleted"))
+        self.assertContains(response, "Verwijderd item")
+        self.assertContains(response, "Nog 30 dagen te herstellen.")
+        self.client.logout()
+        self.client.login(username="student", password="testpass")
+        self.assertEqual(self.client.get(reverse("dossier:function_deleted")).status_code, 403)
+
+    def test_standard_function_cannot_be_changed_or_deleted(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(
+            title="Standaard", kind=FunctionDefinition.Kind.GROUP, std=True
+        )
+        response = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "delete"}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        self.assertEqual(
+            self.client.get(reverse("dossier:function_detail", args=[function.id])).status_code,
+            403,
+        )
+        self.assertContains(self.client.get(reverse("dossier:function_management")), "data-standard-warning")
+
+    def test_function_soft_delete_restore_and_expired_purge(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Herstelbaar", kind=FunctionDefinition.Kind.GROUP)
+        action_url = reverse("dossier:function_action", args=[function.id])
+        response = self.client.post(action_url, json.dumps({"action": "delete"}), content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNotNone(function.deleted_at)
+        response = self.client.post(
+            reverse("dossier:function_trash_action"),
+            json.dumps({"action": "restore", "functionId": function.id}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        function.refresh_from_db()
+        self.assertIsNone(function.deleted_at)
+        FunctionDefinition.objects.filter(id=function.id).update(
+            deleted_at=timezone.now() - timedelta(days=31)
+        )
+        self.client.get(reverse("dossier:function_management"))
+        self.assertFalse(FunctionDefinition.objects.filter(id=function.id).exists())
+
+    def test_function_form_rejects_a_third_matrix(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Matrices", kind=FunctionDefinition.Kind.GROUP)
+        form = ManagedForm.objects.create(function=function, title="Invoer")
+        questions = [{"fieldType": ManagedQuestion.FieldType.MATRIX} for _ in range(3)]
+        response = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "save_form", "formId": form.id, "title": form.title, "questions": questions}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json()["warning"])
+        self.assertEqual(form.questions.count(), 0)
+
+    def test_editor_includes_unsaved_change_guard_and_initially_disabled_save(self):
+        self.client.login(username="teacher", password="testpass")
+        function = FunctionDefinition.objects.create(title="Concept", kind=FunctionDefinition.Kind.FORM)
+        ManagedForm.objects.create(function=function, title=function.title)
+        response = self.client.get(reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "function_management.js")
+        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        self.assertIn("saveButton.disabled = true", script)
+        self.assertIn("saveButton.disabled = locked || !dirty", script)
+        self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
     def test_new_case_receives_all_fixed_dossier_sections(self):
         self.assertEqual(
@@ -190,6 +354,49 @@ class EpdWorkflowTests(TestCase):
         self.case.refresh_from_db()
         self.assertEqual(self.case.status, Case.Status.ARCHIVED)
         self.assertIsNotNone(self.case.archived_at)
+
+    def test_teacher_can_delete_archived_case_without_student_dossiers(self):
+        self.client.force_login(self.teacher)
+        self.case.archive()
+        self.case.save()
+        self.assertContains(
+            self.client.get(reverse("dossier:teacher_case", args=[self.case.id])),
+            "Casus verwijderen",
+        )
+
+        response = self.client.post(
+            reverse("dossier:teacher_case_delete", args=[self.case.id])
+        )
+        self.assertRedirects(response, reverse("dossier:teacher_dashboard"))
+        self.assertFalse(Case.objects.filter(id=self.case.id).exists())
+        self.assertFalse(Patient.objects.filter(id=self.patient.id).exists())
+
+    def test_only_teacher_can_delete_archived_case_and_student_data_is_preserved(self):
+        student_case, _ = start_student_case(self.case, self.student)
+        self.case.archive()
+        self.case.save()
+        delete_url = reverse("dossier:teacher_case_delete", args=[self.case.id])
+
+        self.client.force_login(self.admin)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
+        self.client.force_login(self.student)
+        self.assertEqual(self.client.post(delete_url).status_code, 403)
+        self.client.force_login(self.teacher)
+        response = self.client.post(delete_url, follow=True)
+        self.assertRedirects(
+            response, reverse("dossier:teacher_case", args=[self.case.id])
+        )
+        self.assertContains(response, "studentendossiers aan gekoppeld")
+        self.assertTrue(Case.objects.filter(id=self.case.id).exists())
+        self.assertTrue(StudentCase.objects.filter(id=student_case.id).exists())
+
+    def test_teacher_cannot_delete_case_that_is_not_archived(self):
+        self.client.force_login(self.teacher)
+        response = self.client.post(
+            reverse("dossier:teacher_case_delete", args=[self.case.id])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Case.objects.filter(id=self.case.id).exists())
 
     def test_teacher_can_review_student_assignment(self):
         self.case.publish()
@@ -314,6 +521,41 @@ class EpdWorkflowTests(TestCase):
         self.client.post(add_url, {"template_id": template.id})
         self.assertEqual(self.case.modules.filter(source_template=template).count(), 1)
 
+    def test_teacher_can_edit_group_name_and_education(self):
+        self.client.force_login(self.teacher)
+        edit_url = reverse("dossier:group_edit", args=[self.group.id])
+        page = self.client.get(edit_url)
+        self.assertContains(page, "Groepsnaam")
+        self.assertContains(page, "Opleiding")
+
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste lesgroep",
+            "education": self.education.id,
+        })
+        self.assertRedirects(response, reverse("dossier:group_detail", args=[self.group.id]))
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.name, "Aangepaste lesgroep")
+        self.assertEqual(self.group.teacher, self.teacher)
+
+        other_education = Education.objects.create(name="Zorgkunde", slug="zorgkunde")
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste lesgroep",
+            "education": other_education.id,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gekoppelde casussen")
+        self.group.refresh_from_db()
+        self.assertEqual(self.group.education, self.education)
+
+    def test_teacher_can_delete_group_without_deleting_student_dossiers(self):
+        student_case, _ = start_student_case(self.case, self.student)
+        self.client.force_login(self.teacher)
+        response = self.client.post(reverse("dossier:group_delete", args=[self.group.id]))
+        self.assertRedirects(response, reverse("dossier:group_list"))
+        self.assertFalse(TeachingGroup.objects.filter(id=self.group.id).exists())
+        self.assertFalse(self.case.allowed_groups.exists())
+        self.assertTrue(StudentCase.objects.filter(id=student_case.id).exists())
+
     def test_admin_can_create_education_and_teacher_cannot(self):
         url = reverse("dossier:education_create")
         self.client.login(username="student", password="testpass")
@@ -325,6 +567,42 @@ class EpdWorkflowTests(TestCase):
             reverse("dossier:education_list"),
         )
         self.assertTrue(Education.objects.filter(slug="zorgkunde").exists())
+
+    def test_admin_can_edit_and_delete_unused_education(self):
+        self.client.force_login(self.admin)
+        education = Education.objects.create(name="Testopleiding", slug="testopleiding")
+
+        edit_url = reverse("dossier:education_edit", args=[education.id])
+        response = self.client.post(edit_url, {
+            "name": "Aangepaste opleiding",
+            "slug": "aangepaste-opleiding",
+        })
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        education.refresh_from_db()
+        self.assertEqual(education.name, "Aangepaste opleiding")
+
+        list_page = self.client.get(reverse("dossier:education_list"))
+        self.assertContains(list_page, "Aangepaste opleiding")
+        self.assertContains(
+            list_page,
+            reverse("dossier:education_delete", args=[education.id]),
+        )
+        response = self.client.post(
+            reverse("dossier:education_delete", args=[education.id])
+        )
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        self.assertFalse(Education.objects.filter(id=education.id).exists())
+
+    def test_education_delete_requires_admin_and_preserves_linked_education(self):
+        url = reverse("dossier:education_delete", args=[self.education.id])
+
+        self.client.force_login(self.teacher)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.admin)
+        response = self.client.post(url, follow=True)
+        self.assertRedirects(response, reverse("dossier:education_list"))
+        self.assertContains(response, "kan niet worden verwijderd", status_code=200)
+        self.assertTrue(Education.objects.filter(id=self.education.id).exists())
 
     def test_teacher_can_edit_fixed_library_template_without_teaching_group(self):
         self.group.delete()
@@ -378,6 +656,272 @@ class EpdWorkflowTests(TestCase):
         self.assertFalse(LibraryField.objects.filter(id=field.id).exists())
         template.refresh_from_db()
         self.assertEqual(template.version, 4)
+
+    def test_teacher_can_bundle_and_add_library_modules_as_a_dossier(self):
+        self.client.force_login(self.teacher)
+        existing_module = LibraryTemplate.objects.get(title="Anamnese", education=self.education)
+        create_url = reverse("dossier:library_dossier_create")
+        create_page = self.client.get(create_url)
+        self.assertContains(create_page, "Anamnese")
+        response = self.client.post(create_url, {
+            "title": "Dossierbundel volledig", "description": "Bestaand onderdeel en nieuwe module",
+            "education": self.education.id,
+            "existing_modules": [str(existing_module.id)],
+            "new_modules": json.dumps([
+                {
+                    "title": "Bundelmodule A",
+                    "category": "module",
+                    "description": "Nieuwe module met volledige velden",
+                    "theme": "Opname",
+                    "instructions": "Registreer de observatie.",
+                    "fields": [
+                        {
+                            "label": "Observatie",
+                            "type": "short_text",
+                            "help_text": "Korte notitie",
+                            "required": True,
+                            "options": [],
+                            "rows": [],
+                            "columns": [],
+                        },
+                        {
+                            "label": "Opvolging",
+                            "type": "select",
+                            "help_text": "",
+                            "required": False,
+                            "options": ["Controleren", "Afronden"],
+                            "rows": [],
+                            "columns": [],
+                        },
+                    ],
+                },
+            ]),
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        existing_module.refresh_from_db()
+        self.assertEqual(existing_module.status, LibraryTemplate.Status.ACTIVE)
+        self.assertTrue(LibraryTemplate.objects.filter(id=existing_module.id).exists())
+        dossier = LibraryDossier.objects.get(title="Dossierbundel volledig")
+        entries = list(dossier.module_entries.all())
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].template, existing_module)
+        created_module = entries[1].template
+        self.assertEqual(created_module.title, "Bundelmodule A")
+        self.assertEqual(created_module.description, "Nieuwe module met volledige velden")
+        self.assertEqual(created_module.theme, "Opname")
+        self.assertEqual(created_module.instructions, "Registreer de observatie.")
+        first_module = created_module
+        self.assertEqual(first_module.category, LibraryTemplate.Category.MODULE)
+        self.assertEqual(first_module.education, self.education)
+        self.assertEqual(first_module.fields.count(), 2)
+        self.assertTrue(first_module.fields.get(label="Observatie").required)
+        self.assertEqual(
+            first_module.fields.get(label="Opvolging").options,
+            ["Controleren", "Afronden"],
+        )
+
+        list_response = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(list_response, "Dossierbundel volledig")
+        self.assertContains(list_response, "Anamnese")
+        self.assertContains(list_response, "Bundelmodule A")
+        case_response = self.client.get(reverse("dossier:teacher_case", args=[self.case.id]))
+        self.assertContains(case_response, "Dossierbundel volledig")
+
+        add_url = reverse("dossier:teacher_case_add_dossier", args=[self.case.id])
+        response = self.client.post(add_url, {"dossier_id": dossier.id})
+        self.assertRedirects(response, reverse("dossier:teacher_case", args=[self.case.id]))
+        copied = list(self.case.modules.filter(source_template__in=[existing_module, first_module]))
+        self.assertEqual([module.source_template for module in copied], [existing_module, first_module])
+        copied_new_module = next(module for module in copied if module.source_template == first_module)
+        self.assertEqual(copied_new_module.fields.count(), 2)
+        self.assertTrue(copied_new_module.fields.filter(label="Observatie").exists())
+
+        copy_response = self.client.post(
+            reverse("dossier:library_dossier_copy", args=[dossier.id])
+        )
+        self.assertRedirects(copy_response, reverse("dossier:library_list"))
+        duplicate = LibraryDossier.objects.get(title=f"Kopie van {dossier.title}")
+        self.assertEqual(
+            list(duplicate.module_entries.values_list("template_id", flat=True)),
+            [existing_module.id, first_module.id],
+        )
+        library_page = self.client.get(reverse("dossier:library_list"))
+        visible_dossier_ids = [
+            item.id for item in library_page.context["dossiers"]
+        ]
+        original_index = visible_dossier_ids.index(dossier.id)
+        self.assertEqual(
+            visible_dossier_ids[original_index - 1],
+            duplicate.id,
+        )
+
+        archive_response = self.client.post(
+            reverse("dossier:library_dossier_archive", args=[dossier.id])
+        )
+        self.assertRedirects(archive_response, reverse("dossier:library_list"))
+        dossier.refresh_from_db()
+        self.assertEqual(dossier.status, LibraryDossier.Status.ARCHIVED)
+        self.assertTrue(self.case.modules.filter(source_template=first_module).exists())
+
+    def test_multiple_library_dossiers_can_be_opened_independently(self):
+        self.client.force_login(self.teacher)
+        for title in ("Dossier een", "Dossier twee"):
+            self.client.post(reverse("dossier:library_dossier_create"), {
+                "title": title, "description": "", "education": self.education.id,
+                "new_modules": json.dumps([{
+                    "title": f"Module {title}",
+                    "category": "module",
+                    "fields": [],
+                }]),
+            })
+        self.assertEqual(LibraryDossier.objects.count(), 2)
+        self.assertEqual(LibraryTemplate.objects.filter(title__startswith="Module Dossier").count(), 2)
+        page = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(page, "Dossier een")
+        self.assertContains(page, "Dossier twee")
+        self.assertNotContains(page, "Open om de modules te bekijken")
+        self.assertEqual(
+            [item.title for item in page.context["dossiers"]],
+            ["Dossier twee", "Dossier een"],
+        )
+        filtered_page = self.client.get(
+            reverse("dossier:library_list"), {"dossier_q": "Dossier een"}
+        )
+        self.assertContains(filtered_page, "Dossier een")
+        self.assertEqual(
+            [item.title for item in filtered_page.context["dossiers"]], ["Dossier een"]
+        )
+        substring_page = self.client.get(
+            reverse("dossier:library_list"), {"dossier_q": "ossier een"}
+        )
+        self.assertEqual(list(substring_page.context["dossiers"]), [])
+        education_filtered_page = self.client.get(
+            reverse("dossier:library_list"),
+            {"dossier_education": str(self.education.id)},
+        )
+        self.assertContains(education_filtered_page, "Dossier een")
+        self.assertContains(education_filtered_page, "Dossier twee")
+
+    def test_library_dashboard_hides_loose_templates_but_dossier_form_keeps_them_available(self):
+        self.client.force_login(self.teacher)
+        dashboard = self.client.get(reverse("dossier:library_list"))
+        self.assertNotContains(dashboard, "Bibliotheekonderdelen")
+        self.assertContains(dashboard, "Beschikbare onderdelen beheren")
+        self.assertContains(
+            dashboard, '<details class="library-component-management-details"',
+        )
+        self.assertNotContains(
+            dashboard,
+            '<details class="library-component-management-details" open',
+        )
+        anamnese = LibraryTemplate.objects.get(title="Anamnese")
+        self.assertContains(dashboard, anamnese.title)
+        self.assertContains(
+            dashboard, reverse("dossier:library_detail", args=[anamnese.id])
+        )
+        self.assertContains(
+            dashboard, reverse("dossier:library_archive", args=[anamnese.id])
+        )
+        self.assertContains(dashboard, "Onderdeel toevoegen")
+
+        for title in ("Anamnese", "Klinisch redeneerplan"):
+            template = LibraryTemplate.objects.get(
+                title=title,
+                education=self.education,
+                status=LibraryTemplate.Status.ACTIVE,
+                is_fixed=True,
+            )
+            self.assertTrue(LibraryTemplate.objects.filter(pk=template.pk).exists())
+
+        dossier_form = self.client.get(reverse("dossier:library_dossier_create"))
+        self.assertContains(dossier_form, "Anamnese")
+        self.assertContains(dossier_form, "Klinisch redeneerplan")
+
+    def test_archived_standard_template_is_available_when_creating_a_dossier(self):
+        self.client.force_login(self.teacher)
+        template = LibraryTemplate.objects.get(
+            title="Anamnese", education=self.education, is_fixed=True
+        )
+        template.status = LibraryTemplate.Status.ARCHIVED
+        template.save(update_fields=["status", "updated_at"])
+
+        create_url = reverse("dossier:library_dossier_create")
+        dossier_form = self.client.get(create_url)
+        self.assertContains(dossier_form, "Anamnese")
+
+        response = self.client.post(create_url, {
+            "title": "Dossier met standaardonderdeel",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(template.id)],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        template.refresh_from_db()
+        self.assertEqual(template.status, LibraryTemplate.Status.ACTIVE)
+        self.assertTrue(
+            LibraryDossier.objects.get(title="Dossier met standaardonderdeel")
+            .modules.filter(pk=template.pk).exists()
+        )
+
+    def test_dossier_form_shows_and_accepts_modules_from_other_educations(self):
+        self.client.force_login(self.teacher)
+        other_education = Education.objects.create(
+            name="Verpleegkunde", slug="verpleegkunde"
+        )
+        template = LibraryTemplate.objects.create(
+            title="Verpleegkundig onderdeel",
+            description="",
+            category=LibraryTemplate.Category.MODULE,
+            education=other_education,
+        )
+        create_url = reverse("dossier:library_dossier_create")
+        form_page = self.client.get(create_url)
+        self.assertContains(form_page, "Verpleegkundig onderdeel")
+
+        response = self.client.post(create_url, {
+            "title": "Vroedkundig dossier met ander onderdeel",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(template.id)],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        dossier = LibraryDossier.objects.get(
+            title="Vroedkundig dossier met ander onderdeel"
+        )
+        self.assertTrue(dossier.modules.filter(pk=template.pk).exists())
+
+    def test_dossier_form_accepts_multiple_existing_modules(self):
+        self.client.force_login(self.teacher)
+        modules = list(LibraryTemplate.objects.filter(
+            title__in=["Anamnese", "Klinisch redeneerplan"],
+            education=self.education,
+            status=LibraryTemplate.Status.ACTIVE,
+        ))
+        self.assertEqual(len(modules), 2)
+
+        create_url = reverse("dossier:library_dossier_create")
+        form_page = self.client.get(create_url)
+        self.assertGreaterEqual(
+            form_page.content.count(b'type="checkbox" name="existing_modules"'),
+            2,
+        )
+        response = self.client.post(create_url, {
+            "title": "Dossier met meerdere bestaande onderdelen",
+            "description": "",
+            "education": self.education.id,
+            "existing_modules": [str(module.id) for module in modules],
+            "new_modules": "[]",
+        })
+        self.assertRedirects(response, reverse("dossier:library_list"))
+        dossier = LibraryDossier.objects.get(
+            title="Dossier met meerdere bestaande onderdelen"
+        )
+        self.assertEqual(
+            set(dossier.modules.values_list("id", flat=True)),
+            {module.id for module in modules},
+        )
 
     def test_invalid_library_choice_field_shows_validation_errors(self):
         self.client.login(username="teacher", password="testpass")

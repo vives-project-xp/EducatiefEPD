@@ -6,25 +6,33 @@ from django.contrib.auth.views import LoginView
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404, JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.text import slugify
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.views.decorators.http import require_POST
-from datetime import date, datetime
+from django.views.decorators.csrf import ensure_csrf_cookie
+import base64
+import binascii
+import json
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import mammoth
 import io
 import re
 from docx import Document
 from htmldocx import HtmlToDocx
+from urllib.parse import urlparse
 
 from .forms import (
     AssignmentForm,
     CaseForm,
     EducationForm,
     LibraryFieldForm,
+    LibraryDossierForm,
     LibraryTemplateForm,
     ModuleFieldForm,
     ModuleForm,
@@ -39,17 +47,23 @@ from .models import (
     Case,
     Education,
     FieldDefinition,
+    LibraryDossier,
+    LibraryDossierModule,
+    FunctionDefinition,
     LibraryField,
     LibraryTemplate,
     Module,
     ModuleField,
     ModuleResponse,
+    ManagedForm,
+    ManagedQuestion,
     Profile,
     StudentCase,
     TeachingGroup,
 )
 from .services import (
-    audit, copy_template_to_case, create_case_structure, module_schema, start_student_case, clean_html,
+    audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
+    ensure_default_templates, module_schema, start_student_case, clean_html,
 )
 
 
@@ -88,6 +102,20 @@ def editable_group(user, group_id):
     if not is_admin(user):
         groups = groups.filter(teacher=user)
     return get_object_or_404(groups, id=group_id)
+
+
+def accessible_library_dossiers(user):
+    dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
+    if is_admin(user):
+        return dossiers
+    education_ids = TeachingGroup.objects.filter(teacher=user).values("education_id")
+    profile_education_id = getattr(getattr(user, "epd_profile", None), "education_id", None)
+    return dossiers.filter(
+        Q(education_id__in=education_ids)
+        | Q(education_id=profile_education_id)
+        | Q(education__isnull=True)
+        | Q(created_by=user)
+    ).distinct()
 
 
 def require_post(request):
@@ -462,9 +490,20 @@ def teacher_case(request, case_id):
         Q(education=case.education) | Q(education__isnull=True),
         status=LibraryTemplate.Status.ACTIVE,
     ).exclude(id__in=case.modules.exclude(source_template__isnull=True).values("source_template_id"))
+    dossiers = LibraryDossier.objects.filter(
+        Q(education=case.education) | Q(education__isnull=True),
+        status=LibraryDossier.Status.ACTIVE,
+        module_entries__template__status=LibraryTemplate.Status.ACTIVE,
+    ).prefetch_related(Prefetch(
+        "module_entries",
+        queryset=LibraryDossierModule.objects.filter(
+            template__status=LibraryTemplate.Status.ACTIVE
+        ).select_related("template"),
+    )).distinct().order_by("title")
     return render(request, "dossier/teacher_case.html", {
         "case": case, "students": students,
         "available_groups": groups, "available_templates": templates,
+        "available_dossiers": dossiers,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
 
@@ -495,6 +534,30 @@ def education_edit(request, education_id=None):
 
 
 @login_required
+@require_POST
+def education_delete(request, education_id):
+    if not is_admin(request.user):
+        raise PermissionDenied
+    education = get_object_or_404(Education, id=education_id)
+    if (
+        education.groups.exists()
+        or education.cases.exists()
+        or education.templates.exists()
+        or education.library_dossiers.exists()
+    ):
+        messages.error(
+            request,
+            "Deze opleiding kan niet worden verwijderd zolang er lesgroepen, casussen "
+            "of bibliotheekitems aan gekoppeld zijn.",
+        )
+        return redirect("dossier:education_list")
+    audit(request, "education.deleted", education, name=education.name)
+    education.delete()
+    messages.success(request, "De opleiding is verwijderd.")
+    return redirect("dossier:education_list")
+
+
+@login_required
 def group_list(request):
     require_teacher(request.user)
     groups = TeachingGroup.objects.select_related("education", "teacher").prefetch_related("members")
@@ -508,8 +571,6 @@ def group_edit(request, group_id=None):
     require_teacher(request.user)
     group = editable_group(request.user, group_id) if group_id else None
     form = TeachingGroupForm(request.POST or None, instance=group)
-    if group:
-        form.fields["education"].disabled = True
     if not is_admin(request.user):
         form.fields.pop("teacher")
     else:
@@ -541,6 +602,17 @@ def group_detail(request, group_id):
     return render(request, "dossier/group_detail.html", {
         "group": group, "available_students": available_students,
     })
+
+
+@login_required
+@require_POST
+def group_delete(request, group_id):
+    require_teacher(request.user)
+    group = editable_group(request.user, group_id)
+    audit(request, "group.deleted", group, name=group.name)
+    group.delete()
+    messages.success(request, "De lesgroep is verwijderd. Bestaande studentdossiers blijven bewaard.")
+    return redirect("dossier:group_list")
 
 
 @login_required
@@ -612,6 +684,29 @@ def teacher_case_add_template(request, case_id):
 
 
 @login_required
+@require_POST
+@transaction.atomic
+def teacher_case_add_dossier(request, case_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    dossier = get_object_or_404(
+        LibraryDossier.objects.filter(
+            Q(education=case.education) | Q(education__isnull=True),
+            status=LibraryDossier.Status.ACTIVE,
+        ),
+        id=request.POST.get("dossier_id"),
+    )
+    modules = copy_library_dossier_to_case(dossier, case)
+    audit(request, "case.dossier_added", dossier, case_id=case.id, module_count=len(modules))
+    messages.success(
+        request,
+        f"Dossiersjabloon '{dossier.title}' toegepast: {len(modules)} modules gecontroleerd "
+        "en waar nodig toegevoegd.",
+    )
+    return redirect("dossier:teacher_case", case_id=case.id)
+
+
+@login_required
 def teacher_case_transition(request, case_id):
     require_teacher(request.user)
     require_post(request)
@@ -644,6 +739,31 @@ def teacher_case_transition(request, case_id):
     else:
         raise PermissionDenied
     return redirect("dossier:teacher_case", case_id=case.id)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def teacher_case_delete(request, case_id):
+    if user_role(request.user) != Profile.Role.TEACHER:
+        raise PermissionDenied
+    case = get_object_or_404(
+        teacher_cases(request.user).select_for_update(), id=case_id
+    )
+    if case.status != Case.Status.ARCHIVED:
+        raise PermissionDenied
+    if case.student_cases.exists():
+        messages.error(
+            request,
+            "Deze gearchiveerde casus kan niet worden verwijderd zolang er studentendossiers aan gekoppeld zijn.",
+        )
+        return redirect("dossier:teacher_case", case_id=case.id)
+    audit(request, "case.deleted", case, title=case.title)
+    patient = case.patient
+    case.delete()
+    patient.delete()
+    messages.success(request, "De gearchiveerde casus is verwijderd.")
+    return redirect("dossier:teacher_dashboard")
 
 
 @login_required
@@ -840,20 +960,530 @@ def library_list(request):
     category = request.GET.get("category", "")
     education = request.GET.get("education", "").strip()
     theme = request.GET.get("theme", "").strip()
-    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE).select_related("education")
+    dossier_query = request.GET.get("dossier_q", "").strip()
+    dossier_education = request.GET.get("dossier_education", "").strip()
+    dossiers = accessible_library_dossiers(request.user).select_related("education").prefetch_related(
+        Prefetch(
+            "module_entries",
+            queryset=LibraryDossierModule.objects.filter(
+                template__status=LibraryTemplate.Status.ACTIVE
+            ).select_related("template"),
+        )
+    ).order_by("-created_at", "-id")
+    dossier_educations = dossiers.exclude(education__isnull=True).order_by().values_list(
+        "education_id", "education__name"
+    ).distinct()
+    if dossier_query:
+        dossiers = dossiers.filter(title__istartswith=dossier_query)
+    if dossier_education.isdecimal():
+        dossiers = dossiers.filter(education_id=dossier_education)
+    ordered_dossiers = list(dossiers)
+    available_templates = LibraryTemplate.objects.filter(
+        status=LibraryTemplate.Status.ACTIVE
+    ).select_related("education")
     if query:
-        templates = templates.filter(Q(title__icontains=query) | Q(description__icontains=query))
+        available_templates = available_templates.filter(
+            Q(title__icontains=query) | Q(description__icontains=query)
+        )
     if category in LibraryTemplate.Category.values:
-        templates = templates.filter(category=category)
+        available_templates = available_templates.filter(category=category)
     if education:
-        templates = templates.filter(education__name__icontains=education)
+        available_templates = available_templates.filter(education__name__icontains=education)
     if theme:
-        templates = templates.filter(theme__icontains=theme)
+        available_templates = available_templates.filter(theme__icontains=theme)
     return render(request, "dossier/library_list.html", {
-        "templates": templates, "query": query, "category_filter": category,
+        "dossier_query": dossier_query, "dossier_education_filter": dossier_education,
+        "dossiers": ordered_dossiers,
+        "dossier_educations": dossier_educations,
+        "available_templates": available_templates,
+        "query": query, "category_filter": category,
         "education_filter": education, "theme_filter": theme,
-        "categories": LibraryTemplate.Category.choices,
+        "categories": LibraryTemplate.Category.choices, "is_admin": is_admin(request.user),
+        "component_filters_active": bool(query or category or education or theme),
     })
+
+
+def purge_expired_functions():
+    cutoff = timezone.now() - timedelta(days=30)
+    FunctionDefinition.objects.filter(
+        deleted_at__lt=cutoff, std=False
+    ).delete()
+
+
+@login_required
+@ensure_csrf_cookie
+def function_management(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    query = request.GET.get("q", "").strip()
+    sort = request.GET.get("sort", "az")
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=True)
+    if query:
+        functions = functions.filter(title__icontains=query)
+    if sort == "za":
+        functions = functions.order_by("-title", "-id")
+    elif sort == "oldest":
+        functions = functions.order_by("created_at", "id")
+    else:
+        sort = "az"
+        functions = functions.order_by("title", "id")
+    return render(request, "dossier/function_management.html", {
+        "functions": functions,
+        "query": query,
+        "sort": sort,
+        "deleted_count": FunctionDefinition.objects.filter(
+            deleted_at__isnull=False, std=False
+        ).count(),
+    })
+
+
+@login_required
+def function_type(request):
+    require_teacher(request.user)
+    if request.method == "POST":
+        kind = request.POST.get("kind")
+        if kind not in FunctionDefinition.Kind.values:
+            raise Http404
+        return redirect(f"{reverse('dossier:function_general')}?kind={kind}")
+    return render(request, "dossier/function_type.html")
+
+
+@login_required
+def function_general(request):
+    require_teacher(request.user)
+    kind = request.GET.get("kind", request.POST.get("kind", ""))
+    if kind not in FunctionDefinition.Kind.values:
+        return redirect("dossier:function_type")
+    error = ""
+    title = ""
+    if request.method == "POST":
+        title = request.POST.get("title", "").strip()
+        if not title:
+            error = "Geef de functie een naam."
+        elif len(title) > 180:
+            error = "De naam mag maximaal 180 tekens bevatten."
+        else:
+            with transaction.atomic():
+                function = FunctionDefinition.objects.create(title=title, kind=kind)
+                if kind == FunctionDefinition.Kind.FORM:
+                    ManagedForm.objects.create(function=function, title=title)
+                audit(request, "function.created", function, kind=kind)
+            return redirect("dossier:function_detail", function_id=function.id)
+    return render(request, "dossier/function_general.html", {
+        "kind": kind, "title": title, "error": error,
+    })
+
+
+def managed_function_payload(function):
+    return {
+        "id": function.id,
+        "title": function.title,
+        "kind": function.kind,
+        "locked": function.locked,
+        "std": function.std,
+        "forms": [{
+            "id": form.id,
+            "title": form.title,
+            "position": form.position,
+            "questions": [{
+                "id": question.id,
+                "fieldType": question.field_type,
+                "question": question.question,
+                "unit": question.unit,
+                "required": question.required,
+                "options": question.options,
+                "columns": question.columns,
+                "rows": question.rows,
+                "url": question.url,
+                "buttonText": question.button_text,
+                "image": question.image,
+                "caption": question.caption,
+                "explanation": question.explanation,
+            } for question in form.questions.all()],
+        } for form in function.forms.all()],
+    }
+
+
+@login_required
+@ensure_csrf_cookie
+def function_detail(request, function_id):
+    require_teacher(request.user)
+    function = get_object_or_404(
+        FunctionDefinition.objects.prefetch_related("forms__questions"),
+        id=function_id, deleted_at__isnull=True,
+    )
+    if function.std:
+        raise PermissionDenied
+    return render(request, "dossier/function_editor.html", {
+        "function": function,
+        "function_data": managed_function_payload(function),
+    })
+
+
+def function_api_error(message, status=400, warning=False):
+    return JsonResponse({"ok": False, "message": message, "warning": warning}, status=status)
+
+
+def clean_string_list(value, max_length=500):
+    if not isinstance(value, list):
+        raise ValueError("Ongeldige lijst met antwoorden.")
+    result = []
+    for item in value:
+        if not isinstance(item, str) or len(item) > max_length:
+            raise ValueError("Een antwoord is ongeldig of te lang.")
+        result.append(item.strip())
+    return result
+
+
+def validate_function_image(value):
+    if not value:
+        return ""
+    if not isinstance(value, str) or len(value) > 420_000:
+        raise ValueError("De afbeelding mag maximaal 300 kB groot zijn.")
+    if not value.startswith(("data:image/png;base64,", "data:image/jpeg;base64,", "data:image/gif;base64,", "data:image/webp;base64,")):
+        raise ValueError("Kies een geldig afbeeldingsbestand.")
+    try:
+        decoded = base64.b64decode(value.split(",", 1)[1], validate=True)
+    except (binascii.Error, ValueError, IndexError):
+        raise ValueError("Kies een geldig afbeeldingsbestand.") from None
+    if len(decoded) > 300_000:
+        raise ValueError("De afbeelding mag maximaal 300 kB groot zijn.")
+    mime_type = value.split(";", 1)[0][5:]
+    valid_signature = {
+        "image/png": decoded.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/jpeg": decoded.startswith(b"\xff\xd8\xff"),
+        "image/gif": decoded.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": decoded.startswith(b"RIFF") and decoded[8:12] == b"WEBP",
+    }
+    if not valid_signature.get(mime_type, False):
+        raise ValueError("Kies een geldig afbeeldingsbestand.")
+    return value
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_action(request, function_id):
+    require_teacher(request.user)
+    function = get_object_or_404(
+        FunctionDefinition.objects.select_for_update(), id=function_id, deleted_at__isnull=True
+    )
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error("Ongeldige aanvraag.")
+    if not isinstance(payload, dict):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action")
+    if function.std:
+        return function_api_error("Standaardfuncties mogen niet worden bewerkt.", 403, warning=True)
+
+    if action == "toggle_lock":
+        function.locked = not function.locked
+        function.save(update_fields=["locked"])
+        message = "Functie vergrendeld" if function.locked else "Functie ontgrendeld"
+        return JsonResponse({"ok": True, "locked": function.locked, "message": message})
+    if action == "delete":
+        function.deleted_at = timezone.now()
+        function.save(update_fields=["deleted_at"])
+        audit(request, "function.deleted", function)
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})
+    if action == "rename":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if not title or len(title) > 180:
+            return function_api_error("Geef een geldige naam van maximaal 180 tekens.")
+        function.title = title
+        function.save(update_fields=["title"])
+        if function.kind == FunctionDefinition.Kind.FORM:
+            function.forms.update(title=title)
+        return JsonResponse({"ok": True, "title": title, "message": "Naam gewijzigd"})
+    if action == "create_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        if function.kind != FunctionDefinition.Kind.GROUP:
+            return function_api_error("Een formulier kan alleen aan een formulierengroep worden toegevoegd.")
+        form = ManagedForm.objects.create(
+            function=function, title="", position=function.forms.count()
+        )
+        return JsonResponse({"ok": True, "form": {"id": form.id, "title": form.title, "position": form.position, "questions": []}})
+    if action == "reorder_forms":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        form_ids = payload.get("formIds")
+        forms = list(function.forms.all())
+        if (
+            not isinstance(form_ids, list)
+            or any(type(form_id) is not int for form_id in form_ids)
+            or len(form_ids) != len(forms)
+            or set(form_ids) != {form.id for form in forms}
+        ):
+            return function_api_error("De formulier-volgorde is ongeldig.")
+        for position, form_id in enumerate(form_ids):
+            ManagedForm.objects.filter(id=form_id, function=function).update(position=position)
+        return JsonResponse({"ok": True})
+    if action == "delete_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        if function.kind != FunctionDefinition.Kind.GROUP:
+            return function_api_error("Dit formulier kan niet afzonderlijk worden verwijderd.")
+        if type(payload.get("formId")) is not int or payload["formId"] < 1:
+            return function_api_error("Ongeldig formulier.")
+        form = get_object_or_404(ManagedForm, id=payload["formId"], function=function)
+        form.delete()
+        for position, item in enumerate(function.forms.all()):
+            ManagedForm.objects.filter(id=item.id).update(position=position)
+        return JsonResponse({"ok": True, "message": "Formulier verwijderd"})
+    if action == "save_form":
+        if function.locked:
+            return function_api_error("Functie vergrendeld.", 423)
+        if type(payload.get("formId")) is not int or payload["formId"] < 1:
+            return function_api_error("Ongeldig formulier.")
+        form = get_object_or_404(ManagedForm, id=payload["formId"], function=function)
+        title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
+        if function.kind == FunctionDefinition.Kind.GROUP and not title:
+            return function_api_error("Geef het formulier een naam", warning=True)
+        if len(title) > 180:
+            return function_api_error("De formuliernaam mag maximaal 180 tekens bevatten.")
+        if function.kind == FunctionDefinition.Kind.FORM:
+            title = function.title
+        incoming = payload.get("questions")
+        if not isinstance(incoming, list):
+            return function_api_error("Ongeldige vragenlijst.")
+        if sum(1 for item in incoming if isinstance(item, dict) and item.get("fieldType") == ManagedQuestion.FieldType.MATRIX) > 2:
+            return function_api_error("Een formulier mag maximaal 2 matrices bevatten.", warning=True)
+        valid_types = set(ManagedQuestion.FieldType.values)
+        prepared = []
+        try:
+            for position, item in enumerate(incoming):
+                if not isinstance(item, dict) or item.get("fieldType") not in valid_types:
+                    raise ValueError("Kies een geldig veldtype.")
+                if not isinstance(item.get("required", False), bool):
+                    raise ValueError("De instelling voor verplicht antwoord is ongeldig.")
+                url = item.get("url", "")
+                if not isinstance(url, str):
+                    raise ValueError("Vul een geldige http(s)-link in.")
+                if url:
+                    parsed_url = urlparse(url)
+                    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+                        raise ValueError("Gebruik een geldige http(s)-link.")
+                field_type = item["fieldType"]
+                image = validate_function_image(item.get("image", "")) if field_type == ManagedQuestion.FieldType.IMAGE else ""
+                prepared.append(ManagedQuestion(
+                    form=form,
+                    position=position,
+                    field_type=field_type,
+                    question=str(item.get("question", ""))[:500],
+                    unit=str(item.get("unit", ""))[:120],
+                    required=bool(item.get("required", False)),
+                    options=clean_string_list(item.get("options", [])),
+                    columns=clean_string_list(item.get("columns", [])),
+                    rows=clean_string_list(item.get("rows", [])),
+                    url=url[:1000],
+                    button_text=str(item.get("buttonText", ""))[:180],
+                    image=image,
+                    caption=str(item.get("caption", ""))[:280],
+                    explanation=str(item.get("explanation", "")),
+                ))
+        except ValueError as error:
+            return function_api_error(str(error), warning=True)
+        form.title = title
+        form.save(update_fields=["title"])
+        form.questions.all().delete()
+        ManagedQuestion.objects.bulk_create(prepared)
+        audit(request, "function.form_saved", function, form_id=form.id)
+        return JsonResponse({"ok": True, "message": "Wijzigingen opgeslagen"})
+    return function_api_error("Onbekende actie.")
+
+
+@login_required
+@ensure_csrf_cookie
+def function_deleted(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    functions = FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).order_by("-deleted_at")
+    now = timezone.now()
+    for function in functions:
+        function.days_left = max(0, 30 - (now - function.deleted_at).days)
+    return render(request, "dossier/function_deleted.html", {
+        "functions": functions,
+    })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def function_trash_action(request):
+    require_teacher(request.user)
+    purge_expired_functions()
+    try:
+        payload = json.loads(request.body or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return function_api_error("Ongeldige aanvraag.")
+    if not isinstance(payload, dict):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action")
+    if action == "empty":
+        FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Prullenbak geleegd"})
+    if action not in {"restore", "permanent_delete"}:
+        return function_api_error("Onbekende actie.")
+    if type(payload.get("functionId")) is not int or payload["functionId"] < 1:
+        return function_api_error("Ongeldige functie.")
+    function = get_object_or_404(
+        FunctionDefinition.objects.select_for_update(), id=payload.get("functionId"),
+        deleted_at__isnull=False, std=False,
+    )
+    if action == "restore":
+        function.deleted_at = None
+        function.save(update_fields=["deleted_at"])
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie hersteld"})
+    if action == "permanent_delete":
+        function.delete()
+        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie definitief verwijderd"})
+    return function_api_error("Onbekende actie.")
+
+
+@login_required
+@transaction.atomic
+def library_dossier(request, dossier_id=None):
+    require_teacher(request.user)
+    ensure_default_templates()
+    dossier = None
+    if dossier_id is not None:
+        dossiers = accessible_library_dossiers(request.user)
+        dossier = get_object_or_404(dossiers, id=dossier_id)
+
+    education_queryset = Education.objects.all()
+    if not is_admin(request.user):
+        education_ids = TeachingGroup.objects.filter(
+            teacher=request.user
+        ).values("education_id")
+        profile_education_id = getattr(
+            getattr(request.user, "epd_profile", None), "education_id", None
+        )
+        education_queryset = education_queryset.filter(
+            Q(id__in=education_ids) | Q(id=profile_education_id)
+        ).distinct()
+    module_queryset = LibraryTemplate.objects.filter(
+        Q(status=LibraryTemplate.Status.ACTIVE)
+        | Q(is_fixed=True, seed_key__startswith="vroedkunde-")
+    )
+    form = LibraryDossierForm(
+        request.POST or None,
+        instance=dossier,
+        education_queryset=education_queryset,
+        module_queryset=module_queryset,
+    )
+    if request.method == "POST" and form.is_valid():
+        item = form.save(commit=False)
+        if item.pk is None:
+            item.created_by = request.user
+        item.save()
+        LibraryDossierModule.objects.filter(dossier=item).delete()
+        selected_modules = list(form.cleaned_data["existing_modules"])
+        for template in selected_modules:
+            if template.status != LibraryTemplate.Status.ACTIVE:
+                template.status = LibraryTemplate.Status.ACTIVE
+                template.save(update_fields=["status", "updated_at"])
+        LibraryDossierModule.objects.bulk_create([
+            LibraryDossierModule(dossier=item, template=template, position=position)
+            for position, template in enumerate(selected_modules)
+        ])
+        position = len(selected_modules)
+        for offset, module_data in enumerate(form.cleaned_data["new_modules"]):
+            template = LibraryTemplate.objects.create(
+                title=module_data["title"],
+                description=module_data["description"],
+                category=module_data["category"],
+                education=item.education,
+                theme=module_data["theme"],
+                instructions=module_data["instructions"],
+                created_by=request.user,
+            )
+            LibraryDossierModule.objects.create(
+                dossier=item,
+                template=template,
+                position=position + offset,
+            )
+            field_keys = set()
+            for field_position, field_data in enumerate(module_data["fields"]):
+                base_key = slugify(field_data["label"])[:65] or f"veld-{field_position + 1}"
+                key = base_key
+                suffix = 2
+                while key in field_keys:
+                    suffix_text = f"-{suffix}"
+                    key = f"{base_key[:80 - len(suffix_text)]}{suffix_text}"
+                    suffix += 1
+                field_keys.add(key)
+                LibraryField.objects.create(
+                    template=template,
+                    label=field_data["label"],
+                    key=key,
+                    field_type=field_data["type"],
+                    help_text=field_data["help_text"],
+                    required=field_data["required"],
+                    position=field_position,
+                    options=field_data["options"],
+                    rows=field_data["rows"],
+                    columns=field_data["columns"],
+                )
+        audit(request, "library_dossier.updated" if dossier else "library_dossier.created", item)
+        messages.success(request, "Dossiersjabloon bewaard.")
+        return redirect("dossier:library_list")
+    return render(request, "dossier/library_dossier_form.html", {
+        "form": form,
+        "title": "Dossiersjabloon bewerken" if dossier else "Nieuw dossiersjabloon",
+        "dossier": dossier,
+        "field_types": FieldDefinition.FieldType.choices,
+        "module_categories": LibraryTemplate.Category.choices,
+    })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def library_dossier_copy(request, dossier_id):
+    require_teacher(request.user)
+    dossiers = accessible_library_dossiers(request.user)
+    source = get_object_or_404(
+        dossiers.select_for_update().prefetch_related("module_entries"),
+        id=dossier_id,
+    )
+    duplicate = LibraryDossier.objects.create(
+        title=f"Kopie van {source.title}",
+        description=source.description,
+        education=source.education,
+        created_by=request.user,
+        copied_from=source,
+    )
+    LibraryDossierModule.objects.bulk_create([
+        LibraryDossierModule(
+            dossier=duplicate, template=entry.template, position=entry.position
+        )
+        for entry in source.module_entries.all()
+    ])
+    audit(request, "library_dossier.copied", duplicate, source_id=source.id)
+    messages.success(request, f"Dossiersjabloon gekopieerd als '{duplicate.title}'.")
+    return redirect("dossier:library_list")
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def library_dossier_archive(request, dossier_id):
+    require_teacher(request.user)
+    dossiers = accessible_library_dossiers(request.user)
+    dossier = get_object_or_404(dossiers.select_for_update(), id=dossier_id)
+    dossier.status = LibraryDossier.Status.ARCHIVED
+    dossier.save(update_fields=["status", "updated_at"])
+    audit(request, "library_dossier.archived", dossier)
+    messages.success(
+        request,
+        "Dossiersjabloon verwijderd uit de bibliotheek. Bestaande casuskopieën blijven behouden.",
+    )
+    return redirect("dossier:library_list")
 
 
 @login_required
@@ -864,6 +1494,40 @@ def library_template(request, template_id=None):
     if request.method == "POST":
         templates = templates.select_for_update()
     template = get_object_or_404(templates, id=template_id) if template_id else None
+    action = request.POST.get("action")
+
+    if template and action in {"add_function", "remove_function"}:
+        if not is_admin(request.user):
+            raise PermissionDenied
+        functions = list(template.functions or [])
+        if action == "add_function":
+            new_name = request.POST.get("new_function", "").strip()
+            if not new_name:
+                messages.error(request, "Geef de nieuwe functie een naam.")
+            elif len(new_name) > 180:
+                messages.error(request, "De naam mag maximaal 180 tekens bevatten.")
+            elif any(item.casefold() == new_name.casefold() for item in functions):
+                messages.error(request, "Deze functie bestaat al.")
+            else:
+                functions.append(new_name)
+                template.functions = functions
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.function_added", template, title=new_name)
+                messages.success(request, "Functie toegevoegd.")
+        elif action == "remove_function":
+            remove_name = request.POST.get("remove_function", "").strip()
+            filtered = [item for item in functions if item.casefold() != remove_name.casefold()]
+            if filtered != functions:
+                template.functions = filtered
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.function_removed", template, title=remove_name)
+                messages.success(request, "Functie verwijderd.")
+            else:
+                messages.error(request, "Functie niet gevonden.")
+        return redirect("dossier:library_detail", template_id=template.id)
+
     form = LibraryTemplateForm(request.POST or None, instance=template)
     if not is_admin(request.user):
         form.fields.pop("is_fixed")
@@ -880,6 +1544,7 @@ def library_template(request, template_id=None):
     if template:
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
+            "can_manage_functions": is_admin(request.user),
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,

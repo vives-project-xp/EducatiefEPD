@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Recent verwijderd | Functies beheer{% endblock %}
+{% block content %}
+<main class="teacher-shell function-shell" data-function-page="deleted" data-action-url="{% url 'dossier:function_trash_action' %}">
+  <header class="page-bar">
+    <div><p class="eyebrow">Functies beheer</p><h1>Recent verwijderd</h1><p class="function-hint">Verwijderde functies blijven 30 dagen bewaard en worden daarna definitief gewist.</p></div>
+    <div class="header-actions"><a class="back" href="{% url 'dossier:function_management' %}">← Ga terug</a></div>
+  </header>
+  <section class="function-card" aria-labelledby="deleted-heading">
+    <div class="function-card-heading"><h2 id="deleted-heading">Verwijderd</h2><button class="outline button danger-outline" type="button" data-empty-trash {% if not functions %}disabled{% endif %}>Prullenbak legen</button></div>
+    <div class="deleted-list">
+      {% for item in functions %}
+      <article class="deleted-row">
+        <div><h3>{{ item.title }}</h3><p>Verwijderd op {{ item.deleted_at|date:'j F Y' }}. Nog {{ item.days_left }} dagen te herstellen.</p></div>
+        <div class="deleted-actions">
+          <button class="outline button" type="button" data-trash-action="restore" data-id="{{ item.id }}">Herstellen</button>
+          <button class="icon-action danger" type="button" data-trash-action="permanent_delete" data-id="{{ item.id }}" data-title="{{ item.title }}" aria-label="Definitief verwijderen: {{ item.title }}"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3.5 5.5h13m-11.5 0 .8 11h8.4l.8-11M7 5.5V3h6v2.5m-5 3v5m4-5v5"/></svg></button>
+        </div>
+      </article>
+      {% empty %}<p class="empty-state">Er zijn geen recent verwijderde functies.</p>{% endfor %}
+    </div>
+  </section>
+  <div class="function-toast-region" aria-live="polite" aria-atomic="true"></div>
+  <dialog class="function-dialog" data-function-dialog aria-labelledby="dialog-title"><form method="dialog" data-dialog-form><h2 id="dialog-title" data-dialog-title>Bevestigen</h2><p data-dialog-message></p><label class="dialog-input" data-dialog-input-wrap hidden><span>Naam</span><input data-dialog-input maxlength="180"></label><div class="dialog-actions"><button class="outline button" value="cancel">Annuleren</button><button class="primary button" value="confirm" data-dialog-confirm>Bevestigen</button></div></form></dialog>
+</main>
+<script src="{% static 'function_management.js' %}" defer></script>
+{% endblock %}

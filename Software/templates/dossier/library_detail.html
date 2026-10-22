@@ -33,6 +33,29 @@
     {% endfor %}
     <a class="outline inline-action" href="{% url 'dossier:library_field_create' template_item.id %}">Veld toevoegen</a>
   </section>
+  {% if can_manage_functions %}
+  <section class="editor-section">
+    <h2>Functies</h2>
+    <p class="muted">Beheer de functienamen van dit bibliotheekonderdeel.</p>
+    {% for name in template_item.functions %}
+    <div class="content-row">
+      <strong>{{ name }}</strong>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="remove_function">
+        <input type="hidden" name="remove_function" value="{{ name }}">
+        <button class="text-button danger" type="submit" aria-label="{{ name }} verwijderen">Verwijderen</button>
+      </form>
+    </div>
+    {% empty %}<p>Dit onderdeel heeft nog geen functienamen.</p>{% endfor %}
+    <form method="post" class="filter-bar">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_function">
+      <input name="new_function" maxlength="180" required aria-label="Nieuwe functienaam" placeholder="Nieuwe functienaam">
+      <button class="outline button" type="submit">Functie toevoegen</button>
+    </form>
+  </section>
+  {% endif %}
   <form method="post" class="editor-form">
     <section>
       {% csrf_token %}
