@@ -1,3 +1,5 @@
+import uuid
+from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -70,6 +72,9 @@ class TeachingGroup(models.Model):
     def __str__(self):
         return f"{self.education}: {self.name}"
 
+def patient_image_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    return f"images/{uuid.uuid4().hex}{extension}"
 
 class Patient(models.Model):
     class Gender(models.TextChoices):
@@ -84,7 +89,7 @@ class Patient(models.Model):
     gender = models.CharField(
         max_length=20, choices=Gender.choices, default=Gender.UNKNOWN, blank=True
     )
-    image = models.ImageField(upload_to="images/", blank=True)    # models.CharField(max_length=240, blank=True)
+    image = models.ImageField(upload_to=patient_image_path, blank=True)
     context = models.CharField(max_length=280, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

@@ -2,6 +2,7 @@ import json
 
 from django import forms
 from django.utils.text import slugify
+from django.core.files.uploadedfile import UploadedFile
 
 from .models import (
     Assignment, Case, Education, FieldDefinition, LibraryField, LibraryTemplate,
@@ -26,7 +27,7 @@ class PatientForm(forms.ModelForm):
 
     def clean_image(self):
         upload = self.cleaned_data.get("image")
-        if upload and hasattr(upload, "size") and upload.size > 10 * 1024 * 1024:
+        if isinstance(upload, UploadedFile) and upload.size > 10 * 1024 * 1024:
             raise forms.ValidationError("De foto mag maximaal 10 MB groot zijn.")
         return upload
 

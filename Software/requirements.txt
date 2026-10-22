@@ -8,3 +8,4 @@ mammoth>=1.9,<2
 htmldocx>=0.0.6,<0.1
 python-docx>=1.1,<2
 nh3>=0.2,<1
+Pillow>=10,<12
