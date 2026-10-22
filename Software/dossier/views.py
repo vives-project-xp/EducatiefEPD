@@ -13,6 +13,7 @@ from django.utils.text import slugify
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import ensure_csrf_cookie
 import base64
 import binascii
 import json
@@ -95,6 +96,20 @@ def editable_group(user, group_id):
     if not is_admin(user):
         groups = groups.filter(teacher=user)
     return get_object_or_404(groups, id=group_id)
+
+
+def accessible_library_dossiers(user):
+    dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
+    if is_admin(user):
+        return dossiers
+    education_ids = TeachingGroup.objects.filter(teacher=user).values("education_id")
+    profile_education_id = getattr(getattr(user, "epd_profile", None), "education_id", None)
+    return dossiers.filter(
+        Q(education_id__in=education_ids)
+        | Q(education_id=profile_education_id)
+        | Q(education__isnull=True)
+        | Q(created_by=user)
+    ).distinct()
 
 
 def require_post(request):
@@ -738,7 +753,9 @@ def teacher_case_delete(request, case_id):
         )
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "case.deleted", case, title=case.title)
+    patient = case.patient
     case.delete()
+    patient.delete()
     messages.success(request, "De gearchiveerde casus is verwijderd.")
     return redirect("dossier:teacher_dashboard")
 
@@ -928,11 +945,13 @@ def teacher_review_assignment(request, student_case_id, submission_id):
 @login_required
 def library_list(request):
     require_teacher(request.user)
+    query = request.GET.get("q", "").strip()
+    category = request.GET.get("category", "")
+    education = request.GET.get("education", "").strip()
+    theme = request.GET.get("theme", "").strip()
     dossier_query = request.GET.get("dossier_q", "").strip()
     dossier_education = request.GET.get("dossier_education", "").strip()
-    dossiers = LibraryDossier.objects.filter(
-        status=LibraryDossier.Status.ACTIVE
-    ).select_related("education").prefetch_related(
+    dossiers = accessible_library_dossiers(request.user).select_related("education").prefetch_related(
         Prefetch(
             "module_entries",
             queryset=LibraryDossierModule.objects.filter(
@@ -940,19 +959,6 @@ def library_list(request):
             ).select_related("template"),
         )
     ).order_by("-created_at", "-id")
-    if not is_admin(request.user):
-        education_ids = TeachingGroup.objects.filter(
-            teacher=request.user
-        ).values("education_id")
-        profile_education_id = getattr(
-            getattr(request.user, "epd_profile", None), "education_id", None
-        )
-        dossiers = dossiers.filter(
-            Q(education_id__in=education_ids)
-            | Q(education_id=profile_education_id)
-            | Q(education__isnull=True)
-            | Q(created_by=request.user)
-        ).distinct()
     dossier_educations = dossiers.exclude(education__isnull=True).order_by().values_list(
         "education_id", "education__name"
     ).distinct()
@@ -964,14 +970,25 @@ def library_list(request):
     available_templates = LibraryTemplate.objects.filter(
         status=LibraryTemplate.Status.ACTIVE
     ).select_related("education")
+    if query:
+        available_templates = available_templates.filter(
+            Q(title__icontains=query) | Q(description__icontains=query)
+        )
+    if category in LibraryTemplate.Category.values:
+        available_templates = available_templates.filter(category=category)
+    if education:
+        available_templates = available_templates.filter(education__name__icontains=education)
+    if theme:
+        available_templates = available_templates.filter(theme__icontains=theme)
     return render(request, "dossier/library_list.html", {
         "dossier_query": dossier_query, "dossier_education_filter": dossier_education,
         "dossiers": ordered_dossiers,
         "dossier_educations": dossier_educations,
         "available_templates": available_templates,
-        "templates": templates, "query": query, "category_filter": category,
+        "query": query, "category_filter": category,
         "education_filter": education, "theme_filter": theme,
         "categories": LibraryTemplate.Category.choices, "is_admin": is_admin(request.user),
+        "component_filters_active": bool(query or category or education or theme),
     })
 
 
@@ -983,6 +1000,7 @@ def purge_expired_functions():
 
 
 @login_required
+@ensure_csrf_cookie
 def function_management(request):
     require_teacher(request.user)
     purge_expired_functions()
@@ -1076,6 +1094,7 @@ def managed_function_payload(function):
 
 
 @login_required
+@ensure_csrf_cookie
 def function_detail(request, function_id):
     require_teacher(request.user)
     function = get_object_or_404(
@@ -1087,7 +1106,6 @@ def function_detail(request, function_id):
     return render(request, "dossier/function_editor.html", {
         "function": function,
         "function_data": managed_function_payload(function),
-        "field_types": ManagedQuestion.FieldType.choices,
     })
 
 
@@ -1143,7 +1161,9 @@ def function_action(request, function_id):
         payload = json.loads(request.body or "{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return function_api_error("Ongeldige aanvraag.")
-    action = payload.get("action") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action")
     if function.std:
         return function_api_error("Standaardfuncties mogen niet worden bewerkt.", 403, warning=True)
 
@@ -1185,6 +1205,7 @@ def function_action(request, function_id):
         if (
             not isinstance(form_ids, list)
             or any(type(form_id) is not int for form_id in form_ids)
+            or len(form_ids) != len(forms)
             or set(form_ids) != {form.id for form in forms}
         ):
             return function_api_error("De formulier-volgorde is ongeldig.")
@@ -1196,7 +1217,9 @@ def function_action(request, function_id):
             return function_api_error("Functie vergrendeld.", 423)
         if function.kind != FunctionDefinition.Kind.GROUP:
             return function_api_error("Dit formulier kan niet afzonderlijk worden verwijderd.")
-        form = get_object_or_404(ManagedForm, id=payload.get("formId"), function=function)
+        if type(payload.get("formId")) is not int or payload["formId"] < 1:
+            return function_api_error("Ongeldig formulier.")
+        form = get_object_or_404(ManagedForm, id=payload["formId"], function=function)
         form.delete()
         for position, item in enumerate(function.forms.all()):
             ManagedForm.objects.filter(id=item.id).update(position=position)
@@ -1204,7 +1227,9 @@ def function_action(request, function_id):
     if action == "save_form":
         if function.locked:
             return function_api_error("Functie vergrendeld.", 423)
-        form = get_object_or_404(ManagedForm, id=payload.get("formId"), function=function)
+        if type(payload.get("formId")) is not int or payload["formId"] < 1:
+            return function_api_error("Ongeldig formulier.")
+        form = get_object_or_404(ManagedForm, id=payload["formId"], function=function)
         title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
         if function.kind == FunctionDefinition.Kind.GROUP and not title:
             return function_api_error("Geef het formulier een naam", warning=True)
@@ -1262,6 +1287,7 @@ def function_action(request, function_id):
 
 
 @login_required
+@ensure_csrf_cookie
 def function_deleted(request):
     require_teacher(request.user)
     purge_expired_functions()
@@ -1284,10 +1310,16 @@ def function_trash_action(request):
         payload = json.loads(request.body or "{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return function_api_error("Ongeldige aanvraag.")
-    action = payload.get("action") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return function_api_error("Ongeldige aanvraag.")
+    action = payload.get("action")
     if action == "empty":
         FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).delete()
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Prullenbak geleegd"})
+    if action not in {"restore", "permanent_delete"}:
+        return function_api_error("Onbekende actie.")
+    if type(payload.get("functionId")) is not int or payload["functionId"] < 1:
+        return function_api_error("Ongeldige functie.")
     function = get_object_or_404(
         FunctionDefinition.objects.select_for_update(), id=payload.get("functionId"),
         deleted_at__isnull=False, std=False,
@@ -1309,20 +1341,7 @@ def library_dossier(request, dossier_id=None):
     ensure_default_templates()
     dossier = None
     if dossier_id is not None:
-        dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
-        if not is_admin(request.user):
-            education_ids = TeachingGroup.objects.filter(
-                teacher=request.user
-            ).values("education_id")
-            profile_education_id = getattr(
-                getattr(request.user, "epd_profile", None), "education_id", None
-            )
-            dossiers = dossiers.filter(
-                Q(education_id__in=education_ids)
-                | Q(education_id=profile_education_id)
-                | Q(education__isnull=True)
-                | Q(created_by=request.user)
-            ).distinct()
+        dossiers = accessible_library_dossiers(request.user)
         dossier = get_object_or_404(dossiers, id=dossier_id)
 
     education_queryset = Education.objects.all()
@@ -1416,20 +1435,7 @@ def library_dossier(request, dossier_id=None):
 @transaction.atomic
 def library_dossier_copy(request, dossier_id):
     require_teacher(request.user)
-    dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
-    if not is_admin(request.user):
-        education_ids = TeachingGroup.objects.filter(
-            teacher=request.user
-        ).values("education_id")
-        profile_education_id = getattr(
-            getattr(request.user, "epd_profile", None), "education_id", None
-        )
-        dossiers = dossiers.filter(
-            Q(education_id__in=education_ids)
-            | Q(education_id=profile_education_id)
-            | Q(education__isnull=True)
-            | Q(created_by=request.user)
-        ).distinct()
+    dossiers = accessible_library_dossiers(request.user)
     source = get_object_or_404(
         dossiers.select_for_update().prefetch_related("module_entries"),
         id=dossier_id,
@@ -1457,20 +1463,7 @@ def library_dossier_copy(request, dossier_id):
 @transaction.atomic
 def library_dossier_archive(request, dossier_id):
     require_teacher(request.user)
-    dossiers = LibraryDossier.objects.filter(status=LibraryDossier.Status.ACTIVE)
-    if not is_admin(request.user):
-        education_ids = TeachingGroup.objects.filter(
-            teacher=request.user
-        ).values("education_id")
-        profile_education_id = getattr(
-            getattr(request.user, "epd_profile", None), "education_id", None
-        )
-        dossiers = dossiers.filter(
-            Q(education_id__in=education_ids)
-            | Q(education_id=profile_education_id)
-            | Q(education__isnull=True)
-            | Q(created_by=request.user)
-        ).distinct()
+    dossiers = accessible_library_dossiers(request.user)
     dossier = get_object_or_404(dossiers.select_for_update(), id=dossier_id)
     dossier.status = LibraryDossier.Status.ARCHIVED
     dossier.save(update_fields=["status", "updated_at"])
@@ -1500,6 +1493,8 @@ def library_template(request, template_id=None):
             new_name = request.POST.get("new_function", "").strip()
             if not new_name:
                 messages.error(request, "Geef de nieuwe functie een naam.")
+            elif len(new_name) > 180:
+                messages.error(request, "De naam mag maximaal 180 tekens bevatten.")
             elif any(item.casefold() == new_name.casefold() for item in functions):
                 messages.error(request, "Deze functie bestaat al.")
             else:

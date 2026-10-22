@@ -11,7 +11,8 @@
     <div class="library-header-actions">
       <a class="back library-dashboard-link" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
       <div class="header-actions">
-      <a class="primary" href="{% url 'dossier:library_dossier_create' %}">Dossier maken</a>
+        <a class="primary" href="{% url 'dossier:library_dossier_create' %}">Dossier maken</a>
+        <a class="outline function-entry" href="{% url 'dossier:function_management' %}">Functie beheer</a>
       </div>
     </div>
   </header>
@@ -20,6 +21,10 @@
       <div><p class="eyebrow">Samengestelde dossiers</p><h2>Dossiersjablonen</h2></div>
     </div>
     <form class="filter-bar" method="get">
+      <input type="hidden" name="q" value="{{ query }}">
+      <input type="hidden" name="category" value="{{ category_filter }}">
+      <input type="hidden" name="education" value="{{ education_filter }}">
+      <input type="hidden" name="theme" value="{{ theme_filter }}">
       <input name="dossier_q" value="{{ dossier_query }}" placeholder="Zoek dossiersjabloon" aria-label="Zoek dossiersjabloon">
       <select name="dossier_education" aria-label="Filter dossiersjablonen op opleiding">
         <option value="">Alle opleidingen</option>
@@ -69,7 +74,7 @@
     </div>
   </section>
   <section class="editor-section library-component-management">
-    <details class="library-component-management-details">
+    <details class="library-component-management-details" {% if component_filters_active %}open{% endif %}>
       <summary>
         <span><span class="eyebrow">Bibliotheekbeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
         <span class="library-toggle-arrow" aria-hidden="true">↓</span>
@@ -78,6 +83,20 @@
         <p>Wijzig een onderdeel of verwijder het uit de beschikbare lijst. Bestaande casuskopieën blijven behouden.</p>
         <a class="outline inline-action" href="{% url 'dossier:library_create' %}">Onderdeel toevoegen</a>
       </div>
+      <form class="filter-bar" method="get">
+        <input type="hidden" name="dossier_q" value="{{ dossier_query }}">
+        <input type="hidden" name="dossier_education" value="{{ dossier_education_filter }}">
+        <input name="q" value="{{ query }}" placeholder="Zoek onderdeel" aria-label="Zoek onderdeel">
+        <input name="education" value="{{ education_filter }}" placeholder="Opleiding" aria-label="Filter onderdelen op opleiding">
+        <input name="theme" value="{{ theme_filter }}" placeholder="Thema" aria-label="Filter onderdelen op thema">
+        <select name="category" aria-label="Categorie">
+          <option value="">Alle categorieën</option>
+          {% for value,label in categories %}
+          <option value="{{ value }}" {% if category_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="outline button">Onderdelen filteren</button>
+      </form>
       <div class="library-grid">
         {% for item in available_templates %}
         <article class="library-card">

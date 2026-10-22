@@ -246,6 +246,28 @@ class LibraryDossierModule(models.Model):
                 fields=["dossier", "template"], name="unique_dossier_library_template"
             )
         ]
+
+
+class FunctionDefinition(models.Model):
+    class Kind(models.TextChoices):
+        FORM = "formulier", "Formulier"
+        GROUP = "groep", "Formulierengroep"
+
+    title = models.CharField(max_length=180)
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    std = models.BooleanField(default=False)
+    locked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["title", "id"]
+        indexes = [models.Index(fields=["deleted_at", "created_at"], name="fn_del_created_idx")]
+
+    def __str__(self):
+        return self.title
+
+
 class ManagedForm(models.Model):
     function = models.ForeignKey(
         FunctionDefinition, on_delete=models.CASCADE, related_name="forms"

@@ -195,13 +195,6 @@
       dirty = true;
       saveButton.disabled = locked || !dirty;
     }
-    function markSaved() {
-      saved = structuredClone(state);
-      dirty = false;
-      saveButton.disabled = true;
-      root.dataset.locked = String(locked);
-      renderEditor();
-    }
     async function discardIfNeeded() {
       if (!isDirty()) return true;
       if (!await confirm("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", "Weggooien")) return false;
@@ -674,9 +667,10 @@
       const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time", imageUpload: "file", fileUpload: "file" };
       if (question.fieldType === "multipleChoice") {
         const group = node("fieldset", "preview-options");
+        const groupName = `answer-${question.id ?? "new"}-${Math.random()}`;
         question.options.forEach((answer, index) => {
           const label = node("label");
-          const radio = node("input"); radio.type = "radio"; radio.name = `answer-${question.id || index}-${Math.random()}`; radio.value = answer;
+          const radio = node("input"); radio.type = "radio"; radio.name = groupName; radio.value = answer;
           label.append(radio, node("span", "", answer)); group.append(label);
         });
         return group;
@@ -705,7 +699,10 @@
     }
 
     root.querySelector("[data-editor-back]").addEventListener("click", async (event) => {
-      if (!await discardIfNeeded()) event.preventDefault();
+      if (!isDirty()) return;
+      event.preventDefault();
+      const destination = event.currentTarget.href;
+      if (await discardIfNeeded()) window.location.assign(destination);
     });
     window.addEventListener("beforeunload", (event) => {
       if (!dirty) return;

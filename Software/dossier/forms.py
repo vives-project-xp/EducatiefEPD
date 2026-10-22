@@ -265,6 +265,16 @@ class LibraryDossierForm(forms.ModelForm):
                     self.add_error("new_modules", f"Keuzeopties of matrix van '{label}' is ongeldig.")
                     invalid_module = True
                     break
+                if any(
+                    not isinstance(value, str) or len(value) > 500
+                    for values in (options, rows, columns) for value in values
+                ):
+                    self.add_error("new_modules", f"Keuzeopties of matrix van '{label}' is ongeldig.")
+                    invalid_module = True
+                    break
+                options = [value.strip() for value in options if value.strip()]
+                rows = [value.strip() for value in rows if value.strip()]
+                columns = [value.strip() for value in columns if value.strip()]
                 if field_type == FieldDefinition.FieldType.SELECT and not options:
                     self.add_error("new_modules", f"Voeg keuzeopties toe aan '{label}'.")
                     invalid_module = True
@@ -281,9 +291,9 @@ class LibraryDossierForm(forms.ModelForm):
                     "help_text": field.get("help_text", "")[:280]
                     if isinstance(field.get("help_text", ""), str) else "",
                     "required": field.get("required") is True,
-                    "options": [value.strip() for value in options if isinstance(value, str) and value.strip()],
-                    "rows": [value.strip() for value in rows if isinstance(value, str) and value.strip()],
-                    "columns": [value.strip() for value in columns if isinstance(value, str) and value.strip()],
+                    "options": options,
+                    "rows": rows,
+                    "columns": columns,
                 })
             if not invalid_module:
                 validated_modules.append({

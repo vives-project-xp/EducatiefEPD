@@ -6,7 +6,6 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -370,6 +369,7 @@ class EpdWorkflowTests(TestCase):
         )
         self.assertRedirects(response, reverse("dossier:teacher_dashboard"))
         self.assertFalse(Case.objects.filter(id=self.case.id).exists())
+        self.assertFalse(Patient.objects.filter(id=self.patient.id).exists())
 
     def test_only_teacher_can_delete_archived_case_and_student_data_is_preserved(self):
         student_case, _ = start_student_case(self.case, self.student)
@@ -788,11 +788,13 @@ class EpdWorkflowTests(TestCase):
             reverse("dossier:library_list"), {"dossier_q": "Dossier een"}
         )
         self.assertContains(filtered_page, "Dossier een")
-        self.assertNotContains(filtered_page, "Dossier twee")
+        self.assertEqual(
+            [item.title for item in filtered_page.context["dossiers"]], ["Dossier een"]
+        )
         substring_page = self.client.get(
             reverse("dossier:library_list"), {"dossier_q": "ossier een"}
         )
-        self.assertNotContains(substring_page, "Dossier een")
+        self.assertEqual(list(substring_page.context["dossiers"]), [])
         education_filtered_page = self.client.get(
             reverse("dossier:library_list"),
             {"dossier_education": str(self.education.id)},
@@ -806,13 +808,11 @@ class EpdWorkflowTests(TestCase):
         self.assertNotContains(dashboard, "Bibliotheekonderdelen")
         self.assertContains(dashboard, "Beschikbare onderdelen beheren")
         self.assertContains(
-            dashboard, '<details class="library-component-management-details">',
-            html=True,
+            dashboard, '<details class="library-component-management-details"',
         )
         self.assertNotContains(
             dashboard,
-            '<details class="library-component-management-details" open>',
-            html=True,
+            '<details class="library-component-management-details" open',
         )
         anamnese = LibraryTemplate.objects.get(title="Anamnese")
         self.assertContains(dashboard, anamnese.title)
