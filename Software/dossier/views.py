@@ -10,11 +10,13 @@ from django.db.models import Q
 from django.http import Http404, JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 from django.views.decorators.http import require_POST
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import mammoth
 import io
+import re
 from docx import Document
 from htmldocx import HtmlToDocx
 
@@ -959,6 +961,8 @@ def import_docx(request):
 @require_POST
 def export_docx(request):
     html = clean_html(request.POST.get("html", ""))
+    name = get_valid_filename(request.POST.get("filename", "").strip()) or "dossier"
+    name = re.sub(r"\.docx$", "", name, flags=re.IGNORECASE)[:80]
     document = Document()
     HtmlToDocx().add_html_to_document(html, document)
     buffer = io.BytesIO()
@@ -967,5 +971,5 @@ def export_docx(request):
         buffer.getvalue(),
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
-    response["Content-Disposition"] = 'attachment; filename="dossier.docx"'
+    response["Content-Disposition"] = f'attachment; filename="{name}.docx"'
     return response

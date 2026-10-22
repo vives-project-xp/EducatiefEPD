@@ -38,16 +38,38 @@ function importDocx(editor) {
   input.click();
 }
 
-async function exportDocx(editor) {
-  const body = new FormData();
-  body.append('html', editor.getContent());
-  body.append('csrfmiddlewaretoken',
-    document.querySelector('[name=csrfmiddlewaretoken]').value);
-  const response = await fetch('/export/docx/', { method: 'POST', body });
-  if (!response.ok) return alert(`Export mislukt (HTTP ${response.status}).`);
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(await response.blob());
-  link.download = 'dossier.docx';
-  link.click();
-  URL.revokeObjectURL(link.href);
+function exportDocx(editor) {
+  editor.windowManager.open({
+    title: 'Exporteer naar Word',
+    body: {
+      type: 'panel',
+      items: [{
+        type: 'input',
+        name: 'filename',
+        label: 'Bestandsnaam',
+        placeholder: 'bijvoorbeeld: zorgplan-mia',
+      }],
+    },
+    initialData: { filename: 'dossier' },
+    buttons: [
+      { type: 'cancel', text: 'Annuleren' },
+      { type: 'submit', text: 'Downloaden', buttonType: 'primary' },
+    ],
+    onSubmit: async (dialog) => {
+      const filename = dialog.getData().filename;
+      dialog.close();
+      const body = new FormData();
+      body.append('html', editor.getContent());
+      body.append('filename', filename);
+      body.append('csrfmiddlewaretoken',
+        document.querySelector('[name=csrfmiddlewaretoken]').value);
+      const response = await fetch('/export/docx/', { method: 'POST', body });
+      if (!response.ok) return alert(`Export mislukt (HTTP ${response.status}).`);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = (filename.trim() || 'dossier') + '.docx';
+      link.click();
+      URL.revokeObjectURL(link.href);
+    },
+  });
 }
