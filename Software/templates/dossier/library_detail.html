@@ -10,48 +10,36 @@
     </div>
     <a class="back" href="{% url 'dossier:library_list' %}">← Bibliotheek</a>
   </header>
-  <section class="editor-section">
-    <h2>Onderdelen en velden</h2>
-    {% for field in template_item.fields.all %}
-    <div class="content-row library-field-row">
-      <span>{{ field.position }}</span>
-      <div>
-        <small>{{ field.get_field_type_display }}{% if field.required %} · verplicht{% endif %}</small>
-        <strong>{{ field.label }}</strong>
-        {% if field.help_text %}<span class="muted">{{ field.help_text }}</span>{% endif %}
-      </div>
-      <div class="row-actions">
-        <a href="{% url 'dossier:library_field_edit' template_item.id field.id %}">Bewerk</a>
-        <form method="post" action="{% url 'dossier:library_field_delete' template_item.id field.id %}" onsubmit="return confirm('Dit veld verwijderen? Bestaande casuskopieën blijven behouden.');">
-          {% csrf_token %}
-          <button class="text-button danger" type="submit" aria-label="{{ field.label }} verwijderen">Verwijderen</button>
-        </form>
-      </div>
-    </div>
-    {% empty %}
-    <p>Dit onderdeel bevat geen invulvelden.</p>
-    {% endfor %}
-    <a class="outline inline-action" href="{% url 'dossier:library_field_create' template_item.id %}">Veld toevoegen</a>
-  </section>
   {% if can_manage_functions %}
   <section class="editor-section">
     <h2>Functies</h2>
-    <p class="muted">Beheer de functienamen van dit bibliotheekonderdeel.</p>
-    {% for name in template_item.functions %}
+    {% for link in template_item.function_links.all %}
     <div class="content-row">
-      <strong>{{ name }}</strong>
-      <form method="post">
+      <span>{{ forloop.counter }}</span>
+      <div>
+        <small>{{ link.function.get_kind_display }}{% if link.function.std %} · Standaard{% endif %}</small>
+        <strong>{{ link.function.title }}</strong>
+      </div>
+      <div class="row-actions">
+        {% if not link.function.std %}<a href="{% url 'dossier:function_detail' link.function.id %}">Bewerk</a>{% endif %}
+        <form method="post">
         {% csrf_token %}
         <input type="hidden" name="action" value="remove_function">
-        <input type="hidden" name="remove_function" value="{{ name }}">
-        <button class="text-button danger" type="submit" aria-label="{{ name }} verwijderen">Verwijderen</button>
-      </form>
+        <input type="hidden" name="function_id" value="{{ link.function.id }}">
+        <button class="text-button danger" type="submit" aria-label="{{ link.function.title }} verwijderen">Verwijderen</button>
+        </form>
+      </div>
     </div>
-    {% empty %}<p>Dit onderdeel heeft nog geen functienamen.</p>{% endfor %}
+    {% empty %}<p class="empty-state">Er zijn nog geen functies gekoppeld aan dit onderdeel.</p>{% endfor %}
     <form method="post" class="filter-bar">
       {% csrf_token %}
       <input type="hidden" name="action" value="add_function">
-      <input name="new_function" maxlength="180" required aria-label="Nieuwe functienaam" placeholder="Nieuwe functienaam">
+      <label>
+        <span class="sr-only">Functies selecteren</span>
+        <select name="function_ids" multiple required aria-label="Functies selecteren">
+          {% for function in available_functions %}<option value="{{ function.id }}">{{ function.title }} ({{ function.get_kind_display }})</option>{% endfor %}
+        </select>
+      </label>
       <button class="outline button" type="submit">Functie toevoegen</button>
     </form>
   </section>
@@ -67,7 +55,7 @@
   </form>
   <form method="post" action="{% url 'dossier:library_archive' template_item.id %}" onsubmit="return confirm('Deze dossiermodule of dit onderdeel uit de bibliotheek verwijderen? Bestaande casuskopieën blijven behouden.');">
     {% csrf_token %}
-    <button class="outline button danger" type="submit">Uit bibliotheek verwijderen</button>
+    <button class="outline button danger" type="submit">Verwijderen uit bibliotheek</button>
   </form>
 </main>
 {% endblock %}

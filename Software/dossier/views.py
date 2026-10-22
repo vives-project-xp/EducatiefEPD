@@ -50,6 +50,7 @@ from .models import (
     LibraryDossier,
     LibraryDossierModule,
     FunctionDefinition,
+    LibraryTemplateFunction,
     LibraryField,
     LibraryTemplate,
     Module,
@@ -1499,33 +1500,55 @@ def library_template(request, template_id=None):
     if template and action in {"add_function", "remove_function"}:
         if not is_admin(request.user):
             raise PermissionDenied
-        functions = list(template.functions or [])
         if action == "add_function":
-            new_name = request.POST.get("new_function", "").strip()
-            if not new_name:
-                messages.error(request, "Geef de nieuwe functie een naam.")
-            elif len(new_name) > 180:
-                messages.error(request, "De naam mag maximaal 180 tekens bevatten.")
-            elif any(item.casefold() == new_name.casefold() for item in functions):
-                messages.error(request, "Deze functie bestaat al.")
+            function_ids = request.POST.getlist("function_ids")
+            selected = list(FunctionDefinition.objects.filter(
+                id__in=function_ids, deleted_at__isnull=True
+            ).exclude(template_links__template=template))
+            if selected:
+                position = template.function_links.count()
+                LibraryTemplateFunction.objects.bulk_create([
+                    LibraryTemplateFunction(template=template, function=function, position=position + index)
+                    for index, function in enumerate(selected)
+                ])
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.functions_added", template, count=len(selected))
+                messages.success(request, "Functies toegevoegd.")
             else:
-                functions.append(new_name)
-                template.functions = functions
-                template.version += 1
-                template.save(update_fields=["functions", "version", "updated_at"])
-                audit(request, "library.function_added", template, title=new_name)
-                messages.success(request, "Functie toegevoegd.")
+                # Keep the old endpoint usable for existing integrations while new UI uses links.
+                new_name = request.POST.get("new_function", "").strip()
+                if new_name and len(new_name) <= 180 and new_name.casefold() not in {
+                    item.casefold() for item in (template.functions or [])
+                }:
+                    template.functions = [*(template.functions or []), new_name]
+                    template.version += 1
+                    template.save(update_fields=["functions", "version", "updated_at"])
+                    messages.success(request, "Functie toegevoegd.")
+                else:
+                    messages.error(request, "Selecteer minstens één nieuwe functie.")
         elif action == "remove_function":
-            remove_name = request.POST.get("remove_function", "").strip()
-            filtered = [item for item in functions if item.casefold() != remove_name.casefold()]
-            if filtered != functions:
-                template.functions = filtered
+            function_id = request.POST.get("function_id")
+            if function_id:
+                link = get_object_or_404(
+                    LibraryTemplateFunction, template=template, function_id=function_id
+                )
+                link.delete()
                 template.version += 1
-                template.save(update_fields=["functions", "version", "updated_at"])
-                audit(request, "library.function_removed", template, title=remove_name)
+                template.save(update_fields=["version", "updated_at"])
+                audit(request, "library.function_removed", template, function_id=function_id)
                 messages.success(request, "Functie verwijderd.")
             else:
-                messages.error(request, "Functie niet gevonden.")
+                remove_name = request.POST.get("remove_function", "").strip()
+                functions = [item for item in (template.functions or [])
+                             if item.casefold() != remove_name.casefold()]
+                if functions != (template.functions or []):
+                    template.functions = functions
+                    template.version += 1
+                    template.save(update_fields=["functions", "version", "updated_at"])
+                    messages.success(request, "Functie verwijderd.")
+                else:
+                    messages.error(request, "Functie niet gevonden.")
         return redirect("dossier:library_detail", template_id=template.id)
 
     form = LibraryTemplateForm(request.POST or None, instance=template)
@@ -1545,6 +1568,9 @@ def library_template(request, template_id=None):
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
             "can_manage_functions": is_admin(request.user),
+            "available_functions": FunctionDefinition.objects.filter(
+                deleted_at__isnull=True
+            ).exclude(template_links__template=template).order_by("title"),
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,

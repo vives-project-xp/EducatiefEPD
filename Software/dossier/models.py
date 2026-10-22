@@ -198,6 +198,25 @@ class LibraryTemplate(models.Model):
         return f"{self.title} (v{self.version})"
 
 
+class LibraryTemplateFunction(models.Model):
+    template = models.ForeignKey(
+        LibraryTemplate, on_delete=models.CASCADE, related_name="function_links"
+    )
+    function = models.ForeignKey(
+        "FunctionDefinition", on_delete=models.CASCADE, related_name="template_links"
+    )
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["template", "function"], name="unique_library_template_function"
+            )
+        ]
+
+
 class LibraryDossier(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Actief"
@@ -345,6 +364,20 @@ class Module(models.Model):
 
     def __str__(self):
         return f"{self.case}: {self.title}"
+
+
+class CaseFunctionSnapshot(models.Model):
+    module = models.ForeignKey(
+        Module, on_delete=models.CASCADE, related_name="function_snapshots"
+    )
+    title = models.CharField(max_length=180)
+    kind = models.CharField(max_length=16)
+    position = models.PositiveIntegerField(default=0)
+    definition = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
 
 
 class FieldDefinition(models.Model):

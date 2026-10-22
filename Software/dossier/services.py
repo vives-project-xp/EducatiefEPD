@@ -14,6 +14,7 @@ from .models import (
     LibraryDossier,
     LibraryField,
     LibraryTemplate,
+    CaseFunctionSnapshot,
     Module,
     ModuleField,
     ModuleResponse,
@@ -196,6 +197,7 @@ def create_case_structure(case):
                     )
                     for field in template.fields.all()
                 ])
+            snapshot_template_functions(existing, template)
         else:
             copy_template_to_case(template, case)
 
@@ -266,7 +268,56 @@ def copy_template_to_case(template, case):
         )
         for field in template.fields.all()
     ])
+    snapshot_template_functions(module, template)
     return module
+
+
+def snapshot_template_functions(module, template):
+    if module.function_snapshots.exists():
+        return
+    function_links = list(
+        template.function_links.filter(function__deleted_at__isnull=True)
+        .select_related("function")
+        .prefetch_related("function__forms__questions")
+    )
+    CaseFunctionSnapshot.objects.bulk_create([
+        CaseFunctionSnapshot(
+            module=module,
+            title=link.function.title,
+            kind=link.function.kind,
+            position=link.position,
+            definition={
+                "title": link.function.title,
+                "kind": link.function.kind,
+                "forms": [
+                    {
+                        "title": form.title,
+                        "position": form.position,
+                        "questions": [
+                            {
+                                "fieldType": question.field_type,
+                                "question": question.question,
+                                "unit": question.unit,
+                                "required": question.required,
+                                "options": question.options,
+                                "columns": question.columns,
+                                "rows": question.rows,
+                                "url": question.url,
+                                "buttonText": question.button_text,
+                                "image": question.image,
+                                "caption": question.caption,
+                                "explanation": question.explanation,
+                                "position": question.position,
+                            }
+                            for question in form.questions.all()
+                        ],
+                    }
+                    for form in link.function.forms.all()
+                ],
+            },
+        )
+        for link in function_links
+    ])
 
 
 @transaction.atomic

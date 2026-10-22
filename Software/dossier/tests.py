@@ -13,12 +13,14 @@ from .models import (
     Assignment,
     AssignmentSubmission,
     Case,
+    CaseFunctionSnapshot,
     Education,
     ExternalIdentity,
     LibraryDossier,
     FunctionDefinition,
     LibraryField,
     LibraryTemplate,
+    LibraryTemplateFunction,
     ManagedForm,
     ManagedQuestion,
     Patient,
@@ -27,7 +29,7 @@ from .models import (
     TeachingGroup,
 )
 from .auth import EpdOIDCAuthenticationBackend
-from .services import create_case_structure, ensure_default_templates, start_student_case
+from .services import copy_template_to_case, create_case_structure, ensure_default_templates, start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -110,6 +112,41 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         template.refresh_from_db()
         self.assertIn("Medicatiecheck", template.functions)
+
+    def test_managed_function_link_is_snapshotted_into_case_copy(self):
+        self.client.force_login(self.admin)
+        function = FunctionDefinition.objects.create(
+            title="Intakefunctie", kind=FunctionDefinition.Kind.FORM
+        )
+        form = ManagedForm.objects.create(function=function, title=function.title)
+        ManagedQuestion.objects.create(
+            form=form, field_type=ManagedQuestion.FieldType.TEXT, question="Vraag"
+        )
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel met beheerde functie",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        response = self.client.post(
+            reverse("dossier:library_detail", args=[template.id]),
+            {"action": "add_function", "function_ids": [function.id]},
+        )
+        self.assertRedirects(response, reverse("dossier:library_detail", args=[template.id]))
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+
+        module = copy_template_to_case(template, self.case)
+        snapshot = CaseFunctionSnapshot.objects.get(module=module)
+        self.assertEqual(snapshot.title, "Intakefunctie")
+        self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
+        question = form.questions.get()
+        question.question = "Gewijzigd"
+        question.save(update_fields=["question"])
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
 
     def test_teacher_cannot_manage_functions_in_section(self):
         self.client.login(username="teacher", password="testpass")
