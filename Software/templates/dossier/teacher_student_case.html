@@ -58,11 +58,7 @@
       <details class="response-detail">
         <summary>{{ module.title }}</summary>
         {% for field in module.display_values %}
-          <div class="response-value">
-            <strong>{{ field.label }}</strong>
-            <pre>
-              {% autoescape off %}{{ field.value }}{% endautoescape %}
-            </pre>
+          <div class="response-value"><strong>{{ field.label }}</strong><pre>{{ field.value }}</pre>
           </div>
         {% empty %}
         <p>Dit onderdeel bevat geen invulvelden.</p>

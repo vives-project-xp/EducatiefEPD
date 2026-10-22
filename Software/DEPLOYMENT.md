@@ -47,36 +47,6 @@ Controleer de effectieve applicatieverbinding:
 docker compose exec web python manage.py check_database
 ```
 
-## Updates na het samenvoegen van de dossiertakken
-
-Migratie `0009_merge_dossiers_functions` brengt de bestaande migratiepaden voor
-dossiersjablonen en functiebeheer samen. Bewaar beide `0007`- en `0008`-reeksen;
-deze kunnen al op afzonderlijke ontwikkelomgevingen zijn toegepast. De nieuwe migratie
-werkt zowel op een lege database als na één van beide takken.
-
-Migratie `0010_remove_librarytemplate_is_fixed` verwijdert de verouderde instelling
-voor automatisch toevoegen. De bestaande bibliotheekmodules, casuskopieën en
-studentgegevens blijven behouden. De automatische seed/kopieerroute en het commando
-`initialize_platform` zijn verwijderd. `0011_record_existing_rich_text_choices` legt
-het al aanwezige teksteditortype ook in de migratiestatus vast.
-
-Maak vóór een update een back-up. Bouw en start vervolgens de webcontainer opnieuw:
-
-```sh
-docker compose up -d --build web
-docker compose exec web python manage.py check
-docker compose exec web python manage.py makemigrations --check --dry-run
-```
-
-`http://localhost:8001/health/` controleert ook de databaseverbinding. De standaard
-Compose-healthcheck test alleen de open webpoort. Controleer daarnaast de aanmelding
-en de bibliotheek. Start geen andere branch op hetzelfde volume als die branch een
-afwijkend databaseschema verwacht.
-
-Bytecode en SQL-back-ups horen niet in Git. De eerdere gevolgde testdump is lokaal
-bewaard als `backups/local/educatief_epd-test.sql`; deze genegeerde map wordt niet in
-de containerimage opgenomen.
-
 ## Databasebeheer
 
 Open een MySQL-console zonder poort 3306 publiek te maken:
@@ -133,9 +103,13 @@ docker compose ps
 docker compose exec web python manage.py check_database
 ```
 
-Controleer `/health/`, containerlogs, beschikbare opslag en MySQL-back-ups. De MySQL-initialisatie verleent de applicatiegebruiker alleen binnen `test_educatief_epd` extra rechten. Daardoor maken Django-tests een aparte tijdelijke database en wijzigen ze de applicatiedatabase niet.
+Controleer `/health/`, containerlogs, beschikbare opslag en MySQL-back-ups. De
+MySQL-initialisatie verleent de applicatiegebruiker alleen binnen `test_educatief_epd`
+extra rechten. Django-tests gebruiken een tijdelijke testdatabase. Om de
+opstartmigraties op de applicatiedatabase over te slaan, gebruik je voor controles
+expliciet de Python-entrypoint:
 
 ```sh
-docker compose run --rm web python manage.py test
-docker compose run --rm -e DJANGO_DEBUG=0 web python manage.py check --deploy
+docker compose run --rm --no-deps --entrypoint python web manage.py test
+docker compose run --rm --no-deps --entrypoint python -e DJANGO_DEBUG=0 web manage.py check --deploy
 ```

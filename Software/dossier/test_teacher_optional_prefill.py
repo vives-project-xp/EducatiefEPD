@@ -127,12 +127,13 @@ class TeacherOptionalPrefillTests(TestCase):
                 response = self.client.post(self.module_url, {
                     "action": "save", f"field_{key}": value, "field_short_text": "Niet bewaren",
                 }, follow=True)
-                self.assertContains(response, "Controleer deze velden:")
+                self.assertContains(response, "Controleer de gemarkeerde velden.")
+                self.assertTrue(response.context["fields"])
                 self.module.refresh_from_db()
                 self.assertEqual(self.module.base_data, original)
         self.assertFalse(AuditEvent.objects.filter(action="base_dossier.updated").exists())
 
-    def test_student_required_validation_and_teacher_access_rule_are_preserved(self):
+    def test_student_required_validation_on_submission_and_teacher_access_are_preserved(self):
         self.case.publish()
         self.case.save()
         student_case, _ = start_student_case(self.case, self.student)
@@ -141,11 +142,22 @@ class TeacherOptionalPrefillTests(TestCase):
         response = self.client.post(reverse("dossier:dossier", args=[self.case.pk]), {
             "action": "save", "module": module_response.pk,
         }, follow=True)
-        self.assertContains(response, "Controleer deze velden:")
+        self.assertContains(response, "Dossieronderdeel bewaard.")
         module_response.refresh_from_db()
-        self.assertEqual(module_response.data, {})
+        self.assertEqual(module_response.data["short_text"], "")
         self.assertTrue(all(field["required"] for field in module_response.schema))
-        self.assertFalse(AuditEvent.objects.filter(action="module_response.updated").exists())
+        # Matrix's draft workflow checks completeness when submitting the dossier.
+        submission = student_case.assignment_submissions.get()
+        submission.status = "submitted"
+        submission.save()
+        response = self.client.post(
+            reverse("dossier:submit_student_case", args=[self.case.pk]), follow=True
+        )
+        self.assertContains(response, "Dit veld is verplicht.")
+        student_case.refresh_from_db()
+        self.assertFalse(student_case.locked)
+        self.assertIsNone(student_case.submitted_at)
+        self.assertFalse(AuditEvent.objects.filter(action="student_case.submitted").exists())
         self.assertEqual(self.client.post(self.module_url, {"action": "save"}).status_code, 403)
 
     def test_explicit_invalid_observation_still_requires_time_and_value(self):
