@@ -35,14 +35,14 @@
               {% csrf_token %}
               <div class="review-actions">
                 <div class="review-field">
-                    {{ review_form.status.label_tag }}
-                    {{ review_form.status }}
-                  </div>
+                  {{ submission.review_form.status.label_tag }}
+                  {{ submission.review_form.status }}
                 </div>
+              </div>
               <div class="review-field">
-                {{ review_form.feedback.label_tag }}
-                {{ review_form.feedback }}
-                {{ review_form.feedback.errors }}
+                {{ submission.review_form.feedback.label_tag }}
+                {{ submission.review_form.feedback }}
+                {{ submission.review_form.feedback.errors }}
               </div>
               <div class="review-actions">
                 <button class="primary button">Beoordeling bewaren</button>

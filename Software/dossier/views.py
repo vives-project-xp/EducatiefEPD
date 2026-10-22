@@ -795,8 +795,13 @@ def teacher_student_case(request, student_case_id):
             {"label": field["label"], "value": module.data.get(field["key"], "")}
             for field in module.schema
         ]
+    for submission in student_case.assignment_submissions.all():
+        submission.review_form = ReviewForm(
+            initial={"feedback": submission.answer},
+            auto_id=f"id_%s_{submission.id}",  # unique ids per submission
+        )
     return render(request, "dossier/teacher_student_case.html", {
-        "student_case": student_case, "review_form": ReviewForm(),
+        "student_case": student_case,
     })
 
 

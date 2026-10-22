@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // language: 'nl',            // needs the nl language file in static/tinymce/langs/
     menubar: false,
     plugins: 'lists link table',
-    toolbar: 'undo redo | blocks | bold italic | forecolor backcolor | bullist numlist | importdocx exportdocx',
+    toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | importdocx exportdocx',
     color_cols: 5,
     setup(editor) {
       editor.ui.registry.addButton('importdocx', {
