@@ -9,6 +9,7 @@ from .models import (
     AuditEvent,
     Education,
     FieldDefinition,
+    LibraryDossier,
     LibraryField,
     LibraryTemplate,
     Module,
@@ -264,3 +265,15 @@ def copy_template_to_case(template, case):
         for field in template.fields.all()
     ])
     return module
+
+
+@transaction.atomic
+def copy_library_dossier_to_case(dossier, case):
+    dossier = LibraryDossier.objects.prefetch_related(
+        "module_entries__template__fields"
+    ).get(pk=dossier.pk)
+    return [
+        copy_template_to_case(entry.template, case)
+        for entry in dossier.module_entries.all()
+        if entry.template.status == LibraryTemplate.Status.ACTIVE
+    ]
