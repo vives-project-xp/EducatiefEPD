@@ -62,8 +62,8 @@ from .models import (
     TeachingGroup,
 )
 from .services import (
-    audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
-    ensure_default_templates, module_schema, start_student_case, clean_html,
+    audit, copy_library_dossier_to_case, copy_template_to_case,
+    module_schema, start_student_case, clean_html,
 )
 
 
@@ -280,14 +280,14 @@ def prepare_schema_fields(schema, data):
     return prepared
 
 
-def parsed_module_data(request, schema, current_data):
+def parsed_module_data(request, schema, current_data, *, require_complete=True):
     data = dict(current_data)
     missing = []
     for field in schema:
         key = field["key"]
         field_type = field["type"]
         if field_type == FieldDefinition.FieldType.OBSERVATION:
-            if field.get("required") and not data.get(key):
+            if require_complete and field.get("required") and not data.get(key):
                 missing.append(field["label"])
             continue
         if field_type == FieldDefinition.FieldType.MATRIX:
@@ -321,7 +321,7 @@ def parsed_module_data(request, schema, current_data):
             elif has_value and field_type == FieldDefinition.FieldType.SELECT:
                 if value not in field.get("options", []):
                     missing.append(f"{field['label']} (ongeldige keuze)")
-        if field.get("required") and not has_value:
+        if require_complete and field.get("required") and not has_value:
             missing.append(field["label"])
         data[key] = value
     if missing:
@@ -443,7 +443,6 @@ def teacher_case_create(request):
         case.patient = patient
         case.created_by = request.user
         case.save()
-        create_case_structure(case)
         audit(request, "case.created", case)
         messages.success(request, "Patiënt en casus zijn aangemaakt.")
         return redirect("dossier:teacher_case", case_id=case.id)
@@ -713,15 +712,13 @@ def teacher_case_transition(request, case_id):
     case = editable_case(request.user, case_id)
     action = request.POST.get("action")
     if action == "publish":
-        invalid_modules = [
-            module for module in case.modules.prefetch_related("fields")
-            if module.kind != Module.Kind.INFORMATION
-            and not module.fields.exists()
-            and not module.configuration
-        ]
-        if not case.assignments.exists() or not case.modules.exists() or invalid_modules:
-            messages.error(request, "Voor publicatie zijn een opdracht en volledig geconfigureerde dossieronderdelen nodig.")
-        else:
+        has_assignments = case.assignments.exists()
+        has_modules = case.modules.exists()
+        if not has_assignments:
+            messages.error(request, "Voeg minstens één opdracht toe voordat je de casus publiceert.")
+        if not has_modules:
+            messages.error(request, "Voeg minstens één dossiermodule toe voordat je de casus publiceert.")
+        if has_assignments and has_modules:
             case.publish()
             case.save()
             audit(request, "case.published", case)
@@ -849,7 +846,9 @@ def teacher_module(request, case_id, module_id):
                 audit(request, "base_dossier.observation_added", module)
                 messages.success(request, "Observatie aan het basisdossier toegevoegd.")
         else:
-            data, missing = parsed_module_data(request, schema, module.base_data)
+            data, missing = parsed_module_data(
+                request, schema, module.base_data, require_complete=False
+            )
             if missing:
                 messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
             else:
@@ -1349,7 +1348,6 @@ def function_trash_action(request):
 @transaction.atomic
 def library_dossier(request, dossier_id=None):
     require_teacher(request.user)
-    ensure_default_templates()
     dossier = None
     if dossier_id is not None:
         dossiers = accessible_library_dossiers(request.user)
@@ -1366,10 +1364,7 @@ def library_dossier(request, dossier_id=None):
         education_queryset = education_queryset.filter(
             Q(id__in=education_ids) | Q(id=profile_education_id)
         ).distinct()
-    module_queryset = LibraryTemplate.objects.filter(
-        Q(status=LibraryTemplate.Status.ACTIVE)
-        | Q(is_fixed=True, seed_key__startswith="vroedkunde-")
-    )
+    module_queryset = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
     form = LibraryDossierForm(
         request.POST or None,
         instance=dossier,
@@ -1383,10 +1378,6 @@ def library_dossier(request, dossier_id=None):
         item.save()
         LibraryDossierModule.objects.filter(dossier=item).delete()
         selected_modules = list(form.cleaned_data["existing_modules"])
-        for template in selected_modules:
-            if template.status != LibraryTemplate.Status.ACTIVE:
-                template.status = LibraryTemplate.Status.ACTIVE
-                template.save(update_fields=["status", "updated_at"])
         LibraryDossierModule.objects.bulk_create([
             LibraryDossierModule(dossier=item, template=template, position=position)
             for position, template in enumerate(selected_modules)
@@ -1529,8 +1520,6 @@ def library_template(request, template_id=None):
         return redirect("dossier:library_detail", template_id=template.id)
 
     form = LibraryTemplateForm(request.POST or None, instance=template)
-    if not is_admin(request.user):
-        form.fields.pop("is_fixed")
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         if not item.pk:

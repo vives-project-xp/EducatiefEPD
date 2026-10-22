@@ -36,9 +36,10 @@ docker compose ps
 docker compose exec web python manage.py createsuperuser
 ```
 
-De webcontainer wacht op MySQL, voert migraties uit, zaait de standaardbibliotheek indien
-nodig en start Gunicorn. De vaste dossierstructuur wordt bij het aanmaken van een casus
-gekopieerd.
+De webcontainer wacht op MySQL, voert migraties en collectstatic uit en start Gunicorn.
+Er wordt geen vaste dossierbibliotheek meer gezaaid. Nieuwe casussen starten zonder
+dossiermodules; de docent kiest vervolgens een dossiersjabloon of losse onderdelen.
+`SEED_DEMO=1` maakt uitsluitend expliciete demo-inhoud met een eigen dossiersjabloon aan.
 
 Controleer de effectieve applicatieverbinding:
 
@@ -52,6 +53,12 @@ Migratie `0009_merge_dossiers_functions` brengt de bestaande migratiepaden voor
 dossiersjablonen en functiebeheer samen. Bewaar beide `0007`- en `0008`-reeksen;
 deze kunnen al op afzonderlijke ontwikkelomgevingen zijn toegepast. De nieuwe migratie
 werkt zowel op een lege database als na één van beide takken.
+
+Migratie `0010_remove_librarytemplate_is_fixed` verwijdert de verouderde instelling
+voor automatisch toevoegen. De bestaande bibliotheekmodules, casuskopieën en
+studentgegevens blijven behouden. De automatische seed/kopieerroute en het commando
+`initialize_platform` zijn verwijderd. `0011_record_existing_rich_text_choices` legt
+het al aanwezige teksteditortype ook in de migratiestatus vast.
 
 Maak vóór een update een back-up. Bouw en start vervolgens de webcontainer opnieuw:
 

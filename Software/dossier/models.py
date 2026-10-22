@@ -182,7 +182,6 @@ class LibraryTemplate(models.Model):
     version = models.PositiveIntegerField(default=1)
     seed_key = models.SlugField(max_length=80, unique=True, null=True, blank=True, editable=False)
     functions = models.JSONField(default=list, blank=True)
-    is_fixed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="library_templates",

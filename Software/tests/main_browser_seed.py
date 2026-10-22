@@ -15,13 +15,13 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import Client
 from dossier.models import FunctionDefinition, ManagedForm, ManagedQuestion, Profile
-from dossier.services import ensure_default_templates
+from dossier.test_fixtures import create_library_fixtures
 
 if settings.DATABASES["default"]["NAME"] != "epd_main_test":
     raise RuntimeError("Browser fixtures require the disposable epd_main_test database.")
 
 call_command("migrate", verbosity=0)
-ensure_default_templates()
+create_library_fixtures()
 user = get_user_model().objects.create_user("main-browser-teacher")
 user.epd_profile.role = Profile.Role.TEACHER
 user.epd_profile.save()

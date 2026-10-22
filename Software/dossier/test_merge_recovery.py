@@ -9,14 +9,14 @@ from .models import (
     Case, Education, FunctionDefinition, LibraryDossier, LibraryTemplate,
     ManagedForm, ManagedQuestion, Patient, Profile,
 )
-from .services import ensure_default_templates
+from .test_fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class MergeRecoveryTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        ensure_default_templates()
+        create_library_fixtures()
         cls.education = Education.objects.get(slug="vroedkunde")
         cls.teacher = get_user_model().objects.create_user("merge-teacher")
         cls.teacher.epd_profile.role = Profile.Role.TEACHER

@@ -82,9 +82,16 @@ EPD-beheerder kan alle groepen en casussen beheren.
 ## Docent
 
 1. Maak een patiënt en casus aan binnen een opleiding waarvoor je een lesgroep beheert.
-2. Vul het basisdossier en de opdrachten in. Gebruik de bibliotheek om herbruikbare
-   onderdelen aan de casus toe te voegen.
-3. Publiceer de casus en wijs haar toe aan één of meer van je lesgroepen.
+   De nieuwe casus begint zonder dossiermodules.
+2. Kies bij **Dossier uit bibliotheek toevoegen** een dossiersjabloon. Alleen de actieve
+   modules van dat sjabloon worden als zelfstandige kopieën toegevoegd, in de ingestelde
+   volgorde. Opnieuw toevoegen maakt geen dubbele modules. Je kunt ook expliciet een
+   los bibliotheekonderdeel kiezen. Vul daarna het basisdossier en de opdrachten in.
+3. Publiceer de casus en wijs haar toe aan één of meer van je lesgroepen. Er moet
+   minstens één opdracht en één dossiermodule aanwezig zijn. Voorinvulling door de
+   docent is optioneel: velden en volledige modules mogen leeg blijven bij bewaren
+   en publiceren. Ingevulde getallen, datums en keuzes worden wel gevalideerd.
+   Een * bij een veld duidt op een verplichting voor studenten, niet voor de docent.
 4. Bekijk per student het eigen dossier en beoordeel ingediende opdrachten. De
    bibliotheek en de casusstructuur kunnen later veranderen zonder reeds gestarte
    studentdossiers te wijzigen.
@@ -92,16 +99,19 @@ EPD-beheerder kan alle groepen en casussen beheren.
 ## Bibliotheek beheren
 
 Docenten en EPD-beheerders kunnen in **Bibliotheek** alle dossiermodules, vragenlijsten
-en matrices bewerken, ook de vaste standaardmodules. Kies **Bewerk** om de instellingen
+en matrices bewerken. Kies **Bewerk** om de instellingen
 en de onderdelen te openen. Per veld kun je het type, de opties en de volgorde aanpassen,
 een veld toevoegen of **Verwijderen** kiezen.
 
 Met **Verwijderen** op een bibliotheekkaart of **Uit bibliotheek verwijderen** in de
-editor haal je het onderdeel uit de actieve bibliotheek. Het wordt gearchiveerd en niet
-meer aan nieuwe casussen toegevoegd. Bestaande casuskopieën en studentdossiers blijven
-behouden. Hernoemde modules en verwijderde velden worden bij een herstart niet teruggezet.
-De instelling om een template automatisch aan nieuwe casussen toe te voegen blijft bij
-de EPD-beheerder.
+editor haal je het onderdeel uit de actieve bibliotheek. Het wordt gearchiveerd en kan
+niet meer aan nieuwe casussen of sjablonen worden toegevoegd. Bestaande casuskopieën en
+studentdossiers blijven behouden. Hernoemde modules en verwijderde velden worden bij een
+herstart niet teruggezet. Er is geen vaste lijst die automatisch aan casussen wordt
+toegevoegd; je bepaalt de inhoud via dossiersjablonen en expliciet gekozen onderdelen.
+
+Reeds bestaande casussen behouden hun huidige modules, ook als die vroeger automatisch
+zijn toegevoegd. Deze wijziging verwijdert geen bestaande dossiers of studentantwoorden.
 
 De bibliotheek bevat twee afzonderlijke zoekformulieren: **Dossiers filteren** zoekt
 samengestelde dossiers op naam en opleiding; **Onderdelen filteren** zoekt binnen de

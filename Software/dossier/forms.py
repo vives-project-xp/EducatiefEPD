@@ -140,11 +140,10 @@ class ModuleFieldForm(FieldConfigurationForm):
 class LibraryTemplateForm(forms.ModelForm):
     class Meta:
         model = LibraryTemplate
-        fields = ["title", "description", "category", "education", "theme", "instructions", "is_fixed"]
+        fields = ["title", "description", "category", "education", "theme", "instructions"]
         labels = {
             "title": "Naam", "description": "Beschrijving", "category": "Categorie",
             "education": "Opleiding", "theme": "Thema", "instructions": "Instructies",
-            "is_fixed": "Automatisch toevoegen aan nieuwe casussen",
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 3}),
