@@ -20,9 +20,15 @@ class PatientForm(forms.ModelForm):
         labels = {
             "name": "Naam patiënt", "reference": "Fictieve referentie",
             "birth_date": "Geboortedatum", "gender": "Geslacht",
-            "image": "URL patiëntfoto", "context": "Korte context",
+            "image": "Upload hier een afbeelding", "context": "Korte context",
         }
         widgets = {"birth_date": forms.DateInput(attrs={"type": "date"})}
+
+    def clean_image(self):
+        upload = self.cleaned_data.get("image")
+        if upload and hasattr(upload, "size") and upload.size > 10 * 1024 * 1024:
+            raise forms.ValidationError("De foto mag maximaal 10 MB groot zijn.")
+        return upload
 
 
 class CaseForm(forms.ModelForm):
