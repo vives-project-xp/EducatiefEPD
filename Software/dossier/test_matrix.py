@@ -233,6 +233,26 @@ class MatrixWorkflowTests(TestCase):
         self.assertEqual(self.client.post(self.base_url, self.post_data(payload)).status_code, 302)
         self.module.refresh_from_db(); self.assertEqual(self.module.base_data["sheet"]["cells"]["r1"]["c0"], "Docentvoorinvulling")
 
+    def test_teacher_updates_existing_matrix_without_flattening_or_changing_student_copy(self):
+        self.module.base_data = {"sheet": values(), "other": "Bestaande tekst"}
+        self.module.save()
+        self.client.force_login(self.teacher)
+        changed = values()
+        changed["cells"]["r0"]["c1"] = "37,2"
+        self.assertEqual(self.client.post(self.base_url, self.post_data(changed)).status_code, 302)
+        self.module.refresh_from_db()
+        self.assertEqual(self.module.base_data["sheet"]["version"], 2)
+        self.assertEqual(self.module.base_data["sheet"]["cells"]["r0"]["c1"], "37.2")
+        self.assertNotIn("0_0", self.module.base_data["sheet"])
+        # A partial POST must retain the saved matrix when no new payload is sent.
+        self.assertEqual(self.client.post(self.base_url, {
+            "action": "save", "field_other": "Alleen tekst gewijzigd",
+        }).status_code, 302)
+        self.module.refresh_from_db()
+        self.assertEqual(self.module.base_data["sheet"]["cells"]["r0"]["c1"], "37.2")
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data, {})
+
     def test_review_has_readable_grid_and_no_editable_payload(self):
         self.response.data = {"sheet": values()}; self.response.save()
         self.client.force_login(self.teacher)
@@ -284,6 +304,15 @@ class MatrixWorkflowTests(TestCase):
         # Read from the prefetched instances that the view decorated.
         displayed_submission = list(result.context["student_case"].assignment_submissions.all())[0]
         self.assertEqual(displayed_submission.review_form.initial["feedback"], submission.answer)
+        self.assertContains(result, 'name="status"')
+        self.assertContains(result, 'name="feedback"')
+        reviewed = self.client.post(reverse("dossier:teacher_review_assignment", args=[
+            self.student_case.pk, submission.pk,
+        ]), {"status": "approved", "feedback": "Correct beoordeeld"})
+        self.assertEqual(reviewed.status_code, 302)
+        submission.refresh_from_db()
+        self.assertEqual(submission.status, AssignmentSubmission.Status.APPROVED)
+        self.assertEqual(submission.feedback, "Correct beoordeeld")
 
     def test_empty_required_flexible_matrix_can_be_prefilled_and_published(self):
         self.client.force_login(self.teacher)
