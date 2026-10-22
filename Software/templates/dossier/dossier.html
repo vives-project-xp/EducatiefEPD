@@ -6,7 +6,22 @@
     <div class="person">
       <strong>{{ student_case.patient_name }}</strong>{% if student_case.patient_image %}<img src="{{ student_case.patient_image }}" alt="">{% endif %}</div>
       <form class="search" method="get"><span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies"></form>
-      <nav>{% for module in modules %}<a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}"><span>{{ module.title }}</span><b>›</b></a>{% empty %}<p class="empty">Geen functies gevonden.</p>{% endfor %}</nav>
+      <nav aria-label="Dossieronderdelen">
+        {% for module in sidebar %}
+          <div class="nav-group">
+            {% if module.functions %}
+              <button type="button" class="nav-item nav-toggle {% if selected.id == module.id %}selected{% endif %}" data-nav-toggle aria-expanded="{% if selected.id == module.id %}true{% else %}false{% endif %}" aria-controls="nav-functions-{{ module.id }}"><span>{{ module.title }}</span><b aria-hidden="true">⌄</b></button>
+              <div class="nav-subitems" id="nav-functions-{{ module.id }}" {% if selected.id != module.id %}hidden{% endif %}>
+                {% for function in module.functions %}
+                  <a class="nav-subitem {% if selected_function_id == function.id %}selected{% endif %}" href="{{ function.url }}"><span>{{ function.title }}</span></a>
+                {% endfor %}
+              </div>
+            {% else %}
+              <a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}"><span>{{ module.title }}</span></a>
+            {% endif %}
+          </div>
+        {% empty %}<p class="empty">Geen functies gevonden.</p>{% endfor %}
+      </nav>
     </aside>
   <main class="main">
     <header class="top">
@@ -29,13 +44,30 @@
       {% if selected.instructions %}
         <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
       {% endif %}
-      <form method="post" class="module-form">{% csrf_token %}
-        <input type="hidden" name="module" value="{{ selected.id }}">
-        {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
-        {% if not student_case.locked and selected.kind != 'information' %}
-          <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
+      <div class="dossier-content-grid">
+        {% if show_form_navigation %}
+          <aside class="function-card form-navigation" aria-labelledby="form-navigation-heading">
+            <p class="eyebrow">Functie</p>
+            <h3 id="form-navigation-heading">Formulieren</h3>
+            <p class="form-navigation-help">Kies een formulier om de vragen te bekijken.</p>
+            {% for function in function_forms %}
+              {% for form in function.forms %}
+                <button type="button" class="form-navigation-item {% if form.active %}is-active{% endif %}" data-form-nav="{{ form.key }}" aria-pressed="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button>
+              {% endfor %}
+            {% endfor %}
+          </aside>
         {% endif %}
-      </form>
+        <form method="post" class="module-form" enctype="multipart/form-data">{% csrf_token %}
+          <input type="hidden" name="module" value="{{ selected.id }}">
+          <input type="hidden" name="function" value="{{ selected_function_id }}">
+          <input type="hidden" name="form" value="{{ request.GET.form }}">
+          {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
+          {% include 'dossier/_function_snapshots.html' with locked=student_case.locked %}
+          {% if not student_case.locked and selected.kind != 'information' %}
+            <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
+          {% endif %}
+        </form>
+      </div>
       {% else %}
         <p class="empty-state">Dit dossier bevat geen onderdelen.</p>
       {% endif %}

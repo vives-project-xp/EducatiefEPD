@@ -1,0 +1,58 @@
+{% for function in function_forms %}
+  <article class="function-snapshot-card">
+    <div class="work-title">
+      <div>
+        <p class="eyebrow">{{ function.kind }}</p>
+        <h3>{{ function.title }}</h3>
+      </div>
+    </div>
+    {% for form in function.forms %}
+      <section class="function-form" data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+        {% for field in form.fields %}
+          {% if field.type == 'long_text' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <textarea id="function_{{ field.key }}" name="function_{{ field.key }}" rows="5" class="js-tinymce" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
+            </div>
+          {% elif field.type == 'matrix' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>
+                {% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td><input name="{{ cell.name }}" value="{{ cell.value }}" {% if locked %}disabled{% endif %}></td>{% endfor %}</tr>{% endfor %}
+              </tbody></table></div>
+            </div>
+          {% elif field.type == 'select' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <select id="function_{{ field.key }}" name="function_{{ field.key }}" {% if locked %}disabled{% endif %}>
+                <option value="">Maak een keuze</option>
+                {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+              </select>
+            </div>
+          {% elif field.type == 'image' %}
+            <figure class="function-information">{% if field.image %}<img src="{{ field.image }}" alt="{{ field.caption }}">{% endif %}{% if field.caption %}<figcaption>{{ field.caption }}</figcaption>{% endif %}</figure>
+          {% elif field.type == 'info' %}
+            <div class="function-information">{{ field.explanation|linebreaks }}</div>
+          {% elif field.type == 'link' %}
+            <p class="function-information"><a href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p>
+          {% elif field.type == 'imageUpload' or field.type == 'fileUpload' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="file" {% if field.type == 'imageUpload' %}accept="image/*"{% endif %} {% if locked %}disabled{% endif %}>
+            </div>
+          {% else %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="{{ field.type }}" value="{{ field.value }}" {% if field.unit %}aria-describedby="unit_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
+              {% if field.unit %}<small id="unit_{{ field.key }}">{{ field.unit }}</small>{% endif %}
+            </div>
+          {% endif %}
+        {% empty %}
+          <p class="empty-state">Dit formulier bevat geen vragen.</p>
+        {% endfor %}
+      </section>
+    {% empty %}
+      <p class="empty-state">Deze functie bevat geen formulieren.</p>
+    {% endfor %}
+  </article>
+{% endfor %}

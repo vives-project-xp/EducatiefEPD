@@ -1,8 +1,9 @@
 import json
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.core.exceptions import SuspiciousOperation
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
@@ -29,7 +30,10 @@ from .models import (
     TeachingGroup,
 )
 from .auth import EpdOIDCAuthenticationBackend
-from .services import copy_template_to_case, create_case_structure, ensure_default_templates, start_student_case
+from .services import (
+    build_sidebar_structure, copy_template_to_case, create_case_structure,
+    ensure_default_templates, start_student_case,
+)
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -147,6 +151,55 @@ class EpdWorkflowTests(TestCase):
         question.save(update_fields=["question"])
         snapshot.refresh_from_db()
         self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
+
+        self.case.status = Case.Status.PUBLISHED
+        self.case.save(update_fields=["status"])
+        student_case, _ = start_student_case(self.case, self.student)
+        response = student_case.module_responses.get(module=module)
+        function_key = f"{snapshot.id}_{form.id}_{question.id}"
+        self.client.force_login(self.student)
+        page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id},
+        )
+        self.assertContains(page, "Intakefunctie")
+        self.client.post(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {
+                "module": response.id,
+                "action": "save",
+                f"function_{function_key}": "<p>Opmaak</p>",
+            },
+        )
+        response.refresh_from_db()
+        self.assertEqual(response.data["_functions"][function_key], "<p>Opmaak</p>")
+
+        with CaptureQueriesContext(connection) as baseline:
+            self.client.get(reverse("dossier:dossier", args=[self.case.id]))
+        for index in range(8):
+            CaseFunctionSnapshot.objects.create(
+                module=module,
+                title=f"Extra functie {index}",
+                kind=FunctionDefinition.Kind.FORM,
+                position=index + 1,
+                definition={"forms": []},
+            )
+        with CaptureQueriesContext(connection) as expanded:
+            self.client.get(reverse("dossier:dossier", args=[self.case.id]))
+        self.assertEqual(len(baseline), len(expanded))
+        sidebar = build_sidebar_structure(
+            list(
+                student_case.module_responses.select_related("module").prefetch_related(
+                    "module__function_snapshots"
+                )
+            )
+        )
+        function_titles = [
+            function["title"]
+            for item in sidebar
+            for function in item["functions"]
+        ]
+        self.assertIn("Extra functie 7", function_titles)
 
     def test_teacher_cannot_manage_functions_in_section(self):
         self.client.login(username="teacher", password="testpass")

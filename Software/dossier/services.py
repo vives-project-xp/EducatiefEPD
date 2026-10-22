@@ -69,6 +69,41 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def build_sidebar_structure(module_responses, query=""):
+    query = query.casefold()
+    structure = []
+    for response in module_responses:
+        snapshots = list(response.module.function_snapshots.all()) if response.module else []
+        functions = []
+        for snapshot in snapshots:
+            definition = snapshot.definition or {}
+            forms = [
+                {
+                    "id": form.get("id", form.get("position", 0)),
+                    "title": form.get("title") or "Naamloos formulier",
+                }
+                for form in definition.get("forms", [])
+            ]
+            functions.append({
+                "id": snapshot.id,
+                "title": snapshot.title,
+                "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
+                "forms": forms,
+                "url": f"?module={response.id}&function={snapshot.id}",
+            })
+        searchable = " ".join(
+            [response.title, *(item["title"] for item in functions)]
+        ).casefold()
+        if not query or query in searchable:
+            structure.append({
+                "id": response.id,
+                "title": response.title,
+                "kind": response.kind,
+                "functions": functions,
+            })
+    return structure
+
+
 DEFAULT_DOSSIER = [
     {
         "title": "Dashboard", "category": "module", "theme": "Algemeen",
@@ -291,10 +326,12 @@ def snapshot_template_functions(module, template):
                 "kind": link.function.kind,
                 "forms": [
                     {
+                        "id": form.id,
                         "title": form.title,
                         "position": form.position,
                         "questions": [
                             {
+                                "id": question.id,
                                 "fieldType": question.field_type,
                                 "question": question.question,
                                 "unit": question.unit,

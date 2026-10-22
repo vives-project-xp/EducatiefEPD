@@ -1,22 +1,54 @@
 document.addEventListener('DOMContentLoaded', () => {
-  tinymce.init({
-    selector: 'textarea.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
-    license_key: 'gpl',
-    base_url: '/static/tinymce',
-    suffix: '.min',
-    // language: 'nl',            // needs the nl language file in static/tinymce/langs/
-    menubar: false,
-    plugins: 'lists link table',
-    toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | importdocx exportdocx',
-    color_cols: 5,
-    setup(editor) {
-      editor.ui.registry.addButton('importdocx', {
-        text: 'Import Word', onAction: () => importDocx(editor),
+  const navigation = document.querySelector('.form-navigation');
+
+  if (navigation) {
+    navigation.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-form-nav]');
+      if (!button) return;
+      const key = button.dataset.formNav;
+      navigation.querySelectorAll('[data-form-nav]').forEach((item) => {
+        item.classList.toggle('is-active', item === button);
+        item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
       });
-      editor.ui.registry.addButton('exportdocx', {
-        text: 'Export Word', onAction: () => exportDocx(editor),
+      document.querySelectorAll('[data-function-form]').forEach((form) => {
+        form.hidden = form.dataset.functionForm !== key;
       });
-    },
+      document.querySelectorAll('[name="form"]').forEach((input) => {
+        input.value = key;
+      });
+    });
+  }
+
+  if (typeof tinymce !== 'undefined') {
+    tinymce.init({
+      selector: 'textarea.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
+      license_key: 'gpl',
+      base_url: '/static/tinymce',
+      suffix: '.min',
+      menubar: false,
+      plugins: 'lists link table',
+      toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | importdocx exportdocx',
+      color_cols: 5,
+      setup(editor) {
+        editor.ui.registry.addButton('importdocx', {
+          text: 'Import Word', onAction: () => importDocx(editor),
+        });
+        editor.ui.registry.addButton('exportdocx', {
+          text: 'Export Word', onAction: () => exportDocx(editor),
+        });
+      },
+    });
+  }
+
+  document.querySelectorAll('[data-nav-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      document.querySelectorAll('[data-nav-toggle]').forEach((item) => {
+        item.setAttribute('aria-expanded', item === button && !expanded ? 'true' : 'false');
+        const panel = document.getElementById(item.getAttribute('aria-controls'));
+        if (panel) panel.hidden = item !== button || expanded;
+      });
+    });
   });
 });
 

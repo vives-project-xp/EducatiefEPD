@@ -585,6 +585,14 @@ body {
   border-radius: 4px;
 }
 
+.nav-toggle {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .nav-item:hover,
 .nav-item.selected {
   background: var(--blue-dark);
@@ -593,6 +601,26 @@ body {
 .nav-item b {
   font-size: 1.4rem;
   font-weight: 400;
+}
+
+.nav-subitems {
+  margin: -5px 10px 10px 25px;
+  border-left: 1px solid currentColor;
+}
+
+.nav-subitem {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  padding: 7px 12px;
+  overflow-wrap: anywhere;
+  font-size: .92rem;
+}
+
+.nav-subitem.selected,
+.nav-subitem:hover {
+  background: var(--blue-dark);
+  border-radius: 4px;
 }
 
 .printer {
@@ -637,6 +665,61 @@ body {
 
 .work {
   margin-top: 40px;
+}
+
+.dossier-content-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.form-navigation {
+  align-self: start;
+  padding: 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.form-navigation h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.form-navigation-help {
+  color: var(--muted);
+  font-size: .9rem;
+  line-height: 1.45;
+  margin: 6px 0 16px;
+}
+
+.form-navigation-item {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  line-height: 1.3;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink);
+}
+
+.form-navigation-item:hover,
+.form-navigation-item.is-active {
+  background: var(--surface-selected);
+  border-color: var(--line);
+  font-weight: 700;
+}
+
+.function-form[hidden] {
+  display: none !important;
 }
 
 .work-title {
@@ -697,6 +780,10 @@ body {
 
   .main {
     padding: 30px 18px;
+  }
+
+  .dossier-content-grid {
+    grid-template-columns: 1fr;
   }
 
   .top {

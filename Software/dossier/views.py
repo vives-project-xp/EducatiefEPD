@@ -25,7 +25,7 @@ import io
 import re
 from docx import Document
 from htmldocx import HtmlToDocx
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from .forms import (
     AssignmentForm,
@@ -64,7 +64,8 @@ from .models import (
 )
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
-    ensure_default_templates, module_schema, start_student_case, clean_html,
+    build_sidebar_structure, ensure_default_templates, module_schema,
+    start_student_case, clean_html,
 )
 
 
@@ -330,18 +331,204 @@ def parsed_module_data(request, schema, current_data):
     return data, []
 
 
+def prepare_function_forms(snapshots, data, selected_function_id=None, active_form_key=None):
+    prepared = []
+    function_data = data.get("_functions", {}) if isinstance(data, dict) else {}
+    for snapshot in snapshots:
+        definition = snapshot.definition or {}
+        forms = []
+        for form in definition.get("forms", []):
+            fields = []
+            for question in form.get("questions", []):
+                field_type = question.get("fieldType")
+                key = f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+                mapped_type = {
+                    "text": "long_text",
+                    "number": "number",
+                    "date": "date",
+                    "dateTime": "datetime-local",
+                    "time": "time",
+                    "multipleChoice": "select",
+                    "matrix": "matrix",
+                }.get(field_type, field_type)
+                value = function_data.get(key, {} if mapped_type == "matrix" else "")
+                item = {
+                    "key": key,
+                    "label": question.get("question", ""),
+                    "type": mapped_type,
+                    "required": question.get("required", False),
+                    "unit": question.get("unit", ""),
+                    "options": question.get("options", []),
+                    "columns": question.get("columns", []),
+                    "rows": question.get("rows", []),
+                    "value": value,
+                    "url": question.get("url", ""),
+                    "button_text": question.get("buttonText", ""),
+                    "image": question.get("image", ""),
+                    "caption": question.get("caption", ""),
+                    "explanation": question.get("explanation", ""),
+                }
+                if mapped_type == "matrix":
+                    matrix_values = value if isinstance(value, dict) else {}
+                    item["prepared_rows"] = [
+                        {
+                            "label": row,
+                            "cells": [
+                                {
+                                    "name": f"function_{key}_{row_index}_{column_index}",
+                                    "value": matrix_values.get(
+                                        f"{row_index}_{column_index}", ""
+                                    ),
+                                }
+                                for column_index, _ in enumerate(item["columns"])
+                            ],
+                        }
+                        for row_index, row in enumerate(item["rows"])
+                    ]
+                fields.append(item)
+            forms.append({
+                "id": form.get("id", form.get("position", 0)),
+                "title": form.get("title", ""),
+                "key": f"{snapshot.id}-{form.get('id', form.get('position', 0))}",
+                "fields": fields,
+            })
+        prepared.append({
+            "id": snapshot.id,
+            "title": snapshot.title,
+            "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
+            "kind_code": snapshot.kind,
+            "forms": forms,
+        })
+    if selected_function_id is not None:
+        prepared = [item for item in prepared if item["id"] == selected_function_id]
+    for function in prepared:
+        for form in function["forms"]:
+            form["active"] = form["key"] == active_form_key
+        if function["forms"] and not any(form["active"] for form in function["forms"]):
+            function["forms"][0]["active"] = True
+    return prepared
+
+
+def parsed_function_data(request, snapshots, current_data):
+    data = dict(current_data)
+    function_data = dict(data.get("_functions", {}))
+    missing = []
+    for snapshot in snapshots:
+        for form in (snapshot.definition or {}).get("forms", []):
+            form_id = form.get("id", form.get("position", 0))
+            for question in form.get("questions", []):
+                field_type = question.get("fieldType")
+                question_id = question.get("id", question.get("position", 0))
+                key = f"{snapshot.id}_{form_id}_{question_id}"
+                prefix = f"function_{key}"
+                if field_type == "matrix":
+                    value = {
+                        f"{row_index}_{column_index}": request.POST.get(
+                            f"{prefix}_{row_index}_{column_index}", ""
+                        ).strip()
+                        for row_index, _ in enumerate(question.get("rows", []))
+                        for column_index, _ in enumerate(question.get("columns", []))
+                    }
+                    has_value = any(value.values())
+                elif field_type in {"image", "info", "link"}:
+                    continue
+                elif field_type in {"imageUpload", "fileUpload"}:
+                    upload = request.FILES.get(prefix)
+                    if upload:
+                        max_size = 300_000 if field_type == "imageUpload" else 5_000_000
+                        if upload.size > max_size:
+                            missing.append(question.get("question", "Bestand") + " (bestand is te groot)")
+                        raw = upload.read()
+                        if field_type == "imageUpload":
+                            encoded = base64.b64encode(raw).decode("ascii")
+                            try:
+                                validate_function_image(
+                                    f"data:{upload.content_type};base64,{encoded}"
+                                )
+                            except ValueError as error:
+                                missing.append(str(error))
+                        value = {
+                            "name": upload.name[:180],
+                            "content_type": upload.content_type or "application/octet-stream",
+                            "data": base64.b64encode(raw).decode("ascii"),
+                        }
+                        has_value = True
+                    else:
+                        value = function_data.get(key, {})
+                        has_value = bool(value)
+                else:
+                    value = request.POST.get(prefix, "").strip()
+                    has_value = bool(value)
+                    if field_type == "number" and has_value:
+                        try:
+                            if not Decimal(value).is_finite():
+                                raise InvalidOperation
+                        except InvalidOperation:
+                            missing.append(question.get("question", "Getal") + " (ongeldig getal)")
+                    elif field_type == "date" and has_value:
+                        try:
+                            date.fromisoformat(value)
+                        except ValueError:
+                            missing.append(question.get("question", "Datum") + " (ongeldige datum)")
+                    elif field_type == "dateTime" and has_value:
+                        try:
+                            datetime.fromisoformat(value)
+                        except ValueError:
+                            missing.append(question.get("question", "Datum en tijd") + " (ongeldig tijdstip)")
+                    elif field_type == "time" and has_value:
+                        try:
+                            datetime.strptime(value, "%H:%M").time()
+                        except ValueError:
+                            missing.append(question.get("question", "Tijd") + " (ongeldige tijd)")
+                    elif field_type == "multipleChoice" and has_value:
+                        if value not in question.get("options", []):
+                            missing.append(question.get("question", "Meerkeuze") + " (ongeldige keuze)")
+                    if field_type == "text":
+                        value = clean_html(value)
+                        has_value = bool(value.strip())
+                if question.get("required") and not has_value:
+                    missing.append(question.get("question", "Dit veld"))
+                function_data[key] = value
+    data["_functions"] = function_data
+    return (None, missing) if missing else (data, [])
+
+
 @login_required
 def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
     query = request.GET.get("q", "").strip()
-    modules = list(student_case.module_responses.all())
-    visible_modules = [item for item in modules if query.lower() in item.title.lower()] if query else modules
+    modules = list(
+        student_case.module_responses.select_related("module").prefetch_related(
+            "module__function_snapshots"
+        ).all()
+    )
+    sidebar = build_sidebar_structure(modules, query)
+    visible_ids = {item["id"] for item in sidebar}
     selected_id = request.POST.get("module") or request.GET.get("module")
-    selected = next((item for item in modules if str(item.id) == selected_id), None)
+    selected = next((item for item in modules if str(item.id) == selected_id and item.id in visible_ids), None)
     if selected is None and modules:
-        selected = modules[0]
+        selected = next((item for item in modules if item.id in visible_ids), modules[0])
+    selected_snapshots = (
+        selected.module.function_snapshots.all()
+        if selected and selected.module else []
+    )
+    function_id = request.POST.get("function") or request.GET.get("function")
+    try:
+        selected_function_id = int(function_id) if function_id else None
+    except (TypeError, ValueError):
+        selected_function_id = None
+    available_function_ids = [snapshot.id for snapshot in selected_snapshots]
+    if selected_function_id not in available_function_ids:
+        selected_function_id = available_function_ids[0] if available_function_ids else None
+    active_form_key = request.POST.get("form") or request.GET.get("form")
+    function_forms = prepare_function_forms(
+        selected_snapshots, selected.data, selected_function_id, active_form_key
+    ) if selected else []
+    show_form_navigation = any(
+        len(function["forms"]) > 1 for function in function_forms
+    )
 
     if request.method == "POST" and selected:
         if student_case.locked:
@@ -372,6 +559,14 @@ def dossier(request, case_id):
                     messages.success(request, "Observatie toegevoegd.")
         else:
             data, missing = parsed_module_data(request, selected.schema, selected.data)
+            function_data, function_missing = parsed_function_data(
+                request, selected_snapshots,
+                data if data is not None else selected.data,
+            )
+            if function_missing:
+                missing.extend(function_missing)
+            elif data is not None and function_data is not None:
+                data = function_data
             if missing:
                 messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
             else:
@@ -379,12 +574,21 @@ def dossier(request, case_id):
                 selected.save(update_fields=["data", "updated_at"])
                 messages.success(request, "Dossieronderdeel bewaard.")
                 audit(request, "module_response.updated", selected)
-        return redirect(f"{request.path}?module={selected.id}")
+        redirect_params = {"module": selected.id}
+        if selected_function_id is not None:
+            redirect_params["function"] = selected_function_id
+        if active_form_key:
+            redirect_params["form"] = active_form_key
+        return redirect(f"{request.path}?{urlencode(redirect_params)}")
 
     return render(request, "dossier/dossier.html", {
-        "case": case, "student_case": student_case, "modules": visible_modules,
+        "case": case, "student_case": student_case, "modules": sidebar,
+        "sidebar": sidebar,
         "selected": selected, "query": query,
         "fields": prepare_schema_fields(selected.schema, selected.data) if selected else [],
+        "function_forms": function_forms,
+        "selected_function_id": selected_function_id,
+        "show_form_navigation": show_form_navigation,
     })
 
 
@@ -851,6 +1055,14 @@ def teacher_module(request, case_id, module_id):
                 messages.success(request, "Observatie aan het basisdossier toegevoegd.")
         else:
             data, missing = parsed_module_data(request, schema, module.base_data)
+            function_data, function_missing = parsed_function_data(
+                request, module.function_snapshots.all(),
+                data if data is not None else module.base_data,
+            )
+            if function_missing:
+                missing.extend(function_missing)
+            elif data is not None and function_data is not None:
+                data = function_data
             if missing:
                 messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
             else:
@@ -862,6 +1074,9 @@ def teacher_module(request, case_id, module_id):
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
         "fields": prepare_schema_fields(schema, module.base_data),
+        "function_forms": prepare_function_forms(
+            module.function_snapshots.all(), module.base_data
+        ),
     })
 
 
