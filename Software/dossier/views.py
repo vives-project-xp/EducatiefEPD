@@ -1,5 +1,16 @@
-from django.contrib import messages
-from django.contrib import auth
+import base64
+import binascii
+from datetime import timedelta
+import io
+import json
+import re
+from urllib.parse import urlencode, urlparse
+
+import mammoth
+from docx import Document
+from htmldocx import HtmlToDocx
+
+from django.contrib import auth, messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
@@ -7,25 +18,14 @@ from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
 from django.db.models import Prefetch, Q
-from django.http import Http404, JsonResponse, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.text import slugify
+from django.utils.text import get_valid_filename, slugify
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.text import get_valid_filename
-from django.views.decorators.http import require_POST
+from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import ensure_csrf_cookie
-import base64
-import binascii
-import json
-from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
-import mammoth
-import io
-import re
-from docx import Document
-from htmldocx import HtmlToDocx
-from urllib.parse import urlencode, urlparse
+from django.views.decorators.http import require_POST
 
 from .forms import (
     AssignmentForm,
@@ -41,6 +41,7 @@ from .forms import (
     TeachingGroupForm,
 )
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
+from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
     AssignmentSubmission,
@@ -54,8 +55,6 @@ from .models import (
     LibraryField,
     LibraryTemplate,
     Module,
-    ModuleField,
-    ModuleResponse,
     ManagedForm,
     ManagedQuestion,
     Profile,
@@ -256,14 +255,44 @@ def case_detail(request, case_id):
     })
 
 
-def prepare_schema_fields(schema, data):
+def prepare_schema_fields(schema, data, *, errors=None, pending_observations=None, edit_readonly=False):
     prepared = []
     for field in schema:
         item = dict(field)
         key = item["key"]
         value = data.get(key, [] if item["type"] == "observation" else "")
         item["value"] = value
+        if item["type"] in {"long_text", "rich_text"} and isinstance(value, str):
+            item["render_as_html"] = True
+            item["rendered_value"] = mark_safe(clean_html(value))
+        item["errors"] = (errors or {}).get(key, [])
+        item["pending_observation"] = (pending_observations or {}).get(key, {})
+        # Native number/date controls hide malformed values; use text on error
+        # so even an invalid submitted value remains visible and correctable.
+        item["invalid_typed_value"] = bool(item["errors"] and value and item["type"] in {"number", "date", "datetime"})
+        item["invalid_choice"] = bool(item["type"] == "select" and value and value not in item.get("options", []))
         if item["type"] == "matrix":
+            if item.get("matrix_definition"):
+                from .matrix import cell_spec, empty_values, value_for
+                item["matrix_payload"] = {
+                    "definition": item["matrix_definition"],
+                    "values": data.get(key, empty_values()),
+                    "label": item["label"],
+                    "errors": item["errors"],
+                    "editReadonly": edit_readonly,
+                }
+                item["matrix_display_rows"] = []
+                for row in item["matrix_definition"]["rows"]:
+                    display_cells = []
+                    for column in item["matrix_definition"]["columns"]:
+                        spec = cell_spec(item["matrix_definition"], row["id"], column["id"])
+                        cell = spec.get("text", "") if spec.get("type") == "label" else value_for(data.get(key, empty_values()), spec, row["id"], column["id"])
+                        if type(cell) is bool:
+                            cell = "Ja" if cell else "Nee"
+                        elif isinstance(cell, list):
+                            cell = "; ".join(str(entry) for entry in cell)
+                        display_cells.append(cell)
+                    item["matrix_display_rows"].append({"label": row["label"], "cells": display_cells})
             matrix_values = value if isinstance(value, dict) else {}
             item["prepared_rows"] = [
                 {
@@ -272,8 +301,9 @@ def prepare_schema_fields(schema, data):
                         {
                             "name": f"field_{key}_{row_index}_{column_index}",
                             "value": matrix_values.get(f"{row_index}_{column_index}", ""),
+                            "column": column,
                         }
-                        for column_index, _ in enumerate(item.get("columns", []))
+                        for column_index, column in enumerate(item.get("columns", []))
                     ],
                 }
                 for row_index, row in enumerate(item.get("rows", []))
@@ -494,10 +524,13 @@ def parsed_function_data(request, snapshots, current_data):
 
 
 @login_required
+@transaction.atomic
 def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
+    if request.method == "POST":
+        student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
     modules = list(
         student_case.module_responses.select_related("module").prefetch_related(
@@ -508,6 +541,8 @@ def dossier(request, case_id):
     visible_ids = {item["id"] for item in sidebar}
     selected_id = request.POST.get("module") or request.GET.get("module")
     selected = next((item for item in modules if str(item.id) == selected_id and item.id in visible_ids), None)
+    if request.method == "POST" and selected is None:
+        raise Http404
     if selected is None and modules:
         selected = next((item for item in modules if item.id in visible_ids), modules[0])
     selected_snapshots = (
@@ -530,35 +565,19 @@ def dossier(request, case_id):
         len(function["forms"]) > 1 for function in function_forms
     )
 
+    form_result = None
+    errors = {}
     if request.method == "POST" and selected:
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
-        elif request.POST.get("action", "").startswith("add_observation:"):
-            key = request.POST["action"].split(":", 1)[1]
-            valid_keys = {field["key"] for field in selected.schema if field["type"] == "observation"}
-            if key in valid_keys:
-                data = dict(selected.data)
-                observations = list(data.get(key, []))
-                timestamp = request.POST.get(f"observation_timestamp_{key}", "")
-                value = request.POST.get(f"observation_value_{key}", "").strip()
-                try:
-                    datetime.fromisoformat(timestamp)
-                    valid_timestamp = True
-                except ValueError:
-                    valid_timestamp = False
-                if not valid_timestamp or not value:
-                    messages.error(request, "Geef een geldig tijdstip en een observatie op.")
-                else:
-                    observations.append({
-                        "timestamp": timestamp, "value": value,
-                        "note": request.POST.get(f"observation_note_{key}", "").strip(),
-                    })
-                    data[key] = observations
-                    selected.data = data
-                    selected.save(update_fields=["data", "updated_at"])
-                    messages.success(request, "Observatie toegevoegd.")
         else:
-            data, missing = parsed_module_data(request, selected.schema, selected.data)
+            form_result = parse_module_form(request.POST, selected.schema, selected.data)
+            missing = [
+                message
+                for field_errors in form_result.errors.values()
+                for message in field_errors
+            ]
+            data = form_result.data if not form_result.errors else None
             function_data, function_missing = parsed_function_data(
                 request, selected_snapshots,
                 data if data is not None else selected.data,
@@ -572,14 +591,20 @@ def dossier(request, case_id):
             else:
                 selected.data = data
                 selected.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Dossieronderdeel bewaard.")
-                audit(request, "module_response.updated", selected)
+                message = "Dossieronderdeel en observaties bewaard." if form_result.added_observations else "Dossieronderdeel bewaard."
+                messages.success(request, message)
+                audit(request, "module_response.updated", selected, observations_added=len(form_result.added_observations))
         redirect_params = {"module": selected.id}
         if selected_function_id is not None:
             redirect_params["function"] = selected_function_id
         if active_form_key:
             redirect_params["form"] = active_form_key
-        return redirect(f"{request.path}?{urlencode(redirect_params)}")
+        if not missing:
+            if query:
+                redirect_params["q"] = query
+            return redirect(f"{request.path}?{urlencode(redirect_params)}")
+    elif selected and request.GET.get("validate") == "1":
+        errors = validate_module_data(selected.schema, selected.data, require_complete=True)
 
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": sidebar,
@@ -589,15 +614,18 @@ def dossier(request, case_id):
         "function_forms": function_forms,
         "selected_function_id": selected_function_id,
         "show_form_navigation": show_form_navigation,
+        "errors": errors,
     })
 
 
 @login_required
+@transaction.atomic
 def submit_student_case(request, case_id):
     require_post(request)
     if is_teacher(request.user):
         raise PermissionDenied
     _, student_case = get_student_case(request, case_id)
+    student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     if student_case.locked:
         raise PermissionDenied
     incomplete = student_case.assignment_submissions.filter(
@@ -605,12 +633,23 @@ def submit_student_case(request, case_id):
     ).exists()
     if incomplete:
         messages.error(request, "Dien eerst alle opdrachten in.")
-    else:
-        student_case.status = StudentCase.Status.SUBMITTED
-        student_case.submitted_at = timezone.now()
-        student_case.save(update_fields=["status", "submitted_at", "updated_at"])
-        audit(request, "student_case.submitted", student_case)
-        messages.success(request, "Je volledige dossier is ingediend.")
+    invalid_modules = []
+    for module in student_case.module_responses.all():
+        errors = validate_module_data(module.schema, module.data, require_complete=True)
+        if errors:
+            invalid_modules.append(module)
+            labels = ", ".join(field["label"] for field in module.schema if field["key"] in errors)
+            messages.error(request, f"Controleer {module.title}: {labels}.")
+    if invalid_modules:
+        url = redirect("dossier:dossier", case_id=case_id).url
+        return redirect(f"{url}?{urlencode({'module': invalid_modules[0].id, 'validate': '1'})}")
+    if incomplete:
+        return redirect("dossier:case_detail", case_id=case_id)
+    student_case.status = StudentCase.Status.SUBMITTED
+    student_case.submitted_at = timezone.now()
+    student_case.save(update_fields=["status", "submitted_at", "updated_at"])
+    audit(request, "student_case.submitted", student_case)
+    messages.success(request, "Je volledige dossier is ingediend.")
     return redirect("dossier:case_detail", case_id=case_id)
 
 
@@ -648,7 +687,6 @@ def teacher_case_create(request):
         case.patient = patient
         case.created_by = request.user
         case.save()
-        create_case_structure(case)
         audit(request, "case.created", case)
         messages.success(request, "Patiënt en casus zijn aangemaakt.")
         return redirect("dossier:teacher_case", case_id=case.id)
@@ -918,15 +956,13 @@ def teacher_case_transition(request, case_id):
     case = editable_case(request.user, case_id)
     action = request.POST.get("action")
     if action == "publish":
-        invalid_modules = [
-            module for module in case.modules.prefetch_related("fields")
-            if module.kind != Module.Kind.INFORMATION
-            and not module.fields.exists()
-            and not module.configuration
-        ]
-        if not case.assignments.exists() or not case.modules.exists() or invalid_modules:
-            messages.error(request, "Voor publicatie zijn een opdracht en volledig geconfigureerde dossieronderdelen nodig.")
-        else:
+        has_assignments = case.assignments.exists()
+        has_modules = case.modules.exists()
+        if not has_assignments:
+            messages.error(request, "Voeg minstens één opdracht toe voordat je de casus publiceert.")
+        if not has_modules:
+            messages.error(request, "Voeg minstens één dossiermodule toe voordat je de casus publiceert.")
+        if has_assignments and has_modules:
             case.publish()
             case.save()
             audit(request, "case.published", case)
@@ -1021,59 +1057,42 @@ def teacher_module_create(request, case_id):
 
 
 @login_required
+@transaction.atomic
 def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
-    schema = module_schema(module)
     if request.method == "POST":
-        if request.POST.get("action", "").startswith("add_observation:"):
-            key = request.POST["action"].split(":", 1)[1]
-            valid_keys = {field["key"] for field in schema if field["type"] == "observation"}
-            if key not in valid_keys:
-                raise PermissionDenied
-            data = dict(module.base_data)
-            observations = list(data.get(key, []))
-            timestamp = request.POST.get(f"observation_timestamp_{key}", "")
-            value = request.POST.get(f"observation_value_{key}", "").strip()
-            try:
-                datetime.fromisoformat(timestamp)
-                valid_timestamp = True
-            except ValueError:
-                valid_timestamp = False
-            if not valid_timestamp or not value:
-                messages.error(request, "Geef een geldig tijdstip en een observatie op.")
-            else:
-                observations.append({
-                    "timestamp": timestamp, "value": value,
-                    "note": request.POST.get(f"observation_note_{key}", "").strip(),
-                })
-                data[key] = observations
-                module.base_data = data
-                module.save(update_fields=["base_data"])
-                audit(request, "base_dossier.observation_added", module)
-                messages.success(request, "Observatie aan het basisdossier toegevoegd.")
+        module = Module.objects.select_for_update().get(pk=module.pk)
+    schema = module_schema(module)
+    form_result = None
+    if request.method == "POST":
+        form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
+        if form_result.errors:
+            messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         else:
             data, missing = parsed_module_data(request, schema, module.base_data)
             function_data, function_missing = parsed_function_data(
                 request, module.function_snapshots.all(),
                 data if data is not None else module.base_data,
             )
-            if function_missing:
-                missing.extend(function_missing)
-            elif data is not None and function_data is not None:
-                data = function_data
-            if missing:
-                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
-            else:
-                module.base_data = data
+            missing.extend(function_missing)
+            if not missing and data is not None and function_data is not None:
+                module.base_data = function_data
                 module.save(update_fields=["base_data"])
-                audit(request, "base_dossier.updated", module)
+                audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
                 messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
-        return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
+            elif missing:
+                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
+        if not form_result.errors and not missing:
+            return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
-        "fields": prepare_schema_fields(schema, module.base_data),
+        "fields": prepare_schema_fields(
+            schema, form_result.display_data if form_result else module.base_data, edit_readonly=True,
+            errors=form_result.errors if form_result else None,
+            pending_observations=form_result.pending_observations if form_result else None,
+        ),
         "function_forms": prepare_function_forms(
             module.function_snapshots.all(), module.base_data
         ),
@@ -1081,22 +1100,27 @@ def teacher_module(request, case_id, module_id):
 
 
 @login_required
+@transaction.atomic
 def teacher_module_field(request, case_id, module_id, field_id=None):
     require_teacher(request.user)
     if not is_admin(request.user):
         raise PermissionDenied
     case = editable_case(request.user, case_id)
-    module = get_object_or_404(case.modules, id=module_id)
+    modules = case.modules.select_for_update() if request.method == "POST" else case.modules.all()
+    module = get_object_or_404(modules, id=module_id)
     field = get_object_or_404(module.fields, id=field_id) if field_id else None
     form = ModuleFieldForm(request.POST or None, instance=field, parent=module)
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         item.module = module
         item.save()
+        if form.converted_base is not None:
+            module.base_data = {**module.base_data, item.key: form.converted_base}
+            module.save(update_fields=["base_data"])
         audit(request, "module_field.updated" if field else "module_field.created", item)
         messages.success(request, "Veld bewaard.")
         return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
-    return render(request, "dossier/teacher_item_form.html", {
+    return render(request, "dossier/field_editor.html", {
         "form": form, "case": case, "module": module,
         "title": "Veld aanpassen" if field else "Veld toevoegen",
     })
@@ -1127,10 +1151,7 @@ def teacher_student_case(request, student_case_id):
     )
     editable_case(request.user, student_case.case_id)
     for module in student_case.module_responses.all():
-        module.display_values = [
-            {"label": field["label"], "value": module.data.get(field["key"], "")}
-            for field in module.schema
-        ]
+        module.display_values = prepare_schema_fields(module.schema, module.data)
     for submission in student_case.assignment_submissions.all():
         submission.review_form = ReviewForm(
             initial={"feedback": submission.answer},
@@ -1565,7 +1586,6 @@ def function_trash_action(request):
 @transaction.atomic
 def library_dossier(request, dossier_id=None):
     require_teacher(request.user)
-    ensure_default_templates()
     dossier = None
     if dossier_id is not None:
         dossiers = accessible_library_dossiers(request.user)
@@ -1582,10 +1602,7 @@ def library_dossier(request, dossier_id=None):
         education_queryset = education_queryset.filter(
             Q(id__in=education_ids) | Q(id=profile_education_id)
         ).distinct()
-    module_queryset = LibraryTemplate.objects.filter(
-        Q(status=LibraryTemplate.Status.ACTIVE)
-        | Q(is_fixed=True, seed_key__startswith="vroedkunde-")
-    )
+    module_queryset = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
     form = LibraryDossierForm(
         request.POST or None,
         instance=dossier,
@@ -1599,10 +1616,6 @@ def library_dossier(request, dossier_id=None):
         item.save()
         LibraryDossierModule.objects.filter(dossier=item).delete()
         selected_modules = list(form.cleaned_data["existing_modules"])
-        for template in selected_modules:
-            if template.status != LibraryTemplate.Status.ACTIVE:
-                template.status = LibraryTemplate.Status.ACTIVE
-                template.save(update_fields=["status", "updated_at"])
         LibraryDossierModule.objects.bulk_create([
             LibraryDossierModule(dossier=item, template=template, position=position)
             for position, template in enumerate(selected_modules)
@@ -1767,8 +1780,6 @@ def library_template(request, template_id=None):
         return redirect("dossier:library_detail", template_id=template.id)
 
     form = LibraryTemplateForm(request.POST or None, instance=template)
-    if not is_admin(request.user):
-        form.fields.pop("is_fixed")
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
         if not item.pk:
@@ -1811,7 +1822,7 @@ def library_field(request, template_id, field_id=None):
         audit(request, "library_field.updated" if field else "library_field.created", item)
         messages.success(request, "Templateveld bewaard.")
         return redirect("dossier:library_detail", template_id=template.id)
-    return render(request, "dossier/teacher_item_form.html", {
+    return render(request, "dossier/field_editor.html", {
         "form": form, "title": "Templateveld aanpassen" if field else "Templateveld toevoegen",
         "library_item": template,
     })

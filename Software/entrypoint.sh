@@ -27,7 +27,6 @@ for attempt in range(1, 31):
 PY
 
 python manage.py migrate --noinput
-python manage.py initialize_platform
 python manage.py collectstatic --noinput
 
 if [ "${SEED_DEMO:-0}" = "1" ]; then

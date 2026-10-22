@@ -101,7 +101,7 @@
         {% for item in available_templates %}
         <article class="library-card">
           <div class="library-card-content">
-            <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}{% if item.is_fixed %} · standaard{% endif %}</span>
+            <span class="eyebrow">{{ item.get_category_display }} · v{{ item.version }}</span>
             <h2>{{ item.title }}</h2>
             <p>{{ item.description }}</p>
           </div>

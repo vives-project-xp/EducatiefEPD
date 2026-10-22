@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} | Educatief EPD{% endblock %}
+{% block content %}
+<main class="teacher-shell field-editor-shell">
+  <header class="page-bar">
+    <div><p class="eyebrow">Docentomgeving</p><h1>{{ title }}</h1></div>
+    <a class="back" href="{% if module %}{% url 'dossier:teacher_module' case.id module.id %}{% else %}{% url 'dossier:library_detail' library_item.id %}{% endif %}">← Terug</a>
+  </header>
+  <form method="post" class="editor-form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for hidden in form.hidden_fields %}{{ hidden }}{{ hidden.errors }}{% endfor %}
+    <section class="field-metadata">
+      {% for field in form.visible_fields %}
+        <div {% if field.name == 'rows_text' or field.name == 'columns_text' %}data-legacy-matrix{% endif %} {% if field.name == 'options_text' %}data-select-options{% endif %}>
+          {{ field.label_tag }}{{ field }}{{ field.errors }}
+          {% if field.help_text %}<small class="helptext">{{ field.help_text }}</small>{% endif %}
+        </div>
+      {% endfor %}
+    </section>
+    <div data-matrix-designer hidden></div>
+    <noscript><p>JavaScript is nodig om de flexibele matrix te ontwerpen. Bestaande opgeslagen matrices blijven behouden.</p></noscript>
+    <p class="muted">Bewaren wijzigt deze bron. Reeds gestarte studentdossiers behouden hun eigen indeling en antwoorden.</p>
+    <button class="primary button">Bewaren</button>
+  </form>
+</main>
+{% endblock %}

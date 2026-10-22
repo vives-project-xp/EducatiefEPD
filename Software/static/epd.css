@@ -1157,7 +1157,7 @@ summary {
   color: var(--red);
 }
 
-/* Checkbox fields (e.g. #id_is_fixed): label first, checkbox after it */
+/* Checkbox fields: label first, checkbox after it */
 .editor-form section > div:has(> input[type="checkbox"]) {
   grid-template-columns: max-content max-content;
   justify-content: start;

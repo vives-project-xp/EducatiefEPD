@@ -1,18 +1,13 @@
 from copy import deepcopy
 
 from django.db import transaction
-from django.db.models import Q
-from django.utils.text import slugify
 
 import nh3
 
 from .models import (
     AssignmentSubmission,
     AuditEvent,
-    Education,
-    FieldDefinition,
     LibraryDossier,
-    LibraryField,
     LibraryTemplate,
     CaseFunctionSnapshot,
     Module,
@@ -300,6 +295,7 @@ def copy_template_to_case(template, case):
             field_type=field.field_type, help_text=field.help_text,
             required=field.required, position=field.position,
             options=field.options, rows=field.rows, columns=field.columns,
+            matrix_definition=deepcopy(field.matrix_definition),
         )
         for field in template.fields.all()
     ])

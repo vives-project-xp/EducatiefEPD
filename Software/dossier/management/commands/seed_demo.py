@@ -1,8 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from dossier.models import Assignment, Case, Education, Patient, Profile, TeachingGroup
-from dossier.services import create_case_structure
+from dossier.models import (
+    Assignment, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField,
+    LibraryTemplate, Patient, Profile, TeachingGroup,
+)
+from dossier.services import copy_library_dossier_to_case
 
 
 class Command(BaseCommand):
@@ -65,14 +68,34 @@ class Command(BaseCommand):
                 "created_by": teacher,
             },
         )
-        create_case_structure(case)
+        dossier, _ = LibraryDossier.objects.get_or_create(
+            title="Demo: opname", education=education, defaults={"created_by": teacher}
+        )
+        template, _ = LibraryTemplate.objects.get_or_create(
+            seed_key="demo-opname-anamnese",
+            defaults={
+                "title": "Demo: anamnese", "category": LibraryTemplate.Category.QUESTIONNAIRE,
+                "education": education, "created_by": teacher,
+            },
+        )
+        for position, label in enumerate((
+            "Reden van opname", "Huidige klachten en symptomen", "Medische voorgeschiedenis",
+        )):
+            LibraryField.objects.get_or_create(
+                template=template, key=f"demo-{position + 1}",
+                defaults={"label": label, "field_type": "long_text", "position": position},
+            )
+        LibraryDossierModule.objects.get_or_create(
+            dossier=dossier, template=template, defaults={"position": 0}
+        )
+        copy_library_dossier_to_case(dossier, case)
         group, _ = TeachingGroup.objects.get_or_create(
             name="Demogroep", education=education, teacher=teacher
         )
         group.members.add(student)
         case.allowed_groups.add(group)
 
-        anamnese = case.modules.filter(title="Anamnese").first()
+        anamnese = case.modules.filter(source_template=template).first()
         if anamnese:
             field_by_label = {field.label: field for field in anamnese.fields.all()}
             anamnese.base_data = {
