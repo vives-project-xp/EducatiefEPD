@@ -165,6 +165,31 @@ class EpdWorkflowTests(TestCase):
             {"module": response.id},
         )
         self.assertContains(page, "Intakefunctie")
+        self.assertContains(page, "<title>Intakefunctie | Dossier</title>", html=True)
+        self.assertContains(page, "<h1>Intakefunctie</h1>", html=True)
+        self.assertNotContains(page, "<h2>Intakefunctie</h2>", html=True)
+        self.assertContains(page, 'aria-current="page"')
+        self.assertContains(page, "dossier-content-grid single-form-layout")
+        fallback_page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id, "function": "999999"},
+        )
+        self.assertEqual(fallback_page.status_code, 200)
+        self.assertContains(fallback_page, "<h1>Intakefunctie</h1>", html=True)
+        second_snapshot = CaseFunctionSnapshot.objects.create(
+            module=module,
+            title="Tweede functie",
+            kind=FunctionDefinition.Kind.FORM,
+            position=2,
+            definition={"forms": [{"id": "second", "title": "Tweede formulier", "questions": []}]},
+        )
+        second_page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id, "function": second_snapshot.id},
+        )
+        self.assertEqual(second_page.status_code, 200)
+        self.assertContains(second_page, "<h1>Tweede functie</h1>", html=True)
+        self.assertNotContains(second_page, "<h1>Intakefunctie</h1>", html=True)
         self.client.post(
             reverse("dossier:dossier", args=[self.case.id]),
             {

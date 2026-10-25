@@ -1,13 +1,16 @@
 {% for function in function_forms %}
   <article class="function-snapshot-card">
-    <div class="work-title">
-      <div>
-        <p class="eyebrow">{{ function.kind }}</p>
-        <h3 id="function-heading-{{ function.id }}">{{ function.title }}</h3>
+    {% if not student_dossier %}
+      <div class="work-title">
+        <div>
+          <p class="eyebrow">{{ function.kind }}</p>
+          <h3 id="function-heading-{{ function.id }}">{{ function.title }}</h3>
+        </div>
       </div>
-    </div>
+    {% endif %}
     {% for form in function.forms %}
-      <section class="function-form" aria-labelledby="function-heading-{{ function.id }}" data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+      <section class="function-form" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+        {% if form.show_title %}<h2 id="form-heading-{{ form.key }}">{{ form.title|default:"Naamloos formulier" }}</h2>{% endif %}
         {% for field in form.fields %}
           {% if field.type == 'long_text' %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">

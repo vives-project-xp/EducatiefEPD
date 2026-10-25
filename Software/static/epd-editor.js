@@ -1,14 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
+  const browser = document.defaultView;
   const navigation = document.querySelector('.form-navigation');
 
   if (navigation) {
-    navigation.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-form-nav]');
-      if (!button) return;
-      const key = button.dataset.formNav;
-      navigation.querySelectorAll('[data-form-nav]').forEach((item) => {
-        item.classList.toggle('is-active', item === button);
-        item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+    const selectForm = (key) => {
+      const buttons = [...navigation.querySelectorAll('[data-form-nav]')];
+      if (!buttons.some((item) => item.dataset.formNav === key)) return;
+      buttons.forEach((item) => {
+        item.classList.toggle('is-active', item.dataset.formNav === key);
+        item.setAttribute('aria-pressed', item.dataset.formNav === key ? 'true' : 'false');
       });
       document.querySelectorAll('[data-function-form]').forEach((form) => {
         form.hidden = form.dataset.functionForm !== key;
@@ -16,6 +16,23 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('[name="form"]').forEach((input) => {
         input.value = key;
       });
+    };
+
+    navigation.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-form-nav]');
+      if (!button) return;
+      const key = button.dataset.formNav;
+      const url = new URL(browser.location.href);
+      url.searchParams.set('form', key);
+      browser.history.pushState({}, '', url);
+      selectForm(key);
+    });
+
+    browser.addEventListener('popstate', () => {
+      const firstForm = navigation.querySelector('[data-form-nav]');
+      const key = new URL(browser.location.href).searchParams.get('form')
+        || (firstForm && firstForm.dataset.formNav);
+      if (key) selectForm(key);
     });
   }
 
@@ -42,6 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.querySelectorAll('[data-nav-toggle]').forEach((button) => {
     button.addEventListener('click', () => {
+      if (button.dataset.navUrl) {
+        browser.location.href = button.dataset.navUrl;
+        return;
+      }
       const expanded = button.getAttribute('aria-expanded') === 'true';
       document.querySelectorAll('[data-nav-toggle]').forEach((item) => {
         item.setAttribute('aria-expanded', item === button && !expanded ? 'true' : 'false');

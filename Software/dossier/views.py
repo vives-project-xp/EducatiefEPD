@@ -439,6 +439,9 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
             form["active"] = form["key"] == active_form_key
         if function["forms"] and not any(form["active"] for form in function["forms"]):
             function["forms"][0]["active"] = True
+        multiple_forms = len(function["forms"]) > 1
+        for form in function["forms"]:
+            form["show_title"] = multiple_forms or form["title"] != function["title"]
     return prepared
 
 
@@ -562,6 +565,12 @@ def dossier(request, case_id):
     function_forms = prepare_function_forms(
         selected_snapshots, selected.data, selected_function_id, active_form_key
     ) if selected else []
+    selected_function = function_forms[0] if function_forms else None
+    active_form = next(
+        (form for form in selected_function["forms"] if form["active"]),
+        None,
+    ) if selected_function else None
+    active_form_key = active_form["key"] if active_form else None
     show_form_navigation = any(
         len(function["forms"]) > 1 for function in function_forms
     )
@@ -619,6 +628,10 @@ def dossier(request, case_id):
             pending_observations=form_result.pending_observations if form_result else None,
         ) if selected else [],
         "function_forms": function_forms,
+        "selected_function": selected_function,
+        "page_title": selected_function["title"] if selected_function else (selected.title if selected else ""),
+        "active_form_key": active_form_key,
+        "student_dossier": True,
         "selected_function_id": selected_function_id,
         "show_form_navigation": show_form_navigation,
         "errors": errors,
