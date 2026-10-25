@@ -119,6 +119,58 @@ class EpdWorkflowTests(TestCase):
         template.refresh_from_db()
         self.assertIn("Medicatiecheck", template.functions)
 
+    def test_teacher_can_attach_and_detach_existing_functions(self):
+        self.client.force_login(self.teacher)
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel voor docentfuncties",
+            category=LibraryTemplate.Category.MODULE,
+            education=self.education,
+            created_by=self.admin,
+        )
+        function = FunctionDefinition.objects.create(
+            title="Docentfunctie", kind=FunctionDefinition.Kind.FORM
+        )
+        deleted_function = FunctionDefinition.objects.create(
+            title="Verwijderde functie", kind=FunctionDefinition.Kind.FORM,
+            deleted_at=timezone.now(),
+        )
+        detail_url = reverse("dossier:library_detail", args=[template.id])
+
+        page = self.client.get(detail_url)
+        self.assertContains(page, "Functies")
+        self.assertContains(page, "Functie toevoegen")
+        self.assertContains(page, 'data-function-option data-title="Docentfunctie"')
+        self.assertNotContains(page, "Verwijderde functie")
+
+        response = self.client.post(detail_url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        })
+        self.assertRedirects(response, detail_url)
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+        self.assertNotContains(
+            self.client.get(detail_url), 'data-function-option data-title="Docentfunctie"'
+        )
+
+        response = self.client.post(detail_url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        }, follow=True)
+        self.assertRedirects(response, detail_url)
+        self.assertContains(response, "kunnen niet aan dit onderdeel worden toegevoegd")
+
+        response = self.client.post(detail_url, {
+            "action": "remove_function", "function_id": str(function.id),
+        })
+        self.assertRedirects(response, detail_url)
+        self.assertFalse(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+
     def test_managed_function_link_is_snapshotted_into_case_copy(self):
         self.client.force_login(self.admin)
         function = FunctionDefinition.objects.create(
@@ -228,22 +280,31 @@ class EpdWorkflowTests(TestCase):
         ]
         self.assertIn("Extra functie 7", function_titles)
 
-    def test_teacher_cannot_manage_functions_in_section(self):
+    def test_teacher_can_manage_functions_in_section(self):
         self.client.login(username="teacher", password="testpass")
         template = LibraryTemplate.objects.create(
-            title="Onderdeel zonder functiemanagement",
+            title="Onderdeel met functiemanagement",
             category=LibraryTemplate.Category.MODULE,
             created_by=self.teacher,
         )
-        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Functies")
-
-        response = self.client.post(
-            reverse("dossier:library_detail", args=[template.id]),
-            {"action": "add_function", "new_function": "Medicatiecheck"},
+        function = FunctionDefinition.objects.create(
+            title="Medicatiecheck", kind=FunctionDefinition.Kind.FORM
         )
-        self.assertEqual(response.status_code, 403)
+        url = reverse("dossier:library_detail", args=[template.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Functies")
+        self.assertContains(response, "Functie toevoegen")
+
+        response = self.client.post(url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        })
+        self.assertRedirects(response, url)
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
 
     def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
         self.client.login(username="teacher", password="testpass")

@@ -1,7 +1,8 @@
 {% extends 'base.html' %}
 {% block title %}{{ template_item.title }} | Bibliotheek{% endblock %}
 {% block content %}
-<main class="teacher-shell narrow library-editor">
+{% load static %}
+<main class="teacher-shell narrow library-editor" data-library-detail>
   <header class="page-bar">
     <div>
       <p class="eyebrow">{{ template_item.get_category_display }} · versie {{ template_item.version }}</p>
@@ -10,7 +11,6 @@
     </div>
     <a class="back" href="{% url 'dossier:library_list' %}">← Bibliotheek</a>
   </header>
-  {% if can_manage_functions %}
   <section class="editor-section">
     <h2>Functies</h2>
     {% for link in template_item.function_links.all %}
@@ -26,24 +26,51 @@
         {% csrf_token %}
         <input type="hidden" name="action" value="remove_function">
         <input type="hidden" name="function_id" value="{{ link.function.id }}">
-        <button class="text-button danger" type="submit" aria-label="{{ link.function.title }} verwijderen">Verwijderen</button>
+        <button class="text-button danger" type="button" data-remove-function data-title="{{ link.function.title }}" aria-label="{{ link.function.title }} verwijderen">Verwijderen</button>
         </form>
       </div>
     </div>
     {% empty %}<p class="empty-state">Er zijn nog geen functies gekoppeld aan dit onderdeel.</p>{% endfor %}
-    <form method="post" class="filter-bar">
-      {% csrf_token %}
-      <input type="hidden" name="action" value="add_function">
-      <label>
-        <span class="sr-only">Functies selecteren</span>
-        <select name="function_ids" multiple required aria-label="Functies selecteren">
-          {% for function in available_functions %}<option value="{{ function.id }}">{{ function.title }} ({{ function.get_kind_display }})</option>{% endfor %}
-        </select>
-      </label>
-      <button class="outline button" type="submit">Functie toevoegen</button>
-    </form>
+    {% if can_manage_functions %}
+    <button class="outline button" type="button" data-open-function-picker>Functie toevoegen</button>
+    <dialog class="function-dialog library-function-picker" data-function-picker aria-labelledby="function-picker-title">
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_function">
+        <h2 id="function-picker-title">Functie toevoegen</h2>
+        <label class="search-field">
+          <span>Zoeken</span>
+          <input type="search" data-function-search autocomplete="off">
+        </label>
+        <div class="library-function-options">
+          {% for function in available_functions %}
+          <label data-function-option data-title="{{ function.title }}">
+            <input type="checkbox" name="function_ids" value="{{ function.id }}">
+            <span>{{ function.title }} <small>{{ function.get_kind_display }}{% if function.std %} · Standaard{% endif %}</small></span>
+          </label>
+          {% empty %}
+          <p class="empty-state">Er zijn geen functies beschikbaar om toe te voegen.</p>
+          {% endfor %}
+          <p class="empty-state" data-no-function-results hidden>Er zijn geen functies beschikbaar om toe te voegen.</p>
+        </div>
+        <div class="dialog-actions">
+          <button class="outline button" type="submit" value="cancel" formmethod="dialog">Annuleren</button>
+          <button class="primary button" type="submit" data-add-functions disabled>Toevoegen</button>
+        </div>
+      </form>
+    </dialog>
+    {% endif %}
   </section>
-  {% endif %}
+  <dialog class="function-dialog" data-remove-function-dialog aria-labelledby="remove-function-title">
+    <form method="dialog">
+      <h2 id="remove-function-title">Functie verwijderen</h2>
+      <p>Functie <strong data-remove-title></strong> verwijderen uit dit onderdeel?</p>
+      <div class="dialog-actions">
+        <button class="outline button" value="cancel">Annuleren</button>
+        <button class="primary button danger-outline" value="confirm">Verwijderen</button>
+      </div>
+    </form>
+  </dialog>
   <form method="post" class="editor-form">
     <section>
       {% csrf_token %}
@@ -58,4 +85,5 @@
     <button class="outline button danger" type="submit">Verwijderen uit bibliotheek</button>
   </form>
 </main>
+<script src="{% static 'library_detail.js' %}" defer></script>
 {% endblock %}

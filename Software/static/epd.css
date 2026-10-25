@@ -1956,6 +1956,38 @@ summary {
   line-height: 1.5;
 }
 
+.library-function-picker {
+  width: min(92vw, 620px);
+}
+
+.library-function-options {
+  display: grid;
+  gap: 8px;
+  max-height: min(50vh, 420px);
+  margin-top: 18px;
+  overflow-y: auto;
+}
+
+.library-function-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.library-function-options label small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.library-function-options input {
+  min-width: 20px;
+  min-height: 20px;
+}
+
 .dialog-actions {
   justify-content: flex-end;
   gap: 10px;

@@ -89,6 +89,10 @@ def require_teacher(user):
         raise PermissionDenied
 
 
+def can_manage_library_template(user, template):
+    return is_teacher(user) and template.status == LibraryTemplate.Status.ACTIVE
+
+
 def teacher_cases(user):
     cases = Case.objects.select_related("patient", "created_by").prefetch_related(
         "modules__fields", "assignments", "student_cases__student"
@@ -1759,14 +1763,27 @@ def library_template(request, template_id=None):
     action = request.POST.get("action")
 
     if template and action in {"add_function", "remove_function"}:
-        if not is_admin(request.user):
+        if not can_manage_library_template(request.user, template):
             raise PermissionDenied
         if action == "add_function":
             function_ids = request.POST.getlist("function_ids")
+            try:
+                function_ids = [int(function_id) for function_id in function_ids]
+            except (TypeError, ValueError):
+                function_ids = []
+            unique_function_ids = set(function_ids)
             selected = list(FunctionDefinition.objects.filter(
-                id__in=function_ids, deleted_at__isnull=True
-            ).exclude(template_links__template=template))
-            if selected:
+                id__in=unique_function_ids, deleted_at__isnull=True
+            ))
+            attached_ids = set(
+                template.function_links.values_list("function_id", flat=True)
+            )
+            if (
+                function_ids
+                and len(unique_function_ids) == len(function_ids)
+                and len(selected) == len(unique_function_ids)
+                and not attached_ids.intersection(unique_function_ids)
+            ):
                 position = template.function_links.count()
                 LibraryTemplateFunction.objects.bulk_create([
                     LibraryTemplateFunction(template=template, function=function, position=position + index)
@@ -1776,7 +1793,7 @@ def library_template(request, template_id=None):
                 template.save(update_fields=["functions", "version", "updated_at"])
                 audit(request, "library.functions_added", template, count=len(selected))
                 messages.success(request, "Functies toegevoegd.")
-            else:
+            elif is_admin(request.user):
                 # Keep the old endpoint usable for existing integrations while new UI uses links.
                 new_name = request.POST.get("new_function", "").strip()
                 if new_name and len(new_name) <= 180 and new_name.casefold() not in {
@@ -1788,6 +1805,8 @@ def library_template(request, template_id=None):
                     messages.success(request, "Functie toegevoegd.")
                 else:
                     messages.error(request, "Selecteer minstens één nieuwe functie.")
+            else:
+                messages.error(request, "Een of meer functies kunnen niet aan dit onderdeel worden toegevoegd.")
         elif action == "remove_function":
             function_id = request.POST.get("function_id")
             if function_id:
@@ -1826,7 +1845,7 @@ def library_template(request, template_id=None):
     if template:
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
-            "can_manage_functions": is_admin(request.user),
+            "can_manage_functions": can_manage_library_template(request.user, template),
             "available_functions": FunctionDefinition.objects.filter(
                 deleted_at__isnull=True
             ).exclude(template_links__template=template).order_by("title"),
