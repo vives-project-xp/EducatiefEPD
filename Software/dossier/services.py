@@ -366,9 +366,10 @@ def snapshot_template_functions(module, template):
                                 "options": question.options,
                                 "columns": question.columns,
                                 "rows": question.rows,
-                                "matrixDefinition": legacy_definition(
-                                    question.rows, question.columns
-                                ) if question.field_type == "matrix" else {},
+                                "matrixDefinition": deepcopy(question.matrix_definition) or (
+                                    legacy_definition(question.rows, question.columns)
+                                    if question.field_type == "matrix" else {}
+                                ),
                                 "url": question.url,
                                 "buttonText": question.button_text,
                                 "image": question.image,

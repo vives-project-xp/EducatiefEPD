@@ -30,12 +30,35 @@
                 {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
               </select>
             </div>
+          {% elif field.type == 'observation' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <div class="observation-list">
+                {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}
+              </div>
+              {% if not locked %}
+                <div class="observation-entry">
+                  <input type="datetime-local" name="observation_timestamp_{{ field.key }}" aria-label="{{ field.label }}: tijdstip">
+                  <input name="observation_value_{{ field.key }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie">
+                  <input name="observation_note_{{ field.key }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
+                  <button class="outline button" name="action" value="save">Observatie en wijzigingen bewaren</button>
+                </div>
+              {% endif %}
+            </div>
+          {% elif field.type == 'file' %}
+            <div class="dynamic-field {% if field.required %}required{% endif %}">
+              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
+              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="file" {% if locked %}disabled{% endif %}>
+              {% if field.value %}<small>{{ field.value }}</small>{% endif %}
+            </div>
+          {% elif field.type == 'unknown' %}
+            <p class="empty-state">Deze vraag kan niet worden weergegeven.</p>
           {% elif field.type == 'image' %}
             <figure class="function-information">{% if field.image %}<img src="{{ field.image }}" alt="{{ field.caption }}">{% endif %}{% if field.caption %}<figcaption>{{ field.caption }}</figcaption>{% endif %}</figure>
           {% elif field.type == 'info' %}
             <div class="function-information">{{ field.explanation|linebreaks }}</div>
           {% elif field.type == 'link' %}
-            <p class="function-information"><a href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p>
+            <p class="function-information"><a class="primary button" href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p>
           {% else %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
               <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>

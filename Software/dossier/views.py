@@ -1,6 +1,10 @@
 import base64
 import binascii
-from datetime import timedelta
+import logging
+from copy import deepcopy
+from uuid import uuid4
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 import io
 import json
 import re
@@ -16,6 +20,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
+from django.core.files.storage import default_storage
 from django.db import connection, transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -41,7 +46,8 @@ from .forms import (
     TeachingGroupForm,
 )
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
-from .matrix import convert_base_values, empty_values, legacy_definition, validate_values
+from .function_types import FUNCTION_TYPES, get_function_type, is_display_only
+from .matrix import convert_base_values, empty_values, legacy_definition, normalize_definition, validate_values
 from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
@@ -68,6 +74,8 @@ from .services import (
     ensure_default_templates, module_schema,
     start_student_case, clean_html,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def user_role(user):
@@ -379,6 +387,9 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                 field_type = question.get("fieldType")
                 key = f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
                 mapped_type = {
+                    "image": "image",
+                    "link": "link",
+                    "info": "info",
                     "text": "long_text",
                     "number": "number",
                     "date": "date",
@@ -386,8 +397,13 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "time": "time",
                     "multipleChoice": "select",
                     "matrix": "matrix",
-                }.get(field_type, field_type)
-                if mapped_type in {"imageUpload", "fileUpload"}:
+                    "observation": "observation",
+                    "imageUpload": "file",
+                    "fileUpload": "file",
+                }.get(field_type)
+                if mapped_type is None:
+                    logger.error("Unknown function question type %r (question %s)", field_type, question.get("id"))
+                    fields.append({"key": key, "type": "unknown", "label": question.get("question", "")})
                     continue
                 value = function_data.get(key, {} if mapped_type == "matrix" else "")
                 item = {
@@ -407,21 +423,25 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "explanation": question.get("explanation", ""),
                 }
                 if mapped_type == "matrix":
-                    definition = question.get("matrixDefinition") or legacy_definition(
-                        item["rows"], item["columns"]
-                    )
-                    if isinstance(value, dict) and value.get("version") != 2:
-                        value = convert_base_values(
-                            {"rows": item["rows"], "columns": item["columns"]},
-                            definition,
-                            value,
+                    try:
+                        definition = question.get("matrixDefinition") or legacy_definition(
+                            item["rows"], item["columns"]
                         )
-                    item["matrix_payload"] = {
-                        "definition": definition,
-                        "values": value if isinstance(value, dict) else empty_values(),
-                        "label": item["label"],
-                        "errors": [],
-                    }
+                        if isinstance(value, dict) and value.get("version") != 2:
+                            value = convert_base_values(
+                                {"rows": item["rows"], "columns": item["columns"]},
+                                definition,
+                                value,
+                            )
+                        item["matrix_payload"] = {
+                            "definition": definition,
+                            "values": value if isinstance(value, dict) else empty_values(),
+                            "label": item["label"],
+                            "errors": [],
+                        }
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        logger.exception("Could not render matrix question %s", question.get("id"))
+                        item["type"] = "unknown"
                 fields.append(item)
             forms.append({
                 "id": form.get("id", form.get("position", 0)),
@@ -489,10 +509,43 @@ def parsed_function_data(request, snapshots, current_data):
                         for row in value.get("cells", {}).values()
                         for cell in row.values()
                     )
+                elif is_display_only(field_type):
+                    continue
+                elif field_type == "observation":
+                    entry = {
+                        name: request.POST.get(f"observation_{name}_{key}", "").strip()
+                        for name in ("timestamp", "value", "note")
+                    }
+                    current_value = function_data.get(key, [])
+                    value = current_value if isinstance(current_value, list) else []
+                    if any(entry.values()):
+                        try:
+                            datetime.fromisoformat(entry["timestamp"])
+                        except ValueError:
+                            missing.append(question.get("question", "Observaties") + " (ongeldig tijdstip)")
+                        if not entry["value"]:
+                            missing.append(question.get("question", "Observaties") + " (waarde ontbreekt)")
+                        else:
+                            value = [*value, entry]
+                    has_value = bool(value)
                 elif field_type in {"imageUpload", "fileUpload"}:
-                    continue
-                elif field_type in {"image", "info", "link"}:
-                    continue
+                    upload = request.FILES.get(prefix)
+                    value = function_data.get(key, "")
+                    if upload:
+                        max_size = 300_000 if field_type == "imageUpload" else 5_000_000
+                        valid_image = (
+                            upload.content_type in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+                            and upload.size <= max_size
+                        )
+                        if field_type == "imageUpload" and not valid_image:
+                            missing.append(question.get("question", "Afbeelding") + " (ongeldige afbeelding)")
+                        elif upload.size > max_size:
+                            missing.append(question.get("question", "Bestand") + " (bestand is te groot)")
+                        else:
+                            filename = get_valid_filename(upload.name) or "upload"
+                            path = f"function_answers/{uuid4().hex}_{filename}"
+                            value = default_storage.url(default_storage.save(path, upload))
+                    has_value = bool(value)
                 else:
                     value = request.POST.get(prefix, "").strip()
                     has_value = bool(value)
@@ -525,8 +578,7 @@ def parsed_function_data(request, snapshots, current_data):
                         has_value = bool(value.strip())
                 if question.get("required") and not has_value:
                     missing.append(question.get("question", "Dit veld"))
-                if field_type not in {"imageUpload", "fileUpload"}:
-                    function_data[key] = value
+                function_data[key] = value
     data["_functions"] = function_data
     return (None, missing) if missing else (data, [])
 
@@ -1347,6 +1399,10 @@ def managed_function_payload(function):
         "kind": function.kind,
         "locked": function.locked,
         "std": function.std,
+        "typeRegistry": [
+            {"key": item.key, "label": item.label, "group": item.group}
+            for item in FUNCTION_TYPES
+        ],
         "forms": [{
             "id": form.id,
             "title": form.title,
@@ -1360,9 +1416,10 @@ def managed_function_payload(function):
                 "options": question.options,
                 "columns": question.columns,
                 "rows": question.rows,
-                "matrixDefinition": legacy_definition(
-                    question.rows, question.columns
-                ) if question.field_type == ManagedQuestion.FieldType.MATRIX else {},
+                "matrixDefinition": deepcopy(question.matrix_definition) or (
+                    legacy_definition(question.rows, question.columns)
+                    if question.field_type == ManagedQuestion.FieldType.MATRIX else {}
+                ),
                 "url": question.url,
                 "buttonText": question.button_text,
                 "image": question.image,
@@ -1539,6 +1596,12 @@ def function_action(request, function_id):
                         raise ValueError("Gebruik een geldige http(s)-link.")
                 field_type = item["fieldType"]
                 image = validate_function_image(item.get("image", "")) if field_type == ManagedQuestion.FieldType.IMAGE else ""
+                matrix_definition = item.get("matrixDefinition", {})
+                if field_type == ManagedQuestion.FieldType.MATRIX:
+                    try:
+                        matrix_definition = normalize_definition(matrix_definition)
+                    except ValidationError as error:
+                        raise ValueError(error.messages[0])
                 prepared.append(ManagedQuestion(
                     form=form,
                     position=position,
@@ -1549,6 +1612,7 @@ def function_action(request, function_id):
                     options=clean_string_list(item.get("options", [])),
                     columns=clean_string_list(item.get("columns", [])),
                     rows=clean_string_list(item.get("rows", [])),
+                    matrix_definition=matrix_definition if field_type == ManagedQuestion.FieldType.MATRIX else {},
                     url=url[:1000],
                     button_text=str(item.get("buttonText", ""))[:180],
                     image=image,

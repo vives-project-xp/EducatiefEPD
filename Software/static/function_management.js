@@ -149,14 +149,18 @@
     update();
   }
 
-  const fieldTypes = [
-    { label: "Informatief", options: [["image", "Afbeelding weergeven"], ["link", "Hyperlink"], ["info", "Toelichting"]] },
-    { label: "Interactief", options: [["date", "Datum"], ["dateTime", "Datum en tijd"], ["number", "Getal"], ["matrix", "Matrix (maximaal 2)"], ["multipleChoice", "Meerkeuze"], ["text", "Tekst"], ["time", "Tijd"]] },
-  ];
+  const fieldTypes = (data) => {
+    const groups = new Map();
+    (data.typeRegistry || []).forEach((item) => {
+      if (!groups.has(item.group)) groups.set(item.group, { label: item.group, options: [] });
+      groups.get(item.group).options.push([item.key, item.label]);
+    });
+    return [...groups.values()];
+  };
   const informative = new Set(["image", "link", "info"]);
 
   function blankQuestion() {
-    return { fieldType: "text", question: "", unit: "", required: false, options: [], columns: [], rows: [], url: "", buttonText: "", image: "", caption: "", explanation: "" };
+    return { fieldType: "text", question: "", unit: "", required: false, options: [], columns: [], rows: [], matrixDefinition: {}, url: "", buttonText: "", image: "", caption: "", explanation: "" };
   }
 
   function initEditor() {
@@ -169,6 +173,7 @@
     let openQuestion = 0;
     let dirty = false;
     const standalone = root.dataset.standalone === "true";
+    const typeGroups = fieldTypes(data);
     let locked = data.locked;
     const formList = root.querySelector("[data-form-list]");
     const editorPanel = root.querySelector("[data-editor-panel]");
@@ -239,7 +244,7 @@
       const label = node("label", "managed-field field-wide");
       label.append(node("span", "managed-label", "Veld type"));
       const select = node("select", "managed-input");
-      fieldTypes.forEach((group) => {
+      typeGroups.forEach((group) => {
         const optgroup = node("optgroup");
         optgroup.label = group.label;
         group.options.forEach(([value, title]) => {
@@ -333,6 +338,12 @@
         }
         body.append(wrapper);
         addTextField(body, "Bijschrift", question.caption, (value) => { question.caption = value; change(); }, { wide: true });
+      } else if (question.fieldType === "observation") {
+        addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
+      } else if (["imageUpload", "fileUpload"].includes(question.fieldType)) {
+        addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
       } else if (!informative.has(question.fieldType)) {
         addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
         checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
@@ -341,8 +352,20 @@
         }
         if (question.fieldType === "multipleChoice") listField(body, "Antwoordopties", question.options, change);
         if (question.fieldType === "matrix") {
-          listField(body, "Kolommen", question.columns, change);
-          listField(body, "Rijen (titel optioneel)", question.rows, change);
+          const matrix = node("div", "function-matrix-designer");
+          const input = node("input");
+          input.type = "hidden";
+          input.value = JSON.stringify(question.matrixDefinition || {});
+          input.addEventListener("input", () => {
+            if (!matrix.dataset.ready) return;
+            try { question.matrixDefinition = JSON.parse(input.value); } catch { question.matrixDefinition = {}; }
+            change();
+          });
+          matrix.append(input);
+          body.append(matrix);
+          document.dispatchEvent(new CustomEvent("function-matrix-designer", { detail: { root: matrix, input } }));
+          matrix.dataset.ready = "true";
+          try { question.matrixDefinition = JSON.parse(input.value); } catch { question.matrixDefinition = {}; }
         }
       }
     }
@@ -660,7 +683,7 @@
     }
 
     function previewControl(question) {
-      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time" };
+      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", imageUpload: "file", fileUpload: "file" };
       if (question.fieldType === "multipleChoice") {
         const group = node("fieldset", "preview-options");
         const groupName = `answer-${question.id ?? "new"}-${Math.random()}`;
@@ -686,6 +709,14 @@
           body.append(row);
         });
         table.append(body); scroll.append(table); return scroll;
+      }
+      if (question.fieldType === "observation") {
+        const group = node("div", "observation-entry");
+        group.append(node("input", "managed-input"));
+        group.lastChild.type = "datetime-local";
+        group.append(node("input", "managed-input"));
+        group.lastChild.placeholder = "Waarde of observatie";
+        return group;
       }
       const input = node("input", "managed-input");
       input.type = typeMap[question.fieldType] || "text";

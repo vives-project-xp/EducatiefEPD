@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from .function_types import FUNCTION_TYPE_CHOICES
 
 class Education(models.Model):
     name = models.CharField(max_length=120, unique=True)
@@ -301,17 +302,21 @@ class ManagedForm(models.Model):
 
 
 class ManagedQuestion(models.Model):
-    class FieldType(models.TextChoices):
-        IMAGE = "image", "Afbeelding weergeven"
-        LINK = "link", "Hyperlink"
-        INFO = "info", "Toelichting"
-        DATE = "date", "Datum"
-        DATETIME = "dateTime", "Datum en tijd"
-        NUMBER = "number", "Getal"
-        MATRIX = "matrix", "Matrix (maximaal 2)"
-        MULTIPLE_CHOICE = "multipleChoice", "Meerkeuze"
-        TEXT = "text", "Tekst"
-        TIME = "time", "Tijd"
+    class FieldType:
+        IMAGE = "image"
+        LINK = "link"
+        INFO = "info"
+        IMAGE_UPLOAD = "imageUpload"
+        FILE_UPLOAD = "fileUpload"
+        DATE = "date"
+        DATETIME = "dateTime"
+        NUMBER = "number"
+        MATRIX = "matrix"
+        MULTIPLE_CHOICE = "multipleChoice"
+        TEXT = "text"
+        OBSERVATION = "observation"
+        values = tuple(key for key, _ in FUNCTION_TYPE_CHOICES)
+        choices = FUNCTION_TYPE_CHOICES
 
     form = models.ForeignKey(ManagedForm, on_delete=models.CASCADE, related_name="questions")
     position = models.PositiveIntegerField(default=0)
@@ -322,6 +327,7 @@ class ManagedQuestion(models.Model):
     options = models.JSONField(default=list, blank=True)
     columns = models.JSONField(default=list, blank=True)
     rows = models.JSONField(default=list, blank=True)
+    matrix_definition = models.JSONField(default=dict, blank=True)
     url = models.URLField(max_length=1000, blank=True)
     button_text = models.CharField(max_length=180, blank=True)
     image = models.TextField(blank=True)

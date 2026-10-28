@@ -53,7 +53,11 @@ class MatrixEditor {
     protected(spec) { return spec.type === 'label' || (spec.read_only && !this.editReadonly); }
     range() { return rangeBetween(this.anchor, this.focus); }
     announce(message) { this.status.textContent = message; }
-    sync() { if (this.input) this.input.value = JSON.stringify(this.designer ? this.sheet : this.values); }
+    sync() {
+        if (!this.input) return;
+        this.input.value = JSON.stringify(this.designer ? this.sheet : this.values);
+        this.input.dispatchEvent(new Event('input', {bubbles: true}));
+    }
     changed(next = this.state(), message = 'Wijzigingen nog niet bewaard.') {
         this.sheet = next.sheet; this.values = next.values;
         if (!this.preview) { this.history.push(this.state()); this.dirty = true; }
@@ -385,13 +389,22 @@ class MatrixEditor {
     }
 }
 
+function initializeMatrix(root, payload, options) {
+    try {
+        new MatrixEditor(root, payload, options);
+        root.querySelector('.sheet-fallback')?.remove();
+    } catch (error) {
+        root.append(el('p', 'De matrixeditor kon niet worden geladen. Uw opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'}));
+    }
+}
+
 for (const root of document.querySelectorAll('[data-matrix]')) {
     try {
         const payload = JSON.parse(root.querySelector('script[type="application/json"]').textContent);
         const readonly = root.dataset.readonly === 'true';
         let input = null;
         if (!readonly) { input = el('input', null, {type: 'hidden', name: root.dataset.name}); root.append(input); }
-        new MatrixEditor(root, payload, {input, readonly}); root.querySelector('.sheet-fallback')?.remove();
+        initializeMatrix(root, payload, {input, readonly});
     } catch (error) { root.append(el('p', 'De matrixeditor kon niet worden geladen. Uw opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'})); }
 }
 for (const root of document.querySelectorAll('[data-matrix-designer]')) {
@@ -409,3 +422,13 @@ for (const root of document.querySelectorAll('[data-matrix-designer]')) {
     };
     type.addEventListener('change', update); update();
 }
+
+document.addEventListener('function-matrix-designer', event => {
+    const {root, input} = event.detail;
+    let definition = {};
+    try { definition = JSON.parse(input.value || '{}'); } catch (error) { definition = {}; }
+    initializeMatrix(root, {definition: definition.version === 2 ? definition : newSheet()}, {
+        designer: true,
+        input,
+    });
+});
