@@ -27,20 +27,10 @@
       </tbody></table></div>
       {% endif %}
     {% elif field.type == 'observation' %}
-      <div class="observation-list">
-        {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}
-      </div>
-      {% if not locked %}
-        <div class="observation-entry">
-          <input type="{% if field.errors %}text{% else %}datetime-local{% endif %}" name="observation_timestamp_{{ field.key }}" value="{{ field.pending_observation.timestamp }}" aria-label="{{ field.label }}: tijdstip" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
-          <input id="field_{{ field.key }}" name="observation_value_{{ field.key }}" value="{{ field.pending_observation.value }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
-          <input name="observation_note_{{ field.key }}" value="{{ field.pending_observation.note }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
-          <button class="outline button" name="action" value="add_observation:{{ field.key }}">Observatie en wijzigingen bewaren</button>
-        </div>
-      {% endif %}
+      {% include 'dossier/_observation_field.html' %}
     {% else %}
       <input id="field_{{ field.key }}" name="field_{{ field.key }}" value="{{ field.value }}" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
     {% endif %}
     {% if field.errors %}<ul class="errorlist danger" id="errors_{{ field.key }}" role="alert">{% for error in field.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
   </div>
-{% empty %}<p class="empty-state">Dit onderdeel bevat geen invulvelden.</p>{% endfor %}
+{% endfor %}

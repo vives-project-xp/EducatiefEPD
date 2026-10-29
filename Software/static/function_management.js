@@ -181,11 +181,15 @@
     const actions = root.querySelector("[data-form-actions]");
     const previewPanel = root.querySelector("[data-preview-panel]");
     const previewContent = root.querySelector("[data-preview-content]");
+    const matrixDialog = root.querySelector("[data-matrix-dialog]");
+    const matrixDialogContent = root.querySelector("[data-matrix-dialog-content]");
     const lockButton = root.querySelector("[data-lock]");
     const renameButton = root.querySelector("[data-rename]");
     const saveButton = node("button", "primary button", "Wijzigingen opslaan");
     saveButton.type = "button";
     saveButton.disabled = true;
+    let matrixQuestion = null;
+    let matrixOriginal = "";
     formList?.addEventListener("dragstart", formDragStart);
     formList?.addEventListener("dragover", formDragOver);
     formList?.addEventListener("drop", formDrop);
@@ -352,22 +356,58 @@
         }
         if (question.fieldType === "multipleChoice") listField(body, "Antwoordopties", question.options, change);
         if (question.fieldType === "matrix") {
-          const matrix = node("div", "function-matrix-designer");
-          const input = node("input");
-          input.type = "hidden";
-          input.value = JSON.stringify(question.matrixDefinition || {});
-          input.addEventListener("input", () => {
-            if (!matrix.dataset.ready) return;
-            try { question.matrixDefinition = JSON.parse(input.value); } catch { question.matrixDefinition = {}; }
-            change();
-          });
-          matrix.append(input);
-          body.append(matrix);
-          document.dispatchEvent(new CustomEvent("function-matrix-designer", { detail: { root: matrix, input } }));
-          matrix.dataset.ready = "true";
-          try { question.matrixDefinition = JSON.parse(input.value); } catch { question.matrixDefinition = {}; }
+          const definition = question.matrixDefinition || {};
+          const rows = definition.rows || question.rows || [];
+          const columns = definition.columns || question.columns || [];
+          const summary = node("div", "matrix-question-summary");
+          summary.append(node("span", "", `${rows.length} rijen × ${columns.length} kolommen`));
+          const open = node("button", "outline button", definition.version ? "Matrix bewerken" : "Matrix ontwerpen");
+          open.type = "button";
+          open.addEventListener("click", () => openMatrixDesigner(question, open));
+          summary.append(open);
+          body.append(summary);
         }
       }
+    }
+
+    function openMatrixDesigner(question, opener) {
+      if (!matrixDialog || !matrixDialogContent) return;
+      matrixQuestion = question;
+      matrixOriginal = JSON.stringify(question.matrixDefinition || {});
+      matrixDialogContent.replaceChildren();
+      const matrix = node("div", "function-matrix-designer");
+      const input = node("input");
+      input.type = "hidden";
+      input.value = matrixOriginal;
+      matrix.append(input);
+      matrixDialogContent.append(matrix);
+      document.dispatchEvent(new CustomEvent("function-matrix-designer", { detail: { root: matrix, input } }));
+      matrixDialog.showModal();
+      matrixDialog.querySelector("[data-matrix-save]").focus();
+      matrixDialog.querySelector("[data-matrix-save]").onclick = () => {
+        try {
+          matrixQuestion.matrixDefinition = JSON.parse(input.value || "{}");
+        } catch {
+          toast("De matrixindeling is ongeldig.", true);
+          return;
+        }
+        matrixDialog.close("save");
+        renderEditor();
+        setDirty();
+        opener.focus();
+      };
+      matrixDialog.querySelector("[data-matrix-cancel]").onclick = async () => {
+        if (input.value !== matrixOriginal && !await confirm("Er zijn niet-opgeslagen matrixwijzigingen. Wil je die weggooien?", "Weggooien")) return;
+        matrixDialog.close("cancel");
+        opener.focus();
+      };
+      matrixDialog.oncancel = (event) => {
+        event.preventDefault();
+        matrixDialog.querySelector("[data-matrix-cancel]").click();
+      };
+      matrixDialog.onclose = () => {
+        if (matrixDialog.returnValue !== "save") opener.focus();
+      };
     }
 
     function reorderQuestions(from, to) {
@@ -640,8 +680,33 @@
     function renderPreview(snapshot) {
       previewContent.replaceChildren();
       previewContent.append(node("h2", "", snapshot.title));
-      snapshot.forms.forEach((form) => {
+      const forms = snapshot.forms || [];
+      let activeIndex = 0;
+      const sections = [];
+      if (forms.length > 1) {
+        const navigation = node("nav", "function-form-navigation", "Formulieren");
+        navigation.setAttribute("aria-label", "Formulieren");
+        const list = node("div", "preview-form-list");
+        forms.forEach((form, index) => {
+          const button = node("button", `form-navigation-item${index === 0 ? " is-active" : ""}`, form.title || "Naamloos formulier");
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(index === 0));
+          button.addEventListener("click", () => {
+            activeIndex = index;
+            sections.forEach((section, sectionIndex) => { section.hidden = sectionIndex !== activeIndex; });
+            list.querySelectorAll("button").forEach((item, itemIndex) => {
+              item.classList.toggle("is-active", itemIndex === activeIndex);
+              item.setAttribute("aria-pressed", String(itemIndex === activeIndex));
+            });
+          });
+          list.append(button);
+        });
+        navigation.append(list);
+        previewContent.append(navigation);
+      }
+      forms.forEach((form, formIndex) => {
         const section = node("section", "preview-form");
+        section.hidden = formIndex !== activeIndex;
         if (!standalone) section.append(node("h3", "", form.title));
         form.questions.forEach((question) => {
           const questionWrap = node("div", "preview-question");
@@ -674,6 +739,7 @@
           section.append(questionWrap);
         });
         previewContent.append(section);
+        sections.push(section);
       });
     }
 
@@ -712,10 +778,22 @@
       }
       if (question.fieldType === "observation") {
         const group = node("div", "observation-entry");
-        group.append(node("input", "managed-input"));
-        group.lastChild.type = "datetime-local";
-        group.append(node("input", "managed-input"));
-        group.lastChild.placeholder = "Waarde of observatie";
+        const list = node("div", "observation-list");
+        list.append(node("p", "muted", "Nog geen observaties."));
+        group.append(list);
+        const timestamp = node("input", "managed-input");
+        timestamp.type = "datetime-local";
+        timestamp.setAttribute("aria-label", "Observaties: tijdstip");
+        group.append(timestamp);
+        const value = node("input", "managed-input");
+        value.placeholder = "Waarde of observatie";
+        value.setAttribute("aria-label", "Observaties: waarde of observatie");
+        group.append(value);
+        const note = node("input", "managed-input");
+        note.placeholder = "Toelichting";
+        note.setAttribute("aria-label", "Observaties: toelichting");
+        group.append(note);
+        group.append(node("button", "outline button", "Observatie en wijzigingen bewaren"));
         return group;
       }
       const input = node("input", "managed-input");

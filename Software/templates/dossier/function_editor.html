@@ -28,6 +28,14 @@
   <section class="function-card function-preview" data-preview-panel hidden aria-label="Voorbeeld van de functie"><div data-preview-content></div></section>
   <div class="function-toast-region" aria-live="polite" aria-atomic="true"></div>
   {{ function_data|json_script:"managed-function-data" }}
+  <dialog class="function-dialog matrix-designer-dialog" data-matrix-dialog aria-labelledby="matrix-dialog-title">
+    <h2 id="matrix-dialog-title">Matrix ontwerpen</h2>
+    <div data-matrix-dialog-content></div>
+    <div class="dialog-actions">
+      <button class="outline button" type="button" data-matrix-cancel>Annuleren</button>
+      <button class="primary button" type="button" data-matrix-save>Opslaan</button>
+    </div>
+  </dialog>
   <dialog class="function-dialog" data-function-dialog aria-labelledby="dialog-title"><form method="dialog" data-dialog-form><h2 id="dialog-title" data-dialog-title>Bevestigen</h2><p data-dialog-message></p><label class="dialog-input" data-dialog-input-wrap hidden><span>Naam</span><input data-dialog-input maxlength="180"></label><div class="dialog-actions"><button class="outline button" value="cancel">Annuleren</button><button class="primary button" value="confirm" data-dialog-confirm>Bevestigen</button></div></form></dialog>
 </main>
 <script src="{% static 'function_management.js' %}" defer></script>

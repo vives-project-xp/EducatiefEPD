@@ -1943,6 +1943,61 @@ summary {
   box-shadow: var(--shadow-dialog);
 }
 
+.matrix-designer-dialog {
+  width: min(96vw, 1400px);
+  max-width: 1400px;
+  max-height: 92vh;
+  overflow: hidden;
+}
+
+.matrix-designer-dialog [data-matrix-dialog-content] {
+  min-height: 0;
+  max-height: calc(92vh - 150px);
+  overflow: auto;
+}
+
+.matrix-designer-dialog .function-matrix-designer {
+  min-width: 760px;
+}
+
+.matrix-question-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
+}
+
+.function-form-navigation {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.has-function-navigation {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.has-function-navigation > .work-title,
+.has-function-navigation > .function-form-navigation {
+  grid-column: 1;
+}
+
+.has-function-navigation > .function-form {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.preview-form-list {
+  display: grid;
+  gap: 8px;
+}
+
 .function-dialog::backdrop {
   background: var(--scrim);
 }
@@ -2067,6 +2122,41 @@ summary {
   gap: 20px;
   border-top: 1px solid var(--line);
   padding-top: 20px;
+}
+
+.function-preview .function-form-navigation {
+  max-width: 320px;
+}
+
+.function-preview [data-preview-content] {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 24px;
+}
+
+.function-preview [data-preview-content] > h2 {
+  grid-column: 1 / -1;
+}
+
+.function-preview [data-preview-content] > .function-form-navigation {
+  grid-column: 1;
+}
+
+.function-preview [data-preview-content] > .preview-form {
+  grid-column: 2;
+}
+
+@media (max-width: 700px) {
+  .has-function-navigation,
+  .function-preview [data-preview-content] {
+    grid-template-columns: 1fr;
+  }
+
+  .has-function-navigation > .function-form,
+  .function-preview [data-preview-content] > .preview-form {
+    grid-column: 1;
+    grid-row: auto;
+  }
 }
 
 .preview-form h3,

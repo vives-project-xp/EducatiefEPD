@@ -1,5 +1,5 @@
 {% for function in function_forms %}
-  <article class="function-snapshot-card">
+  <article class="function-snapshot-card {% if function.forms|length > 1 %}has-function-navigation{% endif %}">
     {% if not student_dossier %}
       <div class="work-title">
         <div>
@@ -7,6 +7,12 @@
           <h3 id="function-heading-{{ function.id }}">{{ function.title }}</h3>
         </div>
       </div>
+    {% endif %}
+    {% if function.forms|length > 1 %}
+      <nav class="function-form-navigation" aria-label="Formulieren">
+        <p class="eyebrow">Formulieren</p>
+        {% for form in function.forms %}<button type="button" class="form-navigation-item {% if form.active %}is-active{% endif %}" data-function-form-nav="{{ form.key }}" aria-pressed="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button>{% endfor %}
+      </nav>
     {% endif %}
     {% for form in function.forms %}
       <section class="function-form" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
@@ -33,17 +39,7 @@
           {% elif field.type == 'observation' %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">
               <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <div class="observation-list">
-                {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}
-              </div>
-              {% if not locked %}
-                <div class="observation-entry">
-                  <input type="datetime-local" name="observation_timestamp_{{ field.key }}" aria-label="{{ field.label }}: tijdstip">
-                  <input name="observation_value_{{ field.key }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie">
-                  <input name="observation_note_{{ field.key }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
-                  <button class="outline button" name="action" value="save">Observatie en wijzigingen bewaren</button>
-                </div>
-              {% endif %}
+              {% include 'dossier/_observation_field.html' with function_observation=True locked=locked %}
             </div>
           {% elif field.type == 'file' %}
             <div class="dynamic-field {% if field.required %}required{% endif %}">

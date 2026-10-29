@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 
-from .function_types import FUNCTION_TYPES
+from .function_types import FUNCTION_TYPES, get_function_type
 from .views import prepare_function_forms
 
 
@@ -63,3 +63,11 @@ class FunctionTypeRenderingTests(SimpleTestCase):
     def test_registry_does_not_offer_time(self):
         self.assertNotIn("time", [item.key for item in FUNCTION_TYPES])
         self.assertIn("observation", [item.key for item in FUNCTION_TYPES])
+
+    def test_observation_alias_and_existing_component_markup_are_preserved(self):
+        self.assertEqual(get_function_type("observatie").key, "observation")
+        html = self.render(["observatie"])
+        self.assertIn("Nog geen observaties.", html)
+        self.assertIn("observation_timestamp_1_2_0", html)
+        self.assertIn("observation_value_1_2_0", html)
+        self.assertIn("Observatie en wijzigingen bewaren", html)

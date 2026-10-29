@@ -333,10 +333,41 @@ def parsed_module_data(request, schema, current_data):
         key = field["key"]
         field_type = field["type"]
         if field_type == FieldDefinition.FieldType.OBSERVATION:
-            if field.get("required") and not data.get(key):
-                missing.append(field["label"])
+            current = data.get(key, [])
+            value = list(current) if isinstance(current, list) else []
+            entry = {
+                name: request.POST.get(f"observation_{name}_{key}", "").strip()
+                for name in ("timestamp", "value", "note")
+            }
+            if any(entry.values()):
+                try:
+                    datetime.fromisoformat(entry["timestamp"])
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldig tijdstip)")
+                if not entry["value"]:
+                    missing.append(f"{field['label']} (waarde ontbreekt)")
+                elif not any(message.startswith(f"{field['label']} (ongeldig") for message in missing):
+                    value.append(entry)
+            data[key] = value
             continue
         if field_type == FieldDefinition.FieldType.MATRIX:
+            if field.get("matrix_definition"):
+                current = data.get(key, empty_values())
+                if not isinstance(current, dict) or current.get("version") != 2:
+                    current = empty_values()
+                raw = request.POST.get(f"matrix_{key}")
+                try:
+                    value = json.loads(raw) if raw is not None else current
+                except (TypeError, ValueError, RecursionError):
+                    missing.append(f"{field['label']} (ongeldige matrix)")
+                    continue
+                normalized, matrix_errors, _ = validate_values(
+                    field["matrix_definition"], value, current=None
+                )
+                if matrix_errors:
+                    missing.extend(matrix_errors)
+                data[key] = normalized
+                continue
             value = {
                 f"{row_index}_{column_index}": request.POST.get(
                     f"field_{key}_{row_index}_{column_index}", ""
@@ -367,8 +398,6 @@ def parsed_module_data(request, schema, current_data):
             elif has_value and field_type == FieldDefinition.FieldType.SELECT:
                 if value not in field.get("options", []):
                     missing.append(f"{field['label']} (ongeldige keuze)")
-        if field.get("required") and not has_value:
-            missing.append(field["label"])
         data[key] = value
     if missing:
         return None, missing
@@ -398,6 +427,7 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "multipleChoice": "select",
                     "matrix": "matrix",
                     "observation": "observation",
+                    "observatie": "observation",
                     "imageUpload": "file",
                     "fileUpload": "file",
                 }.get(field_type)
@@ -421,6 +451,7 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "image": question.get("image", ""),
                     "caption": question.get("caption", ""),
                     "explanation": question.get("explanation", ""),
+                    "pending_observation": {},
                 }
                 if mapped_type == "matrix":
                     try:
@@ -511,7 +542,7 @@ def parsed_function_data(request, snapshots, current_data):
                     )
                 elif is_display_only(field_type):
                     continue
-                elif field_type == "observation":
+                elif field_type in {"observation", "observatie"}:
                     entry = {
                         name: request.POST.get(f"observation_{name}_{key}", "").strip()
                         for name in ("timestamp", "value", "note")

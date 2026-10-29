@@ -28,13 +28,15 @@ FUNCTION_TYPES = (
 
 FUNCTION_TYPE_BY_KEY = {item.key: item for item in FUNCTION_TYPES}
 FUNCTION_TYPE_CHOICES = [(item.key, item.label) for item in FUNCTION_TYPES]
+LEGACY_FUNCTION_TYPE_ALIASES = {"observatie": "observation"}
 
 # Rows created before Tijd was replaced remain readable and keep their stored answer.
 LEGACY_FUNCTION_TYPES = {"time": FunctionType("time", "Tijd", "Interactief", True, input_type="time")}
 
 
 def get_function_type(key):
-    return FUNCTION_TYPE_BY_KEY.get(key) or LEGACY_FUNCTION_TYPES.get(key)
+    canonical_key = LEGACY_FUNCTION_TYPE_ALIASES.get(key, key)
+    return FUNCTION_TYPE_BY_KEY.get(canonical_key) or LEGACY_FUNCTION_TYPES.get(key)
 
 
 def is_display_only(key):
