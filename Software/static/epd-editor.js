@@ -1,12 +1,12 @@
 document.addEventListener('DOMContentLoaded', () => {
   tinymce.init({
-    selector: 'textarea.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
+    selector: '.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
     license_key: 'gpl',
     base_url: '/static/tinymce',
     suffix: '.min',
     // language: 'nl',            // needs the nl language file in static/tinymce/langs/
     menubar: false,
-    plugins: 'lists link table image',
+    plugins: 'lists link table image autoresize',
     toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | image importdocx exportdocx',
     color_cols: 5,
     setup(editor) {

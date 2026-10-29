@@ -55,10 +55,18 @@ class AssignmentForm(forms.ModelForm):
         model = Assignment
         fields = ["phase", "title", "content", "position"]
         labels = {
-            "phase": "Fase", "title": "Opdracht",
-            "content": "Instructies", "position": "Volgorde",
+            "phase": "Fase", "title": "Titel",
+            "content": "Beschrijving", "position": "Nummer",
         }
-        widgets = {"content": forms.Textarea(attrs={"rows": 6})}
+        widgets = {
+            "title": forms.TextInput(attrs={
+                "placeholder": "Geef hier een titel aan je opdracht"
+                }),
+            "content": forms.Textarea(attrs={
+                "class": "rich",
+                "placeholder": "Schrijf hier de beschrijving of instructies van de opdracht"
+                })
+            }
 
 
 class ModuleForm(forms.ModelForm):
