@@ -281,7 +281,7 @@ def copy_library_dossier_to_case(dossier, case):
     ]
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
-                "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote"}
+                "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}}, url_schemes={"http", "https", "mailto"})
+    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})
