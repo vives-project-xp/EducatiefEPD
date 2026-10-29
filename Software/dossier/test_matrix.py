@@ -303,10 +303,14 @@ class MatrixWorkflowTests(TestCase):
         self.assertNotContains(result, "<script>alert(1)</script>")
         # Read from the prefetched instances that the view decorated.
         displayed_submission = list(result.context["student_case"].assignment_submissions.all())[0]
-        self.assertNotIn("feedback", displayed_submission.review_form.initial)
+        # Bij de eerste beoordeling is het feedbackveld leeg; de
+        # studentantwoord wordt alleen overgenomen via de knop.
+        self.assertEqual(displayed_submission.review_form.initial["feedback"], submission.feedback)
         self.assertContains(result, "Antwoord voor feedback")
         self.assertContains(result, 'name="status"')
         self.assertContains(result, 'name="feedback"')
+        # Voor de eerste beoordeling bestaat er nog geen "vorige beoordeling".
+        self.assertNotContains(result, "Vorige beoordeling")
         reviewed = self.client.post(reverse("dossier:teacher_review_assignment", args=[
             self.student_case.pk, submission.pk,
         ]), {"status": "approved", "feedback": "Correct beoordeeld"})
@@ -314,6 +318,25 @@ class MatrixWorkflowTests(TestCase):
         submission.refresh_from_db()
         self.assertEqual(submission.status, AssignmentSubmission.Status.APPROVED)
         self.assertEqual(submission.feedback, "Correct beoordeeld")
+        # Een al goedgekeurde opdracht kan weer naar "opnieuw inleveren".
+        re_reviewed = self.client.post(reverse("dossier:teacher_review_assignment", args=[
+            self.student_case.pk, submission.pk,
+        ]), {"status": "resubmit", "feedback": "Niet goed genoeg, probeer het opnieuw"})
+        self.assertEqual(re_reviewed.status_code, 302)
+        submission.refresh_from_db()
+        self.student_case.refresh_from_db()
+        self.assertEqual(submission.status, AssignmentSubmission.Status.RESUBMIT)
+        self.assertEqual(submission.feedback, "Niet goed genoeg, probeer het opnieuw")
+        self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
+        # En de herbeoordeling toont de eerdere feedback in het veld
+        # én de vorige beoordeling leesbaar in een eigen box.
+        result = self.client.get(reverse("dossier:teacher_student_case", args=[self.student_case.pk]))
+        re_displayed = list(result.context["student_case"].assignment_submissions.all())[0]
+        self.assertEqual(
+            re_displayed.review_form.initial["feedback"], "Niet goed genoeg, probeer het opnieuw"
+        )
+        self.assertContains(result, "Vorige beoordeling: Opnieuw inleveren")
+        self.assertContains(result, "Niet goed genoeg, probeer het opnieuw")
 
     def test_empty_required_flexible_matrix_can_be_prefilled_and_published(self):
         self.client.force_login(self.teacher)

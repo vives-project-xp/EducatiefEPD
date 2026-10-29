@@ -889,7 +889,9 @@ def teacher_student_case(request, student_case_id):
         module.display_values = prepare_schema_fields(module.schema, module.data)
     for submission in student_case.assignment_submissions.all():
         submission.review_form = ReviewForm(
-            # initial={"feedback": submission.answer},
+            # Vóór het eerst is de tekst leeg; bij een herbeoordeling bevat
+            # het veld de eerdere feedback zodat de docent hem kan aanpassen.
+            initial={"feedback": submission.feedback},
             auto_id=f"id_%s_{submission.id}",  # unique ids per submission
         )
     return render(request, "dossier/teacher_student_case.html", {
@@ -904,7 +906,13 @@ def teacher_review_assignment(request, student_case_id, submission_id):
     student_case = get_object_or_404(StudentCase.objects.select_related("case"), id=student_case_id)
     editable_case(request.user, student_case.case_id)
     submission = get_object_or_404(student_case.assignment_submissions, id=submission_id)
-    if submission.status != AssignmentSubmission.Status.SUBMITTED:
+    # Ook al beoordeelde opdrachten blijven herbeoordeelbaar (bijv.
+    # goedgekeurd terugzetten naar opnieuw inleveren, of andersom).
+    if submission.status not in {
+        AssignmentSubmission.Status.SUBMITTED,
+        AssignmentSubmission.Status.APPROVED,
+        AssignmentSubmission.Status.RESUBMIT,
+    }:
         raise PermissionDenied
     form = ReviewForm(request.POST)
     if form.is_valid():

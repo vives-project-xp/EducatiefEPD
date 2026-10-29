@@ -2394,6 +2394,26 @@ summary {
   color: #fff;
 }
 
+.previous-review {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 6px;
+  background: #f7f9fc;
+  display: grid;
+  gap: 6px;
+}
+
+.previous-review small {
+  color: #667;
+}
+
+.previous-review-feedback {
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
+}
+
 .response-detail {
   border-top: 1px solid var(--line);
   padding: 13px 0;

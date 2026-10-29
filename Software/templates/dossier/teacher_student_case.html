@@ -25,12 +25,18 @@
           <div class="student-answer">
             {% autoescape off %}{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}{% endautoescape %}
           </div>
-          {% if submission.feedback %}
-            <div class="feedback">
-              <strong>Eerdere feedback</strong>{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}
+          {% if submission.status in 'approved,resubmit' %}
+            <div class="previous-review">
+              <strong>Vorige beoordeling: {{ submission.get_status_display }}</strong>
+              {% if submission.reviewed_at %}
+                <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
+              {% endif %}
+              {% if submission.feedback %}
+                <div class="previous-review-feedback">{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}</div>
+              {% endif %}
             </div>
           {% endif %}
-          {% if submission.status == 'submitted' %}
+          {% if submission.status in 'submitted,approved,resubmit' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">
               {% csrf_token %}
               <div class="review-actions">
