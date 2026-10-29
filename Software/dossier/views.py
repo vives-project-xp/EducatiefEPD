@@ -187,7 +187,7 @@ def home(request):
         .select_related("patient")
         .prefetch_related("assignments")
         .distinct()
-        .order_by("title")
+        .order_by("-created_at", "-pk")
     )
     instances = {
         item.case_id: item

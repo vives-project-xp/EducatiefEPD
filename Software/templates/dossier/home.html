@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}Casussen | Educatief EPD{% endblock %}
 {% block content %}
 <main class="home">
@@ -12,9 +13,26 @@
   <p class="eyebrow">Vroedkunde · simulatie</p>
   <h1>Mijn casussen</h1>
   <p class="lead">Open een beschikbare casus of hervat je persoonlijke patiëntendossier.</p>
+  <details class="case-filter">
+    <summary>Filter status</summary>
+    <div class="case-filter-options" aria-label="Filter casussen op status">
+      <label class="case-filter-option">
+        <input type="checkbox" value="active" data-status-filter>
+        <span>Bezig</span>
+      </label>
+      <label class="case-filter-option">
+        <input type="checkbox" value="submitted" data-status-filter>
+        <span>Ingediend</span>
+      </label>
+      <label class="case-filter-option">
+        <input type="checkbox" value="reviewed" data-status-filter>
+        <span>Beoordeeld</span>
+      </label>
+    </div>
+  </details>
   <div class="cards">
     {% for case in cases %}
-    <article class="case-card">
+    <article class="case-card" data-case-status="{% if case.student_instance %}{{ case.student_instance.status }}{% else %}new{% endif %}">
       <header>
         <div>
           <h2>
@@ -38,19 +56,27 @@
         <span class="state">Nieuw</span>
         {% endif %}
       </header>
-      <div class="patient">
-        {% if case.student_instance %}
+      {% if case.student_instance %}
+        {% if case.student_instance.patient_image or case.student_instance.patient_context %}
+        <div class="patient">
           {% if case.student_instance.patient_image %}
             <img src="{{ case.student_instance.patient_image }}" alt="Fictieve patiënt {{ case.student_instance.patient_name }}">
           {% endif %}
-          <p>{{ case.student_instance.patient_context }}</p>
-        {% else %}
+          {% if case.student_instance.patient_context %}
+            <p>{{ case.student_instance.patient_context }}</p>
+          {% endif %}
+        </div>
+        {% endif %}
+      {% elif case.patient.image or case.patient.context %}
+        <div class="patient">
           {% if case.patient.image %}
             <img src="{{ case.patient.image.url }}" alt="Fictieve patiënt {{ case.patient.name }}">
           {% endif %}
-          <p>{{ case.patient.context }}</p>
-        {% endif %}
+          {% if case.patient.context %}
+            <p>{{ case.patient.context }}</p>
+          {% endif %}
         </div>
+      {% endif %}
       <div class="course">
         {% if case.student_instance %}
           {{ case.student_instance.course }}
@@ -89,6 +115,8 @@
     {% empty %}
       <p class="empty-state">Er zijn momenteel geen casussen beschikbaar.</p>
     {% endfor %}
+    <p class="empty-state case-filter-empty" hidden>Geen casussen met deze status.</p>
   </div>
 </main>
+<script src="{% static 'case-filter.js' %}" defer></script>
 {% endblock %}

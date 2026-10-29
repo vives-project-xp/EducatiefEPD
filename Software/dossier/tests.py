@@ -73,6 +73,28 @@ class EpdWorkflowTests(TestCase):
             response, f"{reverse('login')}?next=/", fetch_redirect_response=False
         )
 
+    def test_student_home_lists_newest_cases_first(self):
+        newer_patient = Patient.objects.create(
+            name="Nieuw, Nina", reference="TEST-002", created_by=self.teacher
+        )
+        newer_case = Case.objects.create(
+            title="A-casus", patient=newer_patient, education=self.education,
+            course="Vroedkunde", created_by=self.teacher,
+        )
+        newer_case.allowed_groups.add(self.group)
+        Case.objects.filter(pk=self.case.pk).update(
+            created_at=newer_case.created_at - timedelta(seconds=1)
+        )
+
+        self.client.login(username="student", password="testpass")
+        response = self.client.get(reverse("dossier:home"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(
+            response.content.find(b"A-casus"),
+            response.content.find(b"Testcasus"),
+        )
+
     def test_oidc_failure_page_is_accessible_and_forbidden(self):
         response = self.client.get(reverse("login_failure"))
         self.assertEqual(response.status_code, 403)

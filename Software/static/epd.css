@@ -35,9 +35,10 @@ body {
    ========================================================================== */
 
 .home {
-  max-width: 1080px;
+  width: calc(100% - 128px);
+  max-width: 1400px;
   margin: auto;
-  padding: 55px 28px;
+  padding: 55px 24px;
 }
 
 .brandline {
@@ -74,33 +75,127 @@ body {
   max-width: 580px;
 }
 
+.case-filter {
+  position: relative;
+  width: 145px;
+  margin: 12px 0 0 auto;
+  color: var(--muted);
+  z-index: 3;
+}
+
+.case-filter summary {
+  padding: 6px 9px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+  list-style: none;
+}
+
+.case-filter summary::-webkit-details-marker {
+  display: none;
+}
+
+.case-filter summary::after {
+  content: "▾";
+  float: right;
+  font-size: 0.8rem;
+}
+
+.case-filter[open] summary::after {
+  content: "▴";
+}
+
+.case-filter-options {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+}
+
+.case-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.case-filter-option input {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  border: 1px solid #9aa5b5;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.case-filter-option input:checked {
+  border-color: var(--blue);
+  background: radial-gradient(circle, var(--blue) 0 3px, transparent 4px);
+}
+
 .cards {
-  margin-top: 45px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+  padding: 2px 8px 8px 2px;
+}
+
+.case-card[hidden] {
+  display: none;
+}
+
+.case-filter-empty {
+  grid-column: 1 / -1;
 }
 
 .case-card {
-  max-width: 650px;
+  display: flex;
+  flex-direction: column;
+  height: 450px;
+  min-width: 0;
   background: var(--surface);
   border: 1px solid #bdc7d8;
   border-radius: 12px;
   box-shadow: 0 10px 25px #30466a12;
-  padding: 22px;
-  margin: 20px;
+  padding: 14px;
 }
 
 .case-card header {
   display: flex;
   justify-content: space-between;
   align-items: start;
+  gap: 10px;
+}
+
+.case-card header > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.case-card header .state {
+  flex: 0 1 auto;
+  max-width: 40%;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .case-card h2 {
-  font-size: 1.45rem;
-  margin: 0 0 16px;
+  font-size: 1.2rem;
+  margin: 0 0 3px;
 }
 
 .case-card header strong {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
 }
 
 .favorite {
@@ -110,42 +205,56 @@ body {
 
 .patient {
   display: flex;
-  gap: 19px;
+  gap: 12px;
   align-items: center;
-  margin-top: 19px;
+  margin-top: 2px;
+  min-width: 0;
 }
 
 .patient img {
-  height: 100px;
-  width: 100px;
+  flex: 0 0 55px;
+  height: 55px;
+  width: 55px;
   object-fit: cover;
 }
 
 .patient p {
+  min-width: 0;
   font-style: italic;
-  line-height: 1.5;
+  line-height: 1.35;
+  font-size: 0.9rem;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .course {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  overflow-wrap: anywhere;
   color: var(--blue);
   font-weight: 700;
   text-align: center;
   border-bottom: 2px solid var(--blue);
-  padding: 15px 0;
+  padding: 4px 0;
 }
 
 .assignments {
+  flex: 1;
+  min-height: 0;
   background: #fafbfd;
+  overflow-y: auto;
+  margin-top: 2px;
 }
 
 .assignment-preview {
   display: grid;
-  grid-template-columns: 42px 1fr auto 18px;
-  gap: 12px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
   border-bottom: 1px solid var(--line);
-  padding: 8px 0;
+  padding: 4px 0;
 }
 
 .assignment-preview:last-child {
@@ -159,21 +268,30 @@ body {
   display: grid;
   place-items: center;
   align-self: stretch;
-  min-height: 58px;
+  min-height: 30px;
 }
 
 .assignment-preview div {
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow-wrap: anywhere;
 }
 
 .assignment-preview small,
 .assignment-row small {
-  font-size: 0.86rem;
+  font-size: 0.78rem;
 }
 
 .assignment-preview div span {
-  line-height: 1.4;
+  line-height: 1.25;
+}
+
+.assignment-preview b {
+  min-width: 0;
+  max-width: 100%;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .status-resubmit {
@@ -190,17 +308,22 @@ body {
 
 .case-card footer {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 25px;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
 }
 
 .outline,
 .primary {
-  padding: 12px 18px;
+  min-width: 0;
+  padding: 9px 12px;
   border-radius: 5px;
   font-weight: 700;
   text-decoration: none;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .outline {
@@ -435,6 +558,12 @@ body {
   }
 }
 
+@media (max-width: 760px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 580px) {
   .home {
     padding: 32px 18px;
@@ -445,7 +574,7 @@ body {
   }
 
   .case-card {
-    padding: 17px;
+    padding: 14px;
   }
 
   .patient img {
