@@ -1064,7 +1064,7 @@ def managed_function_payload(function):
                 "rows": question.rows,
                 "url": question.url,
                 "buttonText": question.button_text,
-                "image": question.image,
+                "image": question.image.url if question.image else None,
                 "caption": question.caption,
                 "explanation": question.explanation,
             } for question in form.questions.all()],

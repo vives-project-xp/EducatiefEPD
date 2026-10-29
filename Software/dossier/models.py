@@ -316,7 +316,7 @@ class ManagedQuestion(models.Model):
     rows = models.JSONField(default=list, blank=True)
     url = models.URLField(max_length=1000, blank=True)
     button_text = models.CharField(max_length=180, blank=True)
-    image = models.TextField(blank=True)
+    image = models.ImageField(blank=True)
     caption = models.CharField(max_length=280, blank=True)
     explanation = models.TextField(blank=True)
 
