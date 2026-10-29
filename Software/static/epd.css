@@ -2370,6 +2370,30 @@ summary {
   margin: 10px 0px;
 }
 
+.review-field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.button-copy-answer {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--blue);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.button-copy-answer:hover {
+  background: var(--blue);
+  color: #fff;
+}
+
 .response-detail {
   border-top: 1px solid var(--line);
   padding: 13px 0;

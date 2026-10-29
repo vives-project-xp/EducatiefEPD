@@ -40,8 +40,15 @@
                 </div>
               </div>
               <div class="review-field">
-                {{ submission.review_form.feedback.label_tag }}
-                {{ submission.review_form.feedback }}
+                <span class="review-field-head">
+                  {{ submission.review_form.feedback.label_tag }}
+                  <button type="button" class="button button-copy-answer">
+                    Importeer antwoord
+                  </button>
+                </span>
+                {% if submission.review_form.feedback %}
+                  {{ submission.review_form.feedback }}
+                {% endif %}
                 {{ submission.review_form.feedback.errors }}
               </div>
               <div class="review-actions">

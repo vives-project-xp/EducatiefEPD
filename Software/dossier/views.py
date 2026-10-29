@@ -889,7 +889,7 @@ def teacher_student_case(request, student_case_id):
         module.display_values = prepare_schema_fields(module.schema, module.data)
     for submission in student_case.assignment_submissions.all():
         submission.review_form = ReviewForm(
-            initial={"feedback": submission.answer},
+            # initial={"feedback": submission.answer},
             auto_id=f"id_%s_{submission.id}",  # unique ids per submission
         )
     return render(request, "dossier/teacher_student_case.html", {

@@ -303,7 +303,8 @@ class MatrixWorkflowTests(TestCase):
         self.assertNotContains(result, "<script>alert(1)</script>")
         # Read from the prefetched instances that the view decorated.
         displayed_submission = list(result.context["student_case"].assignment_submissions.all())[0]
-        self.assertEqual(displayed_submission.review_form.initial["feedback"], submission.answer)
+        self.assertNotIn("feedback", displayed_submission.review_form.initial)
+        self.assertContains(result, "Antwoord voor feedback")
         self.assertContains(result, 'name="status"')
         self.assertContains(result, 'name="feedback"')
         reviewed = self.client.post(reverse("dossier:teacher_review_assignment", args=[

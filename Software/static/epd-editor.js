@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     suffix: '.min',
     // language: 'nl',            // needs the nl language file in static/tinymce/langs/
     menubar: false,
+    statusbar: false,
     plugins: 'lists link table image autoresize',
     toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | image importdocx exportdocx',
     color_cols: 5,
@@ -44,6 +45,31 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     },
   });
+});
+
+document.addEventListener("click", function (event) {
+  const button = event.target.closest(".button-copy-answer");
+  if (!button) return;
+
+  const reviewField = button.closest(".review-field");
+  const feedback = reviewField?.querySelector("textarea");
+  const answerElement = button.closest("article")?.querySelector(".student-answer");
+
+  if (!feedback || !answerElement) return;
+
+  // The student's answer is already rendered in the card; copy it as-is.
+  const answer = answerElement.innerHTML;
+
+  // Update TinyMCE if it manages this textarea, otherwise the raw field.
+  const editor = typeof tinymce !== "undefined" ? tinymce.get(feedback.id) : null;
+  if (editor) {
+    editor.setContent(answer);
+    editor.save();
+    editor.focus();
+  } else {
+    feedback.value = answer;
+    feedback.focus();
+  }
 });
 
 function importDocx(editor) {
