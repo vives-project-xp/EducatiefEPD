@@ -82,9 +82,16 @@ EPD-beheerder kan alle groepen en casussen beheren.
 ## Docent
 
 1. Maak een patiënt en casus aan binnen een opleiding waarvoor je een lesgroep beheert.
-2. Vul het basisdossier en de opdrachten in. Gebruik de bibliotheek om herbruikbare
-   onderdelen aan de casus toe te voegen.
-3. Publiceer de casus en wijs haar toe aan één of meer van je lesgroepen.
+   De nieuwe casus begint zonder dossiermodules.
+2. Kies bij **Dossier uit bibliotheek toevoegen** een dossiersjabloon. Alleen de actieve
+   modules van dat sjabloon worden als zelfstandige kopieën toegevoegd, in de ingestelde
+   volgorde. Opnieuw toevoegen maakt geen dubbele modules. Je kunt ook expliciet een
+   los bibliotheekonderdeel kiezen. Vul daarna het basisdossier en de opdrachten in.
+3. Publiceer de casus en wijs haar toe aan één of meer van je lesgroepen. Er moet
+   minstens één opdracht en één dossiermodule aanwezig zijn. Voorinvulling door de
+   docent is optioneel: velden en volledige modules mogen leeg blijven bij bewaren
+   en publiceren. Ingevulde getallen, datums en keuzes worden wel gevalideerd.
+   Een * bij een veld duidt op een verplichting voor studenten, niet voor de docent.
 4. Bekijk per student het eigen dossier en beoordeel ingediende opdrachten. De
    bibliotheek en de casusstructuur kunnen later veranderen zonder reeds gestarte
    studentdossiers te wijzigen.
@@ -92,16 +99,19 @@ EPD-beheerder kan alle groepen en casussen beheren.
 ## Bibliotheek beheren
 
 Docenten en EPD-beheerders kunnen in **Bibliotheek** alle dossiermodules, vragenlijsten
-en matrices bewerken, ook de vaste standaardmodules. Kies **Bewerk** om de instellingen
+en matrices bewerken. Kies **Bewerk** om de instellingen
 en de onderdelen te openen. Per veld kun je het type, de opties en de volgorde aanpassen,
 een veld toevoegen of **Verwijderen** kiezen.
 
 Met **Verwijderen** op een bibliotheekkaart of **Uit bibliotheek verwijderen** in de
-editor haal je het onderdeel uit de actieve bibliotheek. Het wordt gearchiveerd en niet
-meer aan nieuwe casussen toegevoegd. Bestaande casuskopieën en studentdossiers blijven
-behouden. Hernoemde modules en verwijderde velden worden bij een herstart niet teruggezet.
-De instelling om een template automatisch aan nieuwe casussen toe te voegen blijft bij
-de EPD-beheerder.
+editor haal je het onderdeel uit de actieve bibliotheek. Het wordt gearchiveerd en kan
+niet meer aan nieuwe casussen of sjablonen worden toegevoegd. Bestaande casuskopieën en
+studentdossiers blijven behouden. Hernoemde modules en verwijderde velden worden bij een
+herstart niet teruggezet. Er is geen vaste lijst die automatisch aan casussen wordt
+toegevoegd; je bepaalt de inhoud via dossiersjablonen en expliciet gekozen onderdelen.
+
+Reeds bestaande casussen behouden hun huidige modules, ook als die vroeger automatisch
+zijn toegevoegd. Deze wijziging verwijdert geen bestaande dossiers of studentantwoorden.
 
 De bibliotheek bevat twee afzonderlijke zoekformulieren: **Dossiers filteren** zoekt
 samengestelde dossiers op naam en opleiding; **Onderdelen filteren** zoekt binnen de
@@ -128,6 +138,96 @@ Open **Mijn casussen**. Alleen gepubliceerde of eerder gestarte casussen die aan
 huidige lesgroep zijn toegewezen, zijn toegankelijk. Bij de eerste start ontstaat een
 persoonlijke kopie. Vul de velden in, bewaar antwoorden en dien opdrachten in. Iedere
 student heeft een afzonderlijk dossier.
+
+### Bewaren, observaties en volledig indienen
+
+- **Bewaren** mag ook wanneer verplichte velden nog leeg zijn. Ingevulde getallen,
+  datums en keuzes moeten wel geldig zijn.
+- Beide bewaarknoppen slaan alle wijzigingen in het huidige dossieronderdeel op,
+  inclusief ingevulde observaties. Een begonnen observatie heeft een geldig tijdstip
+  en een waarde nodig; een volledig lege observatieregel mag leeg blijven.
+- Bij een fout blijft de ingevoerde tekst op het scherm staan en verschijnt een
+  melding bij het betreffende veld. Er wordt dan niets gedeeltelijk opgeslagen.
+  Corrigeer de fout en bewaar opnieuw.
+- **Volledig dossier indienen** controleert alle opgeslagen dossieronderdelen en
+  opdrachten. Verplichte tekst-/keuzevelden moeten ingevuld zijn, een verplichte
+  matrix heeft minstens één ingevulde antwoordcel en een verplicht observatieveld minstens
+  één geldige observatie. Bij fouten opent het eerste betrokken onderdeel.
+- Bewaar wijzigingen voordat je naar een ander onderdeel navigeert of het volledige
+  dossier indient. De indienknop controleert de opgeslagen persoonlijke kopie.
+
+Dezelfde bewaarknoppen en foutafhandeling gelden voor het **docentbasisdossier**.
+Een docent mag dat gedeeltelijk voorinvullen; reeds gestarte studentkopieën veranderen
+daardoor niet.
+
+## Een flexibele matrix maken
+
+1. Open een bibliotheekonderdeel, voeg een veld toe en kies **Matrix**. Er verschijnt
+   direct een raster van zes rijen en vier kolommen. Je hoeft geen rijenlijst te typen.
+2. Klik een cel aan en kies rechts **Celtype**. Iedere cel mag een eigen type hebben:
+   tekst, lange tekst, getal, datum, tijd, datum/tijd, ja/nee, selectievakje, keuzelijst,
+   meerdere keuzes of vaste tekst. **Vaste tekst** is bijvoorbeeld een kop of instructie;
+   studenten kunnen die niet overschrijven.
+3. Dubbelklik, typ of druk Enter om de cel te bewerken. In ontwerpmodus is invoer in
+   een antwoordcel een **standaardantwoord**. Laat dit leeg als de student zelf moet
+   invullen. Stel eventueel verplichte invoer, alleen-lezen, keuzes, grenzen of hulptekst in.
+4. Selecteer meerdere cellen met Shift+klik, Shift+pijlen of slepen om het type of de
+   opmaak tegelijk aan te passen. Kopknoppen selecteren een hele rij of kolom. De
+   instellingen tonen de actieve cel; elke aangepaste instelling geldt voor de selectie.
+5. Gebruik **Rij bewerken** en **Kolom bewerken** om bij de actieve cel in te voegen,
+   te dupliceren, te verplaatsen of te verwijderen. Rechts kun je de rij-/kolomkop
+   en hoogte/breedte aanpassen. Verplaatsen houdt antwoorden bij dezelfde cel.
+6. Probeer **Studentvoorbeeld**. Voorbeeldantwoorden zijn tijdelijk. Ga terug naar
+   het ontwerp en kies **Bewaren** om de indeling en standaardantwoorden op te slaan.
+
+Vet, cursief, tekstkleur, achtergrond, uitlijning, tekstterugloop en randen zijn per
+cel of selectie instelbaar. Getallen ondersteunen eenheden en weergave als decimalen,
+percentage of valuta. Weergaveafronding verandert het opgeslagen getal niet.
+Bij percentage betekent invoer `12,5` de waarde `12,5%`; er is geen automatische
+vermenigvuldiging met honderd. Zowel een decimale komma als punt is toegestaan,
+zonder duizendtalscheiding. Datum/tijd is lokale kloktijd, zonder tijdzoneconversie.
+
+### Kopiëren, plakken en corrigeren
+
+- Selecteer een bereik en gebruik Ctrl/Cmd+C of V om waarden met Excel uit te
+  wisselen. Voorloopnullen in tekstcellen en tekst met meerdere regels blijven behouden.
+  Bij meerdere keuzes scheid je opties met een puntkomma; bij ja/nee gebruik je
+  `ja`/`nee`, `true`/`false` of `1`/`0`. Excel moet datums als `JJJJ-MM-DD` leveren
+  en tijden als `UU:MM`; niet-herkende datumweergaven worden gemeld.
+- Plakken past alleen binnen bestaande rijen/kolommen. Voeg zo nodig eerst ruimte
+  toe. Bij een ongeldige of beschermde cel wordt niets gedeeltelijk geplakt.
+  Formules blijven tekst en worden niet uitgevoerd; Excel-opmaak wordt niet geïmporteerd.
+- Enter bewerkt/bevestigt een cel; Tab gaat verder; Escape annuleert celinvoer.
+  In lange tekst voegt Enter een nieuwe regel toe en bevestigt Ctrl/Cmd+Enter de cel.
+  Pijlen navigeren buiten celbewerking. Delete wist de geselecteerde inhoud.
+- **Ongedaan maken** / **Opnieuw** bewaren maximaal 40 lokale toestanden. De
+  geschiedenis vervalt na bewaren/herladen. Bij onbewaarde wijzigingen waarschuwt
+  de browser vóór vertrek. Dit is geen automatisch opslaan.
+
+Een matrix is begrensd tot 100 rijen, 40 kolommen en 2.000 cellen. Een cel bevat
+maximaal 10.000 tekens; de gehele indeling of antwoordset maximaal ongeveer 500 kB.
+Samenvoegen, herhaalbare secties, volledige werkmapimport en uploads zijn vervolgstappen.
+
+### Voorinvulling, studenten en bestaande matrices
+
+Voeg het bibliotheekonderdeel toe aan een casus en vul desgewenst het **basisdossier**
+in. Daar kan de docent ook antwoordcellen voorinvullen die alleen-lezen zijn voor
+studenten. Vaste tekst wijzig je in het ontwerp. Bestaande rechten blijven gelden:
+docenten beheren bibliotheekvelden; alleen een EPD-beheerder wijzigt de structuur
+van een casuskopie.
+
+Studenten vullen hetzelfde raster in. Concepten mogen onvolledig zijn. Bij volledig
+indienen worden ook afzonderlijk verplichte cellen gecontroleerd; `0` en `Nee` zijn
+geldige antwoorden. Vaste tekst en alleen-lezen voorinvulling tellen niet als
+antwoord voor de algemene instelling **Verplicht**. Een fout noemt rij en kolom;
+ingevoerde waarden blijven zichtbaar. De docent ziet bij beoordeling hetzelfde raster.
+
+Oude matrices blijven bruikbaar. Pas wanneer je een bronveld in de nieuwe ontwerper
+bewaart, wordt het omgezet. Bestaande casusvoorinvulling wordt daarbij meegenomen;
+een wijziging die ingevulde cellen zou verwijderen wordt geweigerd. Maak die waarden
+eerst bewust leeg in het basisdossier. Reeds gestarte studenten houden altijd hun
+eigen indeling. Als iemand hetzelfde bronveld intussen heeft aangepast, moet je je
+invoer apart bewaren en herladen; een verouderde editor overschrijft geen nieuwere versie.
 
 ## Problemen met aanmelden
 

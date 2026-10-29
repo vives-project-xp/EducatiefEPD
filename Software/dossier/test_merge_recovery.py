@@ -1,6 +1,11 @@
+import base64
+from io import BytesIO
 import json
 
+from docx import Document
+
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
@@ -9,14 +14,14 @@ from .models import (
     Case, Education, FunctionDefinition, LibraryDossier, LibraryTemplate,
     ManagedForm, ManagedQuestion, Patient, Profile,
 )
-from .services import ensure_default_templates
+from .test_fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class MergeRecoveryTests(TestCase):
     @classmethod
     def setUpTestData(cls):
-        ensure_default_templates()
+        create_library_fixtures()
         cls.education = Education.objects.get(slug="vroedkunde")
         cls.teacher = get_user_model().objects.create_user("merge-teacher")
         cls.teacher.epd_profile.role = Profile.Role.TEACHER
@@ -135,3 +140,37 @@ class MergeRecoveryTests(TestCase):
                 self.assertEqual(method(reverse(f"dossier:{route}", args=[foreign.pk])).status_code, 404)
         foreign.refresh_from_db()
         self.assertEqual(foreign.status, LibraryDossier.Status.ACTIVE)
+
+    def test_docx_export_and_import_preserve_formatted_content(self):
+        response = self.client.post(reverse("dossier:export_docx"), {
+            "html": "<p><strong>Voorinvulling</strong> voor de casus.</p>",
+            "filename": "Les casus.docx",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="Les_casus.docx"')
+        document = Document(BytesIO(response.content))
+        self.assertIn("Voorinvulling voor de casus.", "\n".join(p.text for p in document.paragraphs))
+        upload = SimpleUploadedFile("les.docx", response.content, content_type=response["Content-Type"])
+        imported = self.client.post(reverse("dossier:import_docx"), {"file": upload})
+        self.assertEqual(imported.status_code, 200)
+        self.assertIn("<strong>Voorinvulling</strong>", imported.json()["html"])
+
+    def test_function_save_accepts_image_and_link_and_rejects_invalid_base64_atomically(self):
+        image = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+        payload = {
+            "action": "save_form", "formId": self.form.pk, "title": "Intake",
+            "questions": [
+                {"fieldType": ManagedQuestion.FieldType.IMAGE, "image": image, "url": "https://example.org/casus"},
+            ],
+        }
+        response = self.post_json("function_action", payload, [self.function.pk])
+        self.assertEqual(response.status_code, 200)
+        question = self.form.questions.get()
+        self.assertEqual(question.image, image)
+        self.assertEqual(question.url, "https://example.org/casus")
+        payload["questions"][0]["image"] = "data:image/png;base64,%%%"
+        response = self.post_json("function_action", payload, [self.function.pk])
+        self.assertEqual(response.status_code, 400)
+        question.refresh_from_db()
+        self.assertEqual(question.image, image)
+        self.assertEqual(self.form.questions.get().pk, question.pk)

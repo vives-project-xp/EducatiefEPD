@@ -27,7 +27,8 @@ from .models import (
     TeachingGroup,
 )
 from .auth import EpdOIDCAuthenticationBackend
-from .services import create_case_structure, ensure_default_templates, start_student_case
+from .services import copy_template_to_case, start_student_case
+from .test_fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -59,7 +60,8 @@ class EpdWorkflowTests(TestCase):
         )
         cls.group.members.add(cls.student, cls.other_student)
         cls.case.allowed_groups.add(cls.group)
-        create_case_structure(cls.case)
+        for template in create_library_fixtures():
+            copy_template_to_case(template, cls.case)
         cls.assignment = Assignment.objects.create(
             case=cls.case, phase="Opdracht 1", title="Observeer",
             content="Oorspronkelijke opdracht", position=1,
@@ -248,16 +250,13 @@ class EpdWorkflowTests(TestCase):
         self.assertIn("saveButton.disabled = locked || !dirty", script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
-    def test_new_case_receives_all_fixed_dossier_sections(self):
-        self.assertEqual(
-            self.case.modules.count(),
-            LibraryTemplate.objects.filter(
-                status=LibraryTemplate.Status.ACTIVE, is_fixed=True,
-                education=self.education,
-            ).count(),
-        )
-        self.assertTrue(self.case.modules.filter(title="Anamnese").exists())
-        self.assertTrue(self.case.modules.filter(title="Klinisch redeneerplan").exists())
+    def test_opening_empty_library_does_not_seed_default_templates(self):
+        LibraryTemplate.objects.all().delete()
+        self.client.force_login(self.teacher)
+        for route in ("library_list", "library_dossier_create"):
+            with self.subTest(route=route):
+                self.assertEqual(self.client.get(reverse(f"dossier:{route}")).status_code, 200)
+                self.assertEqual(LibraryTemplate.objects.count(), 0)
 
     def test_patient_can_have_only_one_case(self):
         with self.assertRaises(IntegrityError):
@@ -420,7 +419,7 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(submission.status, AssignmentSubmission.Status.APPROVED)
         self.assertEqual(student_case.status, StudentCase.Status.REVIEWED)
 
-    def test_teacher_can_create_patient_and_case_with_fixed_structure(self):
+    def test_teacher_can_create_patient_and_case_without_automatic_modules(self):
         self.client.login(username="teacher", password="testpass")
         response = self.client.post(reverse("dossier:teacher_case_create"), {
             "patient-name": "Voorbeeld, Vera", "patient-reference": "TEST-002",
@@ -433,7 +432,7 @@ class EpdWorkflowTests(TestCase):
         created = Case.objects.get(patient__reference="TEST-002")
         self.assertRedirects(response, reverse("dossier:teacher_case", args=[created.id]))
         self.assertEqual(created.status, Case.Status.DRAFT)
-        self.assertEqual(created.modules.count(), LibraryTemplate.objects.filter(is_fixed=True).count())
+        self.assertEqual(created.modules.count(), 0)
 
     def test_library_supports_search_and_filters(self):
         self.client.login(username="teacher", password="testpass")
@@ -515,7 +514,6 @@ class EpdWorkflowTests(TestCase):
         })
         template = LibraryTemplate.objects.get(title="Extra vragenlijst")
         self.assertRedirects(response, reverse("dossier:library_detail", args=[template.id]))
-        self.assertFalse(template.is_fixed)
         add_url = reverse("dossier:teacher_case_add_template", args=[self.case.id])
         self.client.post(add_url, {"template_id": template.id})
         self.client.post(add_url, {"template_id": template.id})
@@ -604,7 +602,7 @@ class EpdWorkflowTests(TestCase):
         self.assertContains(response, "kan niet worden verwijderd", status_code=200)
         self.assertTrue(Education.objects.filter(id=self.education.id).exists())
 
-    def test_teacher_can_edit_fixed_library_template_without_teaching_group(self):
+    def test_teacher_can_edit_library_template_without_teaching_group(self):
         self.group.delete()
         self.client.login(username="teacher", password="testpass")
         template = LibraryTemplate.objects.get(title="Anamnese")
@@ -616,13 +614,11 @@ class EpdWorkflowTests(TestCase):
             "title": "Anamnese aangepast", "description": "Aangepaste beschrijving",
             "category": template.category, "education": self.education.id,
             "theme": template.theme, "instructions": "Nieuwe instructies",
-            "is_fixed": "",
         }), url)
         template.refresh_from_db()
         self.assertEqual(template.title, "Anamnese aangepast")
         self.assertEqual(template.version, 2)
-        self.assertTrue(template.is_fixed)
-        ensure_default_templates()
+        self.client.get(reverse("dossier:library_dossier_create"))
         self.assertFalse(LibraryTemplate.objects.filter(title="Anamnese").exists())
         self.assertEqual(self.case.modules.get(source_template=template).title, "Anamnese")
 
@@ -829,7 +825,6 @@ class EpdWorkflowTests(TestCase):
                 title=title,
                 education=self.education,
                 status=LibraryTemplate.Status.ACTIVE,
-                is_fixed=True,
             )
             self.assertTrue(LibraryTemplate.objects.filter(pk=template.pk).exists())
 
@@ -837,32 +832,23 @@ class EpdWorkflowTests(TestCase):
         self.assertContains(dossier_form, "Anamnese")
         self.assertContains(dossier_form, "Klinisch redeneerplan")
 
-    def test_archived_standard_template_is_available_when_creating_a_dossier(self):
+    def test_archived_template_is_not_reactivated_when_creating_a_dossier(self):
         self.client.force_login(self.teacher)
-        template = LibraryTemplate.objects.get(
-            title="Anamnese", education=self.education, is_fixed=True
-        )
+        template = LibraryTemplate.objects.get(title="Anamnese", education=self.education)
         template.status = LibraryTemplate.Status.ARCHIVED
         template.save(update_fields=["status", "updated_at"])
-
         create_url = reverse("dossier:library_dossier_create")
-        dossier_form = self.client.get(create_url)
-        self.assertContains(dossier_form, "Anamnese")
-
+        page = self.client.get(create_url)
+        self.assertNotIn(template, page.context["form"].fields["existing_modules"].queryset)
         response = self.client.post(create_url, {
-            "title": "Dossier met standaardonderdeel",
-            "description": "",
-            "education": self.education.id,
-            "existing_modules": [str(template.id)],
-            "new_modules": "[]",
+            "title": "Dossier met gearchiveerd onderdeel", "education": self.education.pk,
+            "existing_modules": [str(template.pk)], "new_modules": "[]",
         })
-        self.assertRedirects(response, reverse("dossier:library_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("existing_modules", response.context["form"].errors)
         template.refresh_from_db()
-        self.assertEqual(template.status, LibraryTemplate.Status.ACTIVE)
-        self.assertTrue(
-            LibraryDossier.objects.get(title="Dossier met standaardonderdeel")
-            .modules.filter(pk=template.pk).exists()
-        )
+        self.assertEqual(template.status, LibraryTemplate.Status.ARCHIVED)
+        self.assertFalse(LibraryDossier.objects.filter(title="Dossier met gearchiveerd onderdeel").exists())
 
     def test_dossier_form_shows_and_accepts_modules_from_other_educations(self):
         self.client.force_login(self.teacher)
@@ -934,7 +920,7 @@ class EpdWorkflowTests(TestCase):
         self.assertTrue(response.context["form"].errors["options_text"])
         self.assertFalse(template.fields.filter(label="Keuze").exists())
 
-    def test_deleted_last_default_field_stays_deleted_and_copies_are_preserved(self):
+    def test_deleted_library_field_stays_deleted_and_copies_are_preserved(self):
         self.client.login(username="teacher", password="testpass")
         template = LibraryTemplate.objects.get(title="Uitwerking opdracht")
         field = template.fields.get()
@@ -944,7 +930,7 @@ class EpdWorkflowTests(TestCase):
         snapshot = student_case.module_responses.get(module=module)
         original_schema = snapshot.schema
         self.client.post(reverse("dossier:library_field_delete", args=[template.id, field.id]))
-        create_case_structure(self.case)
+        self.client.get(reverse("dossier:teacher_case", args=[self.case.pk]))
         self.assertFalse(template.fields.exists())
         module.refresh_from_db()
         snapshot.refresh_from_db()
@@ -952,7 +938,7 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(module.fields.count(), 1)
         self.assertEqual(snapshot.schema, original_schema)
 
-    def test_teacher_can_remove_fixed_template_without_deleting_existing_dossiers(self):
+    def test_teacher_can_archive_template_without_deleting_existing_dossiers(self):
         self.client.login(username="teacher", password="testpass")
         template = LibraryTemplate.objects.get(title="Anamnese")
         student_case, _ = start_student_case(self.case, self.student)
@@ -963,13 +949,12 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(template.status, LibraryTemplate.Status.ARCHIVED)
         self.assertNotContains(self.client.get(reverse("dossier:library_list")), "Anamnese")
         self.assertEqual(self.client.get(reverse("dossier:library_detail", args=[template.id])).status_code, 404)
-        ensure_default_templates()
+        self.client.get(reverse("dossier:library_dossier_create"))
         self.assertEqual(LibraryTemplate.objects.filter(title="Anamnese").count(), 1)
         patient = Patient.objects.create(name="Nieuw", reference="AFTER-DELETE")
         new_case = Case.objects.create(
             title="Nieuwe casus", patient=patient, education=self.education, course="Vroedkunde",
         )
-        create_case_structure(new_case)
         self.assertFalse(new_case.modules.filter(source_template=template).exists())
         self.assertTrue(self.case.modules.filter(source_template=template).exists())
         self.assertTrue(student_case.module_responses.filter(title="Anamnese").exists())

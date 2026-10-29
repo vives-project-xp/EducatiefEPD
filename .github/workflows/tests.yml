@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  django-tests:
+    name: Django + MySQL 8.4
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: epd_ci
+          MYSQL_USER: epd_ci
+          MYSQL_PASSWORD: epd_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      SECRET_KEY: ci-only-not-secret
+      DJANGO_DEBUG: "1"
+      MYSQL_DATABASE: epd_ci
+      # root met bekende (niet-secret) CI-wachtwoord: Django's testrunner moet
+      # zelf de test_epd_ci-database kunnen aanmaken, wat gewone gebruikers
+      # niet mag.
+      MYSQL_USER: root
+      MYSQL_PASSWORD: root
+      MYSQL_HOST: 127.0.0.1
+      MYSQL_PORT: "3306"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: Software/requirements.txt
+      - name: Install dependencies
+        run: pip install -r Software/requirements.txt
+      - name: System check
+        working-directory: Software
+        run: python manage.py check
+      - name: No unmanaged model changes
+        working-directory: Software
+        run: python manage.py makemigrations --check --dry-run
+      - name: Run test suite
+        working-directory: Software
+        run: python manage.py test --verbosity 1
+
+  static-and-node:
+    name: Syntax + Node-matrixtests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JavaScript syntax check
+        run: |
+          for file in Software/static/*.js Software/static/*.mjs; do
+            node --check "$file" || exit 1
+          done
+      - name: Matrix core tests
+        run: node --test Software/tests/matrix-core.test.mjs

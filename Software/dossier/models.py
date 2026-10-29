@@ -191,7 +191,6 @@ class LibraryTemplate(models.Model):
     version = models.PositiveIntegerField(default=1)
     seed_key = models.SlugField(max_length=80, unique=True, null=True, blank=True, editable=False)
     functions = models.JSONField(default=list, blank=True)
-    is_fixed = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="library_templates",
@@ -377,15 +376,22 @@ class FieldDefinition(models.Model):
     options = models.JSONField(default=list, blank=True)
     rows = models.JSONField(default=list, blank=True)
     columns = models.JSONField(default=list, blank=True)
+    matrix_definition = models.JSONField(default=dict, blank=True)
 
     class Meta:
         abstract = True
         ordering = ["position", "id"]
 
     def clean(self):
+        if self.field_type == self.FieldType.MATRIX and self.matrix_definition:
+            from .matrix import normalize_definition
+            try:
+                self.matrix_definition = normalize_definition(self.matrix_definition)
+            except ValidationError as exc:
+                raise ValidationError({"matrix_definition": exc.messages})
         if self.field_type == self.FieldType.SELECT and not self.options:
             raise ValidationError({"options": "Een keuzelijst heeft minstens één optie nodig."})
-        if self.field_type == self.FieldType.MATRIX and (not self.rows or not self.columns):
+        if self.field_type == self.FieldType.MATRIX and not self.matrix_definition and (not self.rows or not self.columns):
             raise ValidationError("Een matrix heeft minstens één rij en één kolom nodig.")
 
     def as_schema(self):
@@ -399,6 +405,7 @@ class FieldDefinition(models.Model):
             "options": self.options,
             "rows": self.rows,
             "columns": self.columns,
+            **({"matrix_definition": self.matrix_definition} if self.matrix_definition and self.field_type == self.FieldType.MATRIX else {}),
         }
 
 

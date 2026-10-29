@@ -45,6 +45,7 @@
       {% endif %}
       <form method="post" class="module-form">{% csrf_token %}
         <input type="hidden" name="module" value="{{ selected.id }}">
+        {% if not student_case.locked and selected.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
         {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
         {% if not student_case.locked and selected.kind != 'information' %}
           <button class="primary button" type="submit" name="action" value="save">Bewaren</button>

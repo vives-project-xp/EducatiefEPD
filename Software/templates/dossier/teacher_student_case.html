@@ -58,11 +58,13 @@
       <details class="response-detail">
         <summary>{{ module.title }}</summary>
         {% for field in module.display_values %}
-          <div class="response-value">
-            <strong>{{ field.label }}</strong>
-            <pre>
-              {% autoescape off %}{{ field.value }}{% endautoescape %}
-            </pre>
+          <div class="response-value"><strong>{{ field.label }}</strong>
+            {% if field.matrix_payload %}
+              {% include 'dossier/_matrix.html' with locked=True %}
+            {% elif field.type == 'matrix' %}
+              <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+            {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
+            {% else %}<pre>{{ field.value }}</pre>{% endif %}
           </div>
         {% empty %}
         <p>Dit onderdeel bevat geen invulvelden.</p>

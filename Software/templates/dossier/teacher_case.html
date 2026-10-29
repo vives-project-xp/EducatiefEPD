@@ -93,19 +93,19 @@
     <section class="editor-section">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Vaste structuur</p>
+          <p class="eyebrow">Gekozen dossiermodules</p>
           <h2>Basisdossier</h2>
         </div>
       </div>
       {% for module in case.modules.all %}
-      <a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}">
-        <span>{{ forloop.counter }}</span>
-        <div>
-          <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
-          <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
-        </div>
-        <b>›</b>
-      </a>{% empty %}<p>De vaste dossierstructuur ontbreekt.</p>
+        <a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}">
+          <span>{{ forloop.counter }}</span>
+          <div>
+            <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
+            <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
+          </div>
+          <b>›</b>
+        </a>{% empty %}<p>Nog geen dossiermodules. Kies hierboven een dossiersjabloon of voeg een los bibliotheekonderdeel toe.</p>
       {% endfor %}
     </section>
     <section class="editor-section">

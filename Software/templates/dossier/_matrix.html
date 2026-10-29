@@ -1,0 +1,9 @@
+<div data-matrix data-name="matrix_{{ field.key }}" data-readonly="{% if locked %}true{% else %}false{% endif %}">
+  {{ field.matrix_payload|json_script }}
+  <div class="sheet-fallback">
+    <table aria-label="{{ field.label }}"><thead><tr><th></th>{% for column in field.matrix_payload.definition.columns %}<th scope="col">{{ column.label }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in field.matrix_display_rows %}<tr><th scope="row">{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+    {% if not locked %}<p>JavaScript is nodig om deze matrix te bewerken. Reeds opgeslagen matrixwaarden blijven behouden bij het bewaren van andere velden.</p>{% endif %}
+  </div>
+</div>

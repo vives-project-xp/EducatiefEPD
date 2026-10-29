@@ -17,9 +17,10 @@
       <section>
         <h2>Onderwijscontext</h2>
         {{ case_form.as_div }}
+        {% if mode != 'edit' %}<p class="muted">De casus start zonder dossiermodules. Kies na het aanmaken een dossiersjabloon uit de bibliotheek.</p>{% endif %}
       </section>
       <button class="primary button" type="submit">
-        {% if mode == 'edit' %}Wijzigingen bewaren{% else %}Patiënt en basisdossier aanmaken{% endif %}
+        {% if mode == 'edit' %}Wijzigingen bewaren{% else %}Patiënt en casus aanmaken{% endif %}
       </button>
     </form>
 </main>
