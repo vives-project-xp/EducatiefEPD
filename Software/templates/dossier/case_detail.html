@@ -17,7 +17,7 @@
       {% if selected %}
         <h2>{{ selected.phase }}: {{ selected.title }}</h2>
         <div class="assignment-content">
-          {{ selected.content|linebreaks }}
+          {% autoescape off %}{{ selected.content|linebreaks }}{% endautoescape %}
         </div>
         <form method="post" class="answer-form">
           {% csrf_token %}
