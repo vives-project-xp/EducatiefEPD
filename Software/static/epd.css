@@ -2336,7 +2336,7 @@ summary {
   margin: 14px 0;
   padding: 14px;
   background: #f7f8fa;
-  line-height: 1.5;
+  line-height: 1.2;
 }
 
 .student-answer img {
@@ -2346,6 +2346,17 @@ summary {
 
 .student-answer table {
   max-width: 100%;
+}
+
+.student-answer p,
+.previous-review-feedback p {
+  margin: 0 0 10px;
+  line-height: 1.2;
+}
+
+.student-answer p:last-child,
+.previous-review-feedback p:last-child {
+  margin-bottom: 0;
 }
 
 .review-form {
