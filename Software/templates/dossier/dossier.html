@@ -45,26 +45,14 @@
         <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
       {% endif %}
       {% if function_forms or fields %}
-      <div class="dossier-content-grid {% if show_form_navigation %}has-form-navigation{% else %}single-form-layout{% endif %}">
-        {% if show_form_navigation %}
-          <aside class="function-card form-navigation" aria-labelledby="form-navigation-heading">
-            <p class="eyebrow">Functie</p>
-            <h3 id="form-navigation-heading">Formulieren</h3>
-            <p class="form-navigation-help">Kies een formulier om de vragen te bekijken.</p>
-            {% for function in function_forms %}
-              {% for form in function.forms %}
-                <button type="button" class="form-navigation-item {% if form.active %}is-active{% endif %}" data-form-nav="{{ form.key }}" aria-pressed="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button>
-              {% endfor %}
-            {% endfor %}
-          </aside>
-        {% endif %}
+      <div class="dossier-content-grid single-form-layout">
         <form method="post" class="module-form" enctype="multipart/form-data">{% csrf_token %}
           <input type="hidden" name="module" value="{{ selected.id }}">
           <input type="hidden" name="function" value="{{ selected_function_id }}">
           <input type="hidden" name="form" value="{{ active_form_key|default:'' }}">
           {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
           {% include 'dossier/_function_snapshots.html' with locked=student_case.locked %}
-          {% if not student_case.locked and selected.kind != 'information' %}
+          {% if not student_case.locked and selected.kind != 'information' and fields or not student_case.locked and selected.kind != 'information' and selected_function.answerable %}
             <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
           {% endif %}
         </form>

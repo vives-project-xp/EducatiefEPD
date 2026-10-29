@@ -447,7 +447,188 @@ body {
   .home {
     padding: 32px 18px;
   }
+}
 
+/* ==========================================================================
+     Function viewer
+     ========================================================================== */
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .function-viewer {
+    container-type: inline-size;
+    min-width: 0;
+    display: grid;
+    gap: 18px;
+  }
+
+  .function-viewer + .function-viewer {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .function-viewer-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .function-viewer-header h3 {
+    margin: 0;
+    font-size: 1.25rem;
+  }
+
+  .function-viewer-body {
+    display: grid;
+    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+    align-items: start;
+    gap: 24px;
+  }
+
+  .function-viewer-body > .function-form-navigation {
+    grid-column: 1;
+    margin: 0;
+  }
+
+  .function-viewer-content {
+    min-width: 0;
+    grid-column: 2;
+  }
+
+  .function-viewer:not(.has-function-navigation) .function-viewer-content {
+    grid-column: 1 / -1;
+  }
+
+  .function-viewer .function-form {
+    min-width: 0;
+    margin: 0;
+  }
+
+  .function-viewer .function-form > h2,
+  .function-viewer .preview-form > h3 {
+    margin: 0 0 18px;
+  }
+
+  .function-viewer .function-form > .dynamic-field:first-child {
+    padding-top: 0;
+  }
+
+  .function-viewer .function-form > .dynamic-field:last-child {
+    border-bottom: 0;
+  }
+
+  .function-viewer .managed-form-list {
+    gap: 4px;
+  }
+
+  .function-viewer .managed-form-list li {
+    min-width: 0;
+  }
+
+  .function-viewer .form-navigation-item {
+    min-height: 44px;
+    border-color: transparent;
+    white-space: normal;
+  }
+
+  .function-viewer .form-navigation-item[aria-current="true"] {
+    background: var(--surface-selected);
+    border-color: var(--line);
+    font-weight: 700;
+  }
+
+  .function-viewer .form-navigation-item:hover:not([aria-current="true"]) {
+    background: var(--surface-hover);
+  }
+
+  .function-viewer .function-information {
+    margin: 0;
+  }
+
+  .function-viewer .function-information img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .function-viewer .dynamic-field > label {
+    display: block;
+  }
+
+  .function-viewer .required-marker {
+    color: var(--red);
+  }
+
+  .function-viewer .observation-entry {
+    grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 1fr) minmax(12rem, 1.5fr) max-content;
+    align-items: start;
+  }
+
+  .function-viewer .observation-entry .button {
+    white-space: nowrap;
+  }
+
+  .function-viewer .preview-form {
+    display: grid;
+    gap: 0;
+    border-top: 0;
+    padding-top: 0;
+  }
+
+  .function-viewer .preview-question {
+    width: 100%;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .function-viewer .preview-question:last-child {
+    border-bottom: 0;
+  }
+
+  .function-viewer .preview-label {
+    display: block;
+    margin-bottom: 7px;
+  }
+
+  .function-viewer .preview-question > .managed-input,
+  .function-viewer .preview-question > input,
+  .function-viewer .preview-question > select,
+  .function-viewer .preview-question > textarea {
+    width: 100%;
+  }
+
+  @container (max-width: 720px) {
+    .function-viewer-body {
+      grid-template-columns: 1fr;
+    }
+
+    .function-viewer-body > .function-form-navigation,
+    .function-viewer-content,
+    .function-viewer:not(.has-function-navigation) .function-viewer-content {
+      grid-column: 1;
+    }
+
+    .function-viewer .observation-entry {
+      grid-template-columns: 1fr;
+    }
+
+    .function-viewer .observation-entry .button {
+      justify-self: start;
+    }
+  }
+
+@media (max-width: 580px) {
   .brandline {
     margin-bottom: 45px;
   }
@@ -3405,4 +3586,214 @@ summary {
     flex-wrap: wrap;
   }
 
+}
+
+/* Function viewer layout is intentionally independent of the viewport. */
+.function-viewer {
+  --viewer-card-padding: 24px;
+  --viewer-section-gap: 18px;
+  --viewer-question-padding: 20px;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.function-viewer[hidden],
+.function-viewer [hidden] {
+  display: none;
+}
+
+.function-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  margin-bottom: var(--viewer-section-gap);
+}
+
+.function-viewer-body {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.function-viewer-body > .function-form-navigation,
+.function-viewer-content {
+  width: 100%;
+  min-width: 0;
+}
+
+.function-viewer-body > .function-form-navigation {
+  margin: 0 0 var(--viewer-section-gap);
+  padding-bottom: var(--viewer-section-gap);
+  border-bottom: 1px solid var(--line);
+}
+
+.function-viewer .managed-form-list {
+  width: 100%;
+}
+
+.function-viewer .form-navigation-item {
+  width: 100%;
+  min-height: 44px;
+  white-space: normal;
+}
+
+.function-viewer .function-form {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.function-viewer .function-form > h2,
+.function-viewer .preview-form > h3 {
+  margin: 0 0 var(--viewer-section-gap);
+}
+
+.function-viewer .function-form > .dynamic-field,
+.function-viewer .preview-question {
+  width: 100%;
+  min-width: 0;
+  padding: var(--viewer-question-padding) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.function-viewer .function-form > .dynamic-field:first-child,
+.function-viewer .preview-question:first-child {
+  padding-top: 0;
+}
+
+.function-viewer .function-form > .dynamic-field:last-child,
+.function-viewer .preview-question:last-child {
+  border-bottom: 0;
+}
+
+.function-viewer .dynamic-field > label,
+.function-viewer .preview-label {
+  display: block;
+  margin-bottom: 7px;
+}
+
+.function-viewer .dynamic-field input,
+.function-viewer .dynamic-field textarea,
+.function-viewer .dynamic-field select,
+.function-viewer .preview-question > input,
+.function-viewer .preview-question > select,
+.function-viewer .preview-question > textarea,
+.function-viewer .preview-question > .managed-input {
+  width: 100%;
+  max-width: none;
+}
+
+.function-viewer .function-information {
+  margin: 0;
+}
+
+.function-viewer .function-information img,
+.function-viewer .preview-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.function-viewer .function-information figcaption {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.function-viewer .observation-entry {
+  grid-template-columns: repeat(3, minmax(12rem, 1fr));
+  align-items: start;
+}
+
+.function-viewer .observation-entry .button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.function-viewer .function-form-navigation {
+  max-width: none;
+}
+
+.function-viewer [hidden] {
+  display: none;
+}
+
+.function-viewer .function-display-field > p:first-child {
+  margin: 0 0 var(--viewer-section-gap);
+}
+
+.function-viewer .function-display-field .function-information p {
+  margin: 0;
+}
+
+.function-viewer .function-observation {
+  display: grid;
+  gap: var(--viewer-section-gap);
+}
+
+.function-viewer .function-observation .observation-list {
+  margin: 0;
+}
+
+.function-preview [data-preview-content] {
+  display: block;
+  width: 100%;
+}
+
+.function-preview [data-preview-content] > .function-viewer {
+  width: 100%;
+}
+
+.function-viewer .preview-form {
+  display: block;
+  width: 100%;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.function-viewer .preview-question {
+  display: grid;
+  justify-items: stretch;
+  gap: 7px;
+}
+
+.function-viewer .preview-matrix {
+  min-width: 420px;
+}
+
+.base-dossier-functions {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.base-dossier-functions > .function-selection {
+  margin-bottom: var(--viewer-section-gap);
+}
+
+@container (min-width: 860px) {
+  .base-dossier-functions {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    align-items: start;
+    gap: 24px;
+  }
+
+  .base-dossier-functions > .function-selection {
+    grid-column: 1;
+    margin: 0;
+  }
+
+  .base-dossier-functions > .function-viewers {
+    grid-column: 2;
+  }
+}
+
+@container (max-width: 720px) {
+  .function-viewer .observation-entry {
+    grid-template-columns: 1fr;
+  }
 }

@@ -1,73 +1,81 @@
 {% for function in function_forms %}
-  <article class="function-snapshot-card {% if function.forms|length > 1 %}has-function-navigation{% endif %}">
+  <article class="function-viewer {% if function.forms|length > 1 %}has-function-navigation{% endif %}" data-function-viewer data-function-panel="{{ function.id }}" {% if function.active is False %}hidden{% endif %}>
     {% if not student_dossier %}
-      <div class="work-title">
+      <header class="function-viewer-header">
         <div>
           <p class="eyebrow">{{ function.kind }}</p>
           <h3 id="function-heading-{{ function.id }}">{{ function.title }}</h3>
         </div>
-      </div>
+      </header>
     {% endif %}
-    {% if function.forms|length > 1 %}
-      <nav class="function-form-navigation" aria-label="Formulieren">
-        <p class="eyebrow">Formulieren</p>
-        {% for form in function.forms %}<button type="button" class="form-navigation-item {% if form.active %}is-active{% endif %}" data-function-form-nav="{{ form.key }}" aria-pressed="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button>{% endfor %}
-      </nav>
-    {% endif %}
-    {% for form in function.forms %}
-      <section class="function-form" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-function-form="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
-        {% if form.show_title %}<h2 id="form-heading-{{ form.key }}">{{ form.title|default:"Naamloos formulier" }}</h2>{% endif %}
-        {% for field in form.fields %}
-          {% if field.type == 'long_text' %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <textarea id="function_{{ field.key }}" name="function_{{ field.key }}" rows="5" class="js-tinymce" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
-            </div>
-          {% elif field.type == 'matrix' and field.matrix_payload %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              {% include 'dossier/_matrix.html' with locked=locked %}
-            </div>
-          {% elif field.type == 'select' %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <select id="function_{{ field.key }}" name="function_{{ field.key }}" {% if locked %}disabled{% endif %}>
-                <option value="">Maak een keuze</option>
-                {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
-              </select>
-            </div>
-          {% elif field.type == 'observation' %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label>{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              {% include 'dossier/_observation_field.html' with function_observation=True locked=locked %}
-            </div>
-          {% elif field.type == 'file' %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="file" {% if locked %}disabled{% endif %}>
-              {% if field.value %}<small>{{ field.value }}</small>{% endif %}
-            </div>
-          {% elif field.type == 'unknown' %}
-            <p class="empty-state">Deze vraag kan niet worden weergegeven.</p>
-          {% elif field.type == 'image' %}
-            <figure class="function-information">{% if field.image %}<img src="{{ field.image }}" alt="{{ field.caption }}">{% endif %}{% if field.caption %}<figcaption>{{ field.caption }}</figcaption>{% endif %}</figure>
-          {% elif field.type == 'info' %}
-            <div class="function-information">{{ field.explanation|linebreaks }}</div>
-          {% elif field.type == 'link' %}
-            <p class="function-information"><a class="primary button" href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p>
-          {% else %}
-            <div class="dynamic-field {% if field.required %}required{% endif %}">
-              <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
-              <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="{{ field.type }}" value="{{ field.value }}" {% if field.unit %}aria-describedby="unit_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
-              {% if field.unit %}<small id="unit_{{ field.key }}">{{ field.unit }}</small>{% endif %}
-            </div>
-          {% endif %}
+    <div class="function-viewer-body">
+      {% if function.forms|length > 1 %}
+        <nav class="function-form-navigation" aria-label="Formulieren">
+          <p class="eyebrow">Formulieren</p>
+          <ul class="managed-form-list">
+            {% for form in function.forms %}
+              <li><button type="button" class="form-navigation-item" data-viewer-nav="{{ form.key }}" aria-current="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button></li>
+            {% endfor %}
+          </ul>
+        </nav>
+      {% endif %}
+      <div class="function-viewer-content">
+        {% for form in function.forms %}
+          <section class="function-form" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-viewer-panel="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+            {% if form.show_title %}<h2 id="form-heading-{{ form.key }}">{{ form.title|default:"Naamloos formulier" }}</h2>{% endif %}
+            {% for field in form.fields %}
+              {% if field.type == 'long_text' %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  <textarea id="function_{{ field.key }}" name="function_{{ field.key }}" rows="5" class="js-tinymce" {% if locked %}disabled{% endif %}>{{ field.value }}</textarea>
+                </div>
+              {% elif field.type == 'matrix' and field.matrix_payload %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label>{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  {% include 'dossier/_matrix.html' with locked=locked %}
+                </div>
+              {% elif field.type == 'select' %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  <select id="function_{{ field.key }}" name="function_{{ field.key }}" {% if locked %}disabled{% endif %}>
+                    <option value="">Maak een keuze</option>
+                    {% for option in field.options %}<option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>{% endfor %}
+                  </select>
+                </div>
+              {% elif field.type == 'observation' %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label>{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  {% include 'dossier/_observation_field.html' with function_observation=True locked=locked %}
+                </div>
+              {% elif field.type == 'file' %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="file" {% if locked %}disabled{% endif %}>
+                  {% if field.value %}<a class="dossier-link" href="{{ field.value }}" target="_blank" rel="noopener">{{ field.filename|default:"Bestand openen" }}</a>{% endif %}
+                </div>
+              {% elif field.type == 'unknown' %}
+                <p class="empty-state">Deze vraag kan niet worden weergegeven.</p>
+              {% elif field.type == 'image' %}
+                <div class="dynamic-field function-display-field"><figure class="function-information">{% if field.image %}<img src="{{ field.image }}" alt="{{ field.caption }}">{% endif %}{% if field.caption %}<figcaption>{{ field.caption }}</figcaption>{% endif %}</figure></div>
+              {% elif field.type == 'info' %}
+                <div class="dynamic-field function-display-field"><div class="function-information">{{ field.explanation|linebreaks }}</div></div>
+              {% elif field.type == 'link' %}
+                <div class="dynamic-field function-display-field">{% if field.label %}<p>{{ field.label }}</p>{% endif %}<p class="function-information"><a class="primary button" href="{{ field.url }}" target="_blank" rel="noopener">{{ field.button_text|default:field.label }}</a></p></div>
+              {% else %}
+                <div class="dynamic-field {% if field.required %}required{% endif %}">
+                  <label for="function_{{ field.key }}">{{ field.label }}{% if field.required %}<span class="required-marker" aria-hidden="true"> *</span><span class="visually-hidden"> verplicht</span>{% endif %}</label>
+                  <input id="function_{{ field.key }}" name="function_{{ field.key }}" type="{{ field.type }}" value="{{ field.value }}" {% if field.unit %}aria-describedby="unit_{{ field.key }}"{% endif %} {% if locked %}disabled{% endif %}>
+                  {% if field.unit %}<small id="unit_{{ field.key }}">{{ field.unit }}</small>{% endif %}
+                </div>
+              {% endif %}
+            {% empty %}
+              <p class="empty-state">Dit formulier bevat geen vragen.</p>
+            {% endfor %}
+          </section>
         {% empty %}
-          <p class="empty-state">Dit formulier bevat geen vragen.</p>
+          <p class="empty-state">Deze functie bevat geen formulieren.</p>
         {% endfor %}
-      </section>
-    {% empty %}
-      <p class="empty-state">Deze functie bevat geen formulieren.</p>
-    {% endfor %}
+      </div>
+    </div>
   </article>
 {% endfor %}

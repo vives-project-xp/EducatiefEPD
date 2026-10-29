@@ -436,6 +436,17 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     fields.append({"key": key, "type": "unknown", "label": question.get("question", "")})
                     continue
                 value = function_data.get(key, {} if mapped_type == "matrix" else "")
+                if mapped_type == "observation" and isinstance(value, list):
+                    value = [
+                        {
+                            **observation,
+                            "timestamp": format_observation_timestamp(
+                                observation.get("timestamp")
+                            ),
+                        }
+                        for observation in value
+                        if isinstance(observation, dict)
+                    ]
                 item = {
                     "key": key,
                     "label": question.get("question", ""),
@@ -453,6 +464,9 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     "explanation": question.get("explanation", ""),
                     "pending_observation": {},
                 }
+                if mapped_type == "file" and value:
+                    filename = str(value).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    item["filename"] = re.sub(r"^[0-9a-f]{32}_", "", filename)
                 if mapped_type == "matrix":
                     try:
                         definition = question.get("matrixDefinition") or legacy_definition(
@@ -486,6 +500,11 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
             "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
             "kind_code": snapshot.kind,
             "forms": forms,
+            "answerable": any(
+                field["type"] not in {"image", "link", "info", "unknown"}
+                for form in forms
+                for field in form["fields"]
+            ),
         })
     if selected_function_id is not None:
         prepared = [item for item in prepared if item["id"] == selected_function_id]
@@ -498,6 +517,16 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
         for form in function["forms"]:
             form["show_title"] = multiple_forms or form["title"] != function["title"]
     return prepared
+
+
+def format_observation_timestamp(value):
+    if not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return parsed.strftime("%d/%m/%Y %H:%M")
 
 
 def parsed_function_data(request, snapshots, current_data):
@@ -1193,6 +1222,18 @@ def teacher_module(request, case_id, module_id):
                 messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
         if not form_result.errors and not missing:
             return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
+    function_snapshots = module.function_snapshots.all()
+    function_id = request.POST.get("function") or request.GET.get("function")
+    try:
+        selected_function_id = int(function_id) if function_id else None
+    except (TypeError, ValueError):
+        selected_function_id = None
+    available_function_ids = [snapshot.id for snapshot in function_snapshots]
+    if selected_function_id not in available_function_ids:
+        selected_function_id = available_function_ids[0] if available_function_ids else None
+    function_forms = prepare_function_forms(function_snapshots, module.base_data)
+    for function in function_forms:
+        function["active"] = function["id"] == selected_function_id
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
         "fields": prepare_schema_fields(
@@ -1200,9 +1241,8 @@ def teacher_module(request, case_id, module_id):
             errors=form_result.errors if form_result else None,
             pending_observations=form_result.pending_observations if form_result else None,
         ),
-        "function_forms": prepare_function_forms(
-            module.function_snapshots.all(), module.base_data
-        ),
+        "function_forms": function_forms,
+        "selected_function_id": selected_function_id,
     })
 
 

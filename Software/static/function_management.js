@@ -679,33 +679,34 @@
 
     function renderPreview(snapshot) {
       previewContent.replaceChildren();
-      previewContent.append(node("h2", "", snapshot.title));
       const forms = snapshot.forms || [];
       let activeIndex = 0;
       const sections = [];
+      const viewer = node("div", "function-viewer");
+      viewer.dataset.functionViewer = "";
+      const content = node("div", "function-viewer-content");
+      viewer.append(content);
+      previewContent.append(viewer);
       if (forms.length > 1) {
+        viewer.classList.add("has-function-navigation");
         const navigation = node("nav", "function-form-navigation", "Formulieren");
         navigation.setAttribute("aria-label", "Formulieren");
-        const list = node("div", "preview-form-list");
+        const list = node("ul", "managed-form-list");
         forms.forEach((form, index) => {
-          const button = node("button", `form-navigation-item${index === 0 ? " is-active" : ""}`, form.title || "Naamloos formulier");
+          const item = node("li");
+          const button = node("button", "form-navigation-item", form.title || "Naamloos formulier");
           button.type = "button";
-          button.setAttribute("aria-pressed", String(index === 0));
-          button.addEventListener("click", () => {
-            activeIndex = index;
-            sections.forEach((section, sectionIndex) => { section.hidden = sectionIndex !== activeIndex; });
-            list.querySelectorAll("button").forEach((item, itemIndex) => {
-              item.classList.toggle("is-active", itemIndex === activeIndex);
-              item.setAttribute("aria-pressed", String(itemIndex === activeIndex));
-            });
-          });
-          list.append(button);
+          button.dataset.viewerNav = `preview-${index}`;
+          button.setAttribute("aria-current", String(index === 0));
+          item.append(button);
+          list.append(item);
         });
         navigation.append(list);
-        previewContent.append(navigation);
+        viewer.insertBefore(navigation, content);
       }
       forms.forEach((form, formIndex) => {
         const section = node("section", "preview-form");
+        section.dataset.viewerPanel = `preview-${formIndex}`;
         section.hidden = formIndex !== activeIndex;
         if (!standalone) section.append(node("h3", "", form.title));
         form.questions.forEach((question) => {
@@ -731,16 +732,23 @@
               questionWrap.append(link);
             }
           } else {
-            questionWrap.append(node("label", "preview-label", question.question || "Vraag"));
+            const label = node("label", "preview-label", question.question || "Vraag");
+            if (question.required) {
+              label.append(node("span", "required-marker", " *"));
+              label.lastChild.setAttribute("aria-hidden", "true");
+              label.append(node("span", "visually-hidden", " verplicht"));
+            }
+            questionWrap.append(label);
             const control = previewControl(question);
             questionWrap.append(control);
             if (question.unit) questionWrap.append(node("span", "preview-unit", question.unit));
           }
           section.append(questionWrap);
         });
-        previewContent.append(section);
+        content.append(section);
         sections.push(section);
       });
+      document.dispatchEvent(new CustomEvent("function-viewer:initialize"));
     }
 
     function safeHttpUrl(value) {
@@ -751,14 +759,11 @@
     function previewControl(question) {
       const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", imageUpload: "file", fileUpload: "file" };
       if (question.fieldType === "multipleChoice") {
-        const group = node("fieldset", "preview-options");
-        const groupName = `answer-${question.id ?? "new"}-${Math.random()}`;
-        question.options.forEach((answer, index) => {
-          const label = node("label");
-          const radio = node("input"); radio.type = "radio"; radio.name = groupName; radio.value = answer;
-          label.append(radio, node("span", "", answer)); group.append(label);
-        });
-        return group;
+        const select = node("select", "managed-input");
+        select.disabled = true;
+        select.append(node("option", "", "Maak een keuze"));
+        question.options.forEach((answer) => select.append(node("option", "", answer)));
+        return select;
       }
       if (question.fieldType === "matrix") {
         const scroll = node("div", "matrix-scroll");
@@ -770,34 +775,42 @@
         question.rows.forEach((rowTitle) => {
           const row = node("tr"); row.append(node("th", "", rowTitle));
           question.columns.forEach((column, index) => {
-            const cell = node("td"); const input = node("input"); input.type = "text"; input.setAttribute("aria-label", `${rowTitle || "Rij"}, ${column || `kolom ${index + 1}`}`); cell.append(input); row.append(cell);
+            const cell = node("td"); const input = node("input"); input.type = "text"; input.disabled = true; input.setAttribute("aria-label", `${rowTitle || "Rij"}, ${column || `kolom ${index + 1}`}`); cell.append(input); row.append(cell);
           });
           body.append(row);
         });
         table.append(body); scroll.append(table); return scroll;
       }
       if (question.fieldType === "observation") {
-        const group = node("div", "observation-entry");
+        const group = node("div", "function-observation");
         const list = node("div", "observation-list");
         list.append(node("p", "muted", "Nog geen observaties."));
         group.append(list);
+        const entry = node("div", "observation-entry");
         const timestamp = node("input", "managed-input");
         timestamp.type = "datetime-local";
         timestamp.setAttribute("aria-label", "Observaties: tijdstip");
-        group.append(timestamp);
+        entry.append(timestamp);
         const value = node("input", "managed-input");
         value.placeholder = "Waarde of observatie";
         value.setAttribute("aria-label", "Observaties: waarde of observatie");
-        group.append(value);
+        entry.append(value);
         const note = node("input", "managed-input");
         note.placeholder = "Toelichting";
         note.setAttribute("aria-label", "Observaties: toelichting");
-        group.append(note);
-        group.append(node("button", "outline button", "Observatie en wijzigingen bewaren"));
+        entry.append(note);
+        const save = node("button", "outline button", "Observatie en wijzigingen bewaren");
+        save.type = "button";
+        save.disabled = true;
+        entry.append(save);
+        group.append(entry);
         return group;
       }
-      const input = node("input", "managed-input");
-      input.type = typeMap[question.fieldType] || "text";
+      const input = node(question.fieldType === "text" ? "textarea" : "input", "managed-input");
+      if (question.fieldType !== "text") input.type = typeMap[question.fieldType] || "text";
+      if (question.fieldType === "text") input.rows = 5;
+      input.classList.add("js-tinymce");
+      input.disabled = true;
       input.required = Boolean(question.required);
       return input;
     }
