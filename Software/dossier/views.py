@@ -417,7 +417,7 @@ def teacher_dashboard(request):
 @transaction.atomic
 def teacher_case_create(request):
     require_teacher(request.user)
-    patient_form = PatientForm(request.POST or None, prefix="patient")
+    patient_form = PatientForm(request.POST or None, request.FILES or None, prefix="patient")
     case_form = CaseForm(request.POST or None, prefix="case")
     if not is_admin(request.user):
         case_form.fields["education"].queryset = Education.objects.filter(
@@ -444,7 +444,7 @@ def teacher_case_create(request):
 def teacher_case_edit(request, case_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
-    patient_form = PatientForm(request.POST or None, instance=case.patient, prefix="patient")
+    patient_form = PatientForm(request.POST or None, request.FILES or None, instance=case.patient, prefix="patient")
     case_form = CaseForm(request.POST or None, instance=case, prefix="case")
     case_form.fields["education"].disabled = True
     if not is_admin(request.user):

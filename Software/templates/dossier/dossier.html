@@ -4,9 +4,23 @@
 <div class="app">
   <aside class="sidebar">
     <div class="person">
-      <strong>{{ student_case.patient_name }}</strong>{% if student_case.patient_image %}<img src="{{ student_case.patient_image }}" alt="">{% endif %}</div>
-      <form class="search" method="get"><span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies"></form>
-      <nav>{% for module in modules %}<a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}"><span>{{ module.title }}</span><b>›</b></a>{% empty %}<p class="empty">Geen functies gevonden.</p>{% endfor %}</nav>
+      <strong>{{ student_case.patient_name }}</strong>
+      {% if student_case.patient_image %}
+        <img src="{{ student_case.patient_image }}" alt="">
+      {% endif %}
+    </div>
+    <form class="search" method="get">
+      <span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies">
+    </form>
+    <nav>
+      {% for module in modules %}
+        <a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}">
+          <span>{{ module.title }}</span><b>›</b>
+        </a>
+      {% empty %}
+        <p class="empty">Geen functies gevonden.</p>
+      {% endfor %}
+      </nav>
     </aside>
   <main class="main">
     <header class="top">

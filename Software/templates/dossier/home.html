@@ -46,7 +46,7 @@
           <p>{{ case.student_instance.patient_context }}</p>
         {% else %}
           {% if case.patient.image %}
-            <img src="{{ case.patient.image }}" alt="Fictieve patiënt {{ case.patient.name }}">
+            <img src="{{ case.patient.image.url }}" alt="Fictieve patiënt {{ case.patient.name }}">
           {% endif %}
           <p>{{ case.patient.context }}</p>
         {% endif %}

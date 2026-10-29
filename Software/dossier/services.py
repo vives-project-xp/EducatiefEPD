@@ -75,7 +75,7 @@ def start_student_case(case, student):
         student_case.learning_objectives = case.learning_objectives
         student_case.patient_name = case.patient.name
         student_case.patient_reference = case.patient.reference
-        student_case.patient_image = case.patient.image
+        student_case.patient_image = case.patient.image.url if case.patient.image else ""
         student_case.patient_context = case.patient.context
         student_case.save()
 
@@ -145,7 +145,7 @@ def copy_library_dossier_to_case(dossier, case):
     ]
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
-                "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote"}
+                "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}}, url_schemes={"http", "https", "mailto"})
+    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})

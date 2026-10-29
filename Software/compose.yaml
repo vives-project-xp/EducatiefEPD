@@ -28,10 +28,13 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "8001:8001"
+    volumes:
+      - ${MEDIA_HOST_DIR:-./uploads}:/app/uploads
     environment:
       DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env}
+      MEDIA_ROOT: /app/uploads
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-1}
       MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}

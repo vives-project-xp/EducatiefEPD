@@ -1,3 +1,5 @@
+import uuid
+from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -70,6 +72,9 @@ class TeachingGroup(models.Model):
     def __str__(self):
         return f"{self.education}: {self.name}"
 
+def patient_image_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    return f"images/{uuid.uuid4().hex}{extension}"
 
 class Patient(models.Model):
     class Gender(models.TextChoices):
@@ -84,7 +89,7 @@ class Patient(models.Model):
     gender = models.CharField(
         max_length=20, choices=Gender.choices, default=Gender.UNKNOWN, blank=True
     )
-    image = models.CharField(max_length=240, blank=True)
+    image = models.ImageField(upload_to=patient_image_path, blank=True)
     context = models.CharField(max_length=280, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -105,6 +110,10 @@ class Patient(models.Model):
     def save(self, *args, **kwargs):
         self.updated_at = timezone.now()
         super().save(*args, **kwargs)
+
+    @property
+    def image_url(self):
+        return self.image_upload.url if self.image_upload else self.image
 
 
 class Case(models.Model):
@@ -307,7 +316,7 @@ class ManagedQuestion(models.Model):
     rows = models.JSONField(default=list, blank=True)
     url = models.URLField(max_length=1000, blank=True)
     button_text = models.CharField(max_length=180, blank=True)
-    image = models.TextField(blank=True)
+    image = models.ImageField(blank=True)
     caption = models.CharField(max_length=280, blank=True)
     explanation = models.TextField(blank=True)
 

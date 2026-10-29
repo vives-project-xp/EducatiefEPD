@@ -9,7 +9,7 @@
     </div>
     <a class="back" href="{% if case %}{% url 'dossier:teacher_case' case.id %}{% else %}{% url 'dossier:teacher_dashboard' %}{% endif %}">← Annuleren</a>
   </header>
-  <form method="post" class="editor-form">
+  <form method="post" class="editor-form" enctype="multipart/form-data">
     {% csrf_token %}
     <section>
       <h2>Patiëntgegevens</h2>
