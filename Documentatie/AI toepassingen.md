@@ -114,7 +114,7 @@ Bestanden hieronder met **nieuw** zijn voorstellen en bestaan nog niet. Voeg nie
 2. Implementeer passagezoeking, eventueel eerst eenvoudige tekstzoeking, in `Software/dossier/ai/retrieval.py` en `Software/dossier/ai/library_search.py`.
 3. Geef uitsluitend gevonden passages mee via `Software/dossier/ai/library_search.py`, definieer bronverwijzingen in `Software/dossier/ai/prompts.py` en valideer ze in `Software/dossier/ai/schemas.py`; geef geen antwoord zonder bron.
 4. Voeg de vraagview toe aan `Software/dossier/views.py`, registreer de route in `Software/dossier/urls.py` en maak het vraag-/antwoordscherm in `Software/templates/dossier/library_assistant.html`, eventueel bereikbaar vanuit `Software/templates/dossier/library_list.html`.
-5. Test archivering, toegangsrechten en bronverwijzingen in `Software/dossier/tests.py` en `Software/dossier/ai/retrieval.py`.
+5. Test archivering, toegangsrechten en bronverwijzingen in `Software/dossier/tests.py` en `Software/dossier/ai/retrieval.py`. 
 
 ## 10. Vervolgstappen bij een oefencasus verkennen
 
