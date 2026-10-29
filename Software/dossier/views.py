@@ -465,7 +465,6 @@ def teacher_case_edit(request, case_id):
 def teacher_case(request, case_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
-    students = list(case.student_cases.select_related("student").all())
     groups = TeachingGroup.objects.filter(education=case.education)
     if not is_admin(request.user):
         groups = groups.filter(teacher=request.user)
@@ -473,6 +472,11 @@ def teacher_case(request, case_id):
     groups = list(groups)
     for group in groups:
         group.assigned = group.id in selected_group_ids
+    students = list(
+        case.student_cases.select_related("student")
+        .filter(student__epd_teaching_groups__id__in=[g.id for g in groups if g.assigned])
+        .distinct()
+    )
     templates = LibraryTemplate.objects.filter(
         Q(education=case.education) | Q(education__isnull=True),
         status=LibraryTemplate.Status.ACTIVE,
