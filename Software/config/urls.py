@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.conf import settings
 from django.urls import include, path
+from django.views.static import serve
 from dossier import views as dossier_views
 
 urlpatterns = [
@@ -10,6 +11,7 @@ urlpatterns = [
     path("accounts/noodlogin/", dossier_views.emergency_login, name="emergency_login"),
     path("", include("dossier.urls")),
     path("tinymce/", include("tinymce.urls")),
+    path("uploads/<path:path>", serve, {"document_root": settings.MEDIA_ROOT}),
 ]
 
 if settings.OIDC_ENABLED:
