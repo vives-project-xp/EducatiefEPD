@@ -954,7 +954,7 @@ def library_list(request):
         "education_id", "education__name"
     ).distinct()
     if dossier_query:
-        dossiers = dossiers.filter(title__istartswith=dossier_query)
+        dossiers = dossiers.filter(title__icontains=dossier_query)
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)
