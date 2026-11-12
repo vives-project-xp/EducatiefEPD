@@ -1,9 +1,5 @@
 # Automatische webupdates: de VM haalt releases op
 
-De VM is bereikbaar als `student@10.20.10.36`. Dat is een privéadres; een publieke
-SSH-ingang is niet vastgesteld. Daarom haalt de VM zelf releases op bij GHCR.
-Deze handleiding vervangt de eerdere SSH-deploymentprocedure.
-
 Bij een push op `main` doet `.github/workflows/tests.yml` het volgende:
 
 1. Bestaande Django/MySQL-tests, JavaScript-controles en deployregressies uitvoeren.
