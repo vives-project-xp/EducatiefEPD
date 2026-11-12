@@ -40,6 +40,7 @@
     document.querySelectorAll("[data-function-nav]").forEach((button) => {
       if (button.dataset.viewerInitialized === "true") return;
       const container = button.closest(".base-dossier-functions");
+      if (!container) return;
       const select = (id, focus = false) => {
         const selected = [...container.querySelectorAll("[data-function-nav]")].find((item) => item.dataset.functionNav === id);
         if (!selected) return;

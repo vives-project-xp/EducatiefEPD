@@ -195,9 +195,9 @@
     formList?.addEventListener("drop", formDrop);
 
     const currentForm = () => state.forms.find((form) => form.id === selectedFormId) || null;
-    const isDirty = () => dirty;
+    const isDirty = () => dirty && JSON.stringify(state) !== JSON.stringify(saved);
     function setDirty() {
-      dirty = true;
+      dirty = JSON.stringify(state) !== JSON.stringify(saved);
       saveButton.disabled = locked || !dirty;
     }
     async function discardIfNeeded() {
@@ -312,7 +312,7 @@
         addTextField(body, "Link (https://…)", question.url, (value) => { question.url = value; change(); }, { type: "url" });
         addTextField(body, "Knoptekst", question.buttonText, (value) => { question.buttonText = value; change(); });
       } else if (question.fieldType === "image") {
-        const wrapper = node("label", "managed-field field-wide");
+        const wrapper = node("label", "managed-field field-wide image-question-field");
         wrapper.append(node("span", "managed-label", "Afbeelding"));
         const input = node("input", "managed-input image-picker");
         input.type = "file";
@@ -671,6 +671,7 @@
       const button = event.currentTarget;
       const showPreview = button.getAttribute("aria-pressed") !== "true";
       button.setAttribute("aria-pressed", String(showPreview));
+      button.querySelector("span").textContent = showPreview ? "Terug naar ontwerp" : "Voorbeeld";
       editorPanel.hidden = showPreview;
       root.querySelector("[data-editor-layout]").hidden = showPreview;
       previewPanel.hidden = !showPreview;
@@ -684,12 +685,15 @@
       const sections = [];
       const viewer = node("div", "function-viewer");
       viewer.dataset.functionViewer = "";
+      const body = node("div", "function-viewer-body");
       const content = node("div", "function-viewer-content");
-      viewer.append(content);
+      body.append(content);
+      viewer.append(body);
       previewContent.append(viewer);
       if (forms.length > 1) {
         viewer.classList.add("has-function-navigation");
-        const navigation = node("nav", "function-form-navigation", "Formulieren");
+        const navigation = node("nav", "selection-list function-form-navigation", "Formulieren");
+        navigation.dataset.selectionList = "";
         navigation.setAttribute("aria-label", "Formulieren");
         const list = node("ul", "managed-form-list");
         forms.forEach((form, index) => {
@@ -702,7 +706,7 @@
           list.append(item);
         });
         navigation.append(list);
-        viewer.insertBefore(navigation, content);
+        body.insertBefore(navigation, content);
       }
       forms.forEach((form, formIndex) => {
         const section = node("section", "preview-form");
@@ -766,20 +770,25 @@
         return select;
       }
       if (question.fieldType === "matrix") {
-        const scroll = node("div", "matrix-scroll");
-        const table = node("table", "preview-matrix");
-        const head = node("tr"); head.append(node("th", "", ""));
-        question.columns.forEach((column) => head.append(node("th", "", column)));
-        const thead = node("thead"); thead.append(head); table.append(thead);
-        const body = node("tbody");
-        question.rows.forEach((rowTitle) => {
-          const row = node("tr"); row.append(node("th", "", rowTitle));
-          question.columns.forEach((column, index) => {
-            const cell = node("td"); const input = node("input"); input.type = "text"; input.disabled = true; input.setAttribute("aria-label", `${rowTitle || "Rij"}, ${column || `kolom ${index + 1}`}`); cell.append(input); row.append(cell);
-          });
-          body.append(row);
-        });
-        table.append(body); scroll.append(table); return scroll;
+        const matrix = node("div", "matrix-wrap");
+        matrix.dataset.matrix = "";
+        matrix.dataset.readonly = "true";
+        const payload = {
+          definition: question.matrixDefinition || {
+            version: 2,
+            rows: (question.rows || []).map((label, index) => ({ id: `row-${index}`, label })),
+            columns: (question.columns || []).map((label, index) => ({ id: `column-${index}`, label })),
+            cells: {},
+          },
+          values: { version: 2, cells: {} },
+          label: question.question || "Matrix",
+        };
+        const script = document.createElement("script");
+        script.type = "application/json";
+        script.textContent = JSON.stringify(payload);
+        matrix.append(script);
+        queueMicrotask(() => document.dispatchEvent(new CustomEvent("function-matrix-preview", { detail: matrix })));
+        return matrix;
       }
       if (question.fieldType === "observation") {
         const group = node("div", "function-observation");
@@ -822,7 +831,7 @@
       if (await discardIfNeeded()) window.location.assign(destination);
     });
     window.addEventListener("beforeunload", (event) => {
-      if (!dirty) return;
+      if (!isDirty()) return;
       event.preventDefault();
       event.returnValue = "";
     });

@@ -432,3 +432,15 @@ document.addEventListener('function-matrix-designer', event => {
         input,
     });
 });
+
+document.addEventListener('function-matrix-preview', event => {
+    const root = event.detail;
+    if (!root || root.dataset.matrixInitialized === 'true') return;
+    try {
+        const payload = JSON.parse(root.querySelector('script[type="application/json"]').textContent);
+        initializeMatrix(root, payload, {readonly: true});
+        root.dataset.matrixInitialized = 'true';
+    } catch (error) {
+        root.append(el('p', 'De matrixeditor kon niet worden geladen. De opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'}));
+    }
+});

@@ -10,14 +10,7 @@
     {% endif %}
     <div class="function-viewer-body">
       {% if function.forms|length > 1 %}
-        <nav class="function-form-navigation" aria-label="Formulieren">
-          <p class="eyebrow">Formulieren</p>
-          <ul class="managed-form-list">
-            {% for form in function.forms %}
-              <li><button type="button" class="form-navigation-item" data-viewer-nav="{{ form.key }}" aria-current="{% if form.active %}true{% else %}false{% endif %}">{{ form.title|default:"Naamloos formulier" }}</button></li>
-            {% endfor %}
-          </ul>
-        </nav>
+        {% include 'dossier/_selection_list.html' with selection_type='forms' selection_items=function.forms %}
       {% endif %}
       <div class="function-viewer-content">
         {% for form in function.forms %}
