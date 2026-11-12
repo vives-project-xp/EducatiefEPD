@@ -37,6 +37,28 @@
 
   function initializeAll() {
     document.querySelectorAll("[data-function-viewer]").forEach(initializeViewer);
+    document.querySelectorAll("[data-function-form-nav]").forEach((button) => {
+      const container = button.closest(".base-dossier-functions");
+      if (!container) return;
+      button.addEventListener("click", () => {
+        const functionButton = container.querySelector(`[data-function-nav="${button.dataset.functionId}"]`);
+        functionButton?.click();
+        const viewer = container.querySelector(`[data-function-panel="${button.dataset.functionId}"]`);
+        const formButton = viewer?.querySelector(`[data-viewer-nav="${button.dataset.functionFormNav}"]`);
+        if (formButton) {
+          formButton.click();
+        } else if (viewer) {
+          viewer.querySelectorAll("[data-viewer-panel]").forEach((panel) => {
+            panel.hidden = panel.dataset.viewerPanel !== button.dataset.functionFormNav;
+          });
+          const formInput = container.closest("form")?.querySelector('[name="form"]');
+          if (formInput) formInput.value = button.dataset.functionFormNav;
+        }
+        container.querySelectorAll("[data-function-form-nav]").forEach((item) => {
+          item.setAttribute("aria-current", String(item === button));
+        });
+      });
+    });
     document.querySelectorAll("[data-function-nav]").forEach((button) => {
       if (button.dataset.viewerInitialized === "true") return;
       const container = button.closest(".base-dossier-functions");
@@ -49,6 +71,9 @@
           item.setAttribute("aria-current", String(active));
           item.tabIndex = active ? 0 : -1;
           if (active && focus) item.focus();
+        });
+        container.querySelectorAll(".function-tree-item details").forEach((details) => {
+          details.open = details.contains(selected);
         });
         container.querySelectorAll("[data-function-panel]").forEach((panel) => {
           panel.hidden = panel.dataset.functionPanel !== selected.dataset.functionNav;

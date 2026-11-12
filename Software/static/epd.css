@@ -832,6 +832,31 @@ body {
   opacity: 1;
 }
 
+.function-tree-item details {
+  margin: 0;
+}
+
+.function-tree-item summary {
+  list-style: none;
+}
+
+.function-tree-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.function-tree-forms {
+  margin: 0 0 6px 12px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid currentColor;
+  list-style: none;
+  opacity: .82;
+}
+
+.function-tree-forms .form-navigation-item {
+  font-size: .9rem;
+  font-weight: 400;
+}
+
 .nav-item span,
 .nav-subitem span {
   min-width: 0;
@@ -3118,6 +3143,55 @@ summary {
 .library-structure-form {
   overflow-wrap: anywhere;
   padding-left: 16px;
+}
+
+.library-structure-item > details > summary,
+.library-structure-function > summary {
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+}
+
+.library-structure-item > details > summary:hover,
+.library-structure-function > summary:hover {
+  background: var(--surface-hover);
+}
+
+.library-structure-function {
+  margin: 6px 0 0 16px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.library-structure-forms {
+  display: grid;
+  gap: 3px;
+  margin: 4px 0 4px 16px;
+}
+
+.function-pagination-toolbar,
+.function-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: .9rem;
+}
+
+.function-pagination-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.function-pagination-toolbar select {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 7px 25px 7px 8px;
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .library-module-hierarchy {

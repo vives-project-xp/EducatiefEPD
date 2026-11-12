@@ -34,6 +34,7 @@ from .services import (
     build_sidebar_structure, copy_template_to_case, create_case_structure,
     ensure_default_templates, start_student_case,
 )
+from .matrix import legacy_definition
 from .test_fixtures import create_library_fixtures
 
 
@@ -400,19 +401,22 @@ class EpdWorkflowTests(TestCase):
         self.client.get(reverse("dossier:function_management"))
         self.assertFalse(FunctionDefinition.objects.filter(id=function.id).exists())
 
-    def test_function_form_rejects_a_third_matrix(self):
+    def test_function_form_accepts_a_third_matrix(self):
         self.client.login(username="teacher", password="testpass")
         function = FunctionDefinition.objects.create(title="Matrices", kind=FunctionDefinition.Kind.GROUP)
         form = ManagedForm.objects.create(function=function, title="Invoer")
-        questions = [{"fieldType": ManagedQuestion.FieldType.MATRIX} for _ in range(3)]
+        definition = legacy_definition(["Rij"], ["Kolom"])
+        questions = [
+            {"fieldType": ManagedQuestion.FieldType.MATRIX, "matrixDefinition": definition}
+            for _ in range(3)
+        ]
         response = self.client.post(
             reverse("dossier:function_action", args=[function.id]),
             json.dumps({"action": "save_form", "formId": form.id, "title": form.title, "questions": questions}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertTrue(response.json()["warning"])
-        self.assertEqual(form.questions.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(form.questions.count(), 3)
 
     def test_editor_includes_unsaved_change_guard_and_initially_disabled_save(self):
         self.client.login(username="teacher", password="testpass")

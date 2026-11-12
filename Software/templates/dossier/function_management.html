@@ -8,6 +8,16 @@
       <p class="eyebrow">Bibliotheek</p>
       <h1>Functies beheer</h1>
     </div>
+    <div class="function-pagination-toolbar">
+      <label>Per pagina
+        <select name="per_page" form="function-pagination-form" data-page-size>
+          {% for option in page_size_options %}<option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if paginator.count %}
+      <span>{{ page.start_index }}–{{ page.end_index }} van {{ paginator.count }}</span>
+      {% endif %}
+    </div>
     <div class="header-actions"><a class="back" href="{% url 'dossier:library_list' %}">← Ga terug</a></div>
   </header>
   <section class="function-card" aria-labelledby="function-list-heading">
@@ -21,6 +31,7 @@
             <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m12.5 12.5 4 4"/></svg>
           </label>
           <input type="hidden" name="sort" value="{{ sort }}">
+          <input type="hidden" name="per_page" value="{{ page_size }}">
         </form>
         <a class="outline button" href="{% url 'dossier:function_deleted' %}">
           <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 3v7l4 2M17 10a7 7 0 1 1-2-4.95"/></svg>
@@ -56,6 +67,17 @@
       <p class="empty-state">{% if query %}Geen functies gevonden.{% else %}Er zijn nog geen functies. Maak een functie aan om te beginnen.{% endif %}</p>
       {% endfor %}
     </div>
+    {% if paginator.num_pages > 1 %}
+    <nav class="function-pagination" aria-label="Functies pagina's">
+      {% if page.has_previous %}
+      <a class="outline button" href="?q={{ query|urlencode }}&sort={{ sort }}&per_page={{ page_size }}&page={{ page.previous_page_number }}">Vorige</a>
+      {% endif %}
+      <span>Pagina {{ page.number }} van {{ paginator.num_pages }}</span>
+      {% if page.has_next %}
+      <a class="outline button" href="?q={{ query|urlencode }}&sort={{ sort }}&per_page={{ page_size }}&page={{ page.next_page_number }}">Volgende</a>
+      {% endif %}
+    </nav>
+    {% endif %}
   </section>
   <div class="function-toast-region" aria-live="polite" aria-atomic="true"></div>
   <dialog class="function-dialog" data-function-dialog aria-labelledby="dialog-title">
@@ -70,5 +92,9 @@
     </form>
   </dialog>
 </main>
+<form id="function-pagination-form" method="get" hidden>
+  <input type="hidden" name="q" value="{{ query }}">
+  <input type="hidden" name="sort" value="{{ sort }}">
+</form>
 <script src="{% static 'function_management.js' %}" defer></script>
 {% endblock %}

@@ -20,7 +20,7 @@ FUNCTION_TYPES = (
     FunctionType("date", "Datum", "Interactief", True, input_type="date"),
     FunctionType("dateTime", "Datum en tijd", "Interactief", True, input_type="datetime-local"),
     FunctionType("number", "Getal", "Interactief", True, input_type="number", fields=("unit",)),
-    FunctionType("matrix", "Matrix (maximaal 2)", "Interactief", True, input_type="matrix", fields=("matrixDefinition",)),
+    FunctionType("matrix", "Matrix", "Interactief", True, input_type="matrix", fields=("matrixDefinition",)),
     FunctionType("multipleChoice", "Meerkeuze", "Interactief", True, input_type="select", fields=("options",)),
     FunctionType("text", "Tekst", "Interactief", True, input_type="text"),
     FunctionType("observation", "Observaties", "Interactief", True, fields=("required",)),

@@ -19,8 +19,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import default_storage
+from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -1415,8 +1416,22 @@ def function_management(request):
     else:
         sort = "az"
         functions = functions.order_by("title", "id")
+    page_size = request.GET.get("per_page", "10")
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        page_size = 10
+    if page_size not in {10, 25, 50, 100}:
+        page_size = 10
+    paginator = Paginator(functions, page_size)
+    page_number = request.GET.get("page")
+    page = paginator.get_page(page_number)
     return render(request, "dossier/function_management.html", {
-        "functions": functions,
+        "functions": page,
+        "page": page,
+        "paginator": paginator,
+        "page_size": page_size,
+        "page_size_options": (10, 25, 50, 100),
         "query": query,
         "sort": sort,
         "deleted_count": FunctionDefinition.objects.filter(
@@ -1648,8 +1663,6 @@ def function_action(request, function_id):
         incoming = payload.get("questions")
         if not isinstance(incoming, list):
             return function_api_error("Ongeldige vragenlijst.")
-        if sum(1 for item in incoming if isinstance(item, dict) and item.get("fieldType") == ManagedQuestion.FieldType.MATRIX) > 2:
-            return function_api_error("Een formulier mag maximaal 2 matrices bevatten.", warning=True)
         valid_types = set(ManagedQuestion.FieldType.values)
         prepared = []
         try:

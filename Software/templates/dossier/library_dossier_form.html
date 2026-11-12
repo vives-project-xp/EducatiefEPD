@@ -44,14 +44,17 @@
         <ol class="library-structure-list">
           {% for module in dossier_structure %}
           <li class="library-structure-item">
-            <strong>{{ module.title }}</strong>
-            {% for function in module.functions %}
-            <div class="library-structure-function">
-              <span class="library-card-meta">{{ function.kind }}</span>
-              <strong>{{ function.title }}</strong>
-              {% for form in function.forms %}<span class="library-structure-form">{{ form.title }}</span>{% endfor %}
-            </div>
-            {% empty %}<span class="muted">Geen functies</span>{% endfor %}
+            <details>
+              <summary><strong>{{ module.title }}</strong> <span class="muted">({{ module.functions|length }} functies)</span></summary>
+              {% for function in module.functions %}
+              <details class="library-structure-function">
+                <summary><span class="library-card-meta">{{ function.kind }}</span> <strong>{{ function.title }}</strong> <span class="muted">({{ function.forms|length }} formulieren)</span></summary>
+                <div class="library-structure-forms">
+                  {% for form in function.forms %}<span class="library-structure-form">{{ form.title }}</span>{% empty %}<span class="muted">Geen formulieren</span>{% endfor %}
+                </div>
+              </details>
+              {% empty %}<span class="muted">Geen functies</span>{% endfor %}
+            </details>
           </li>
           {% endfor %}
         </ol>

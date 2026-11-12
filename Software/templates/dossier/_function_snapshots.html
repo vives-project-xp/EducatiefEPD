@@ -9,7 +9,7 @@
       </header>
     {% endif %}
     <div class="function-viewer-body">
-      {% if function.forms|length > 1 %}
+      {% if function.forms|length > 1 and not hide_form_navigation %}
         {% include 'dossier/_selection_list.html' with selection_type='forms' selection_items=function.forms %}
       {% endif %}
       <div class="function-viewer-content">

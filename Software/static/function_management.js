@@ -92,6 +92,9 @@
   }
 
   function initList() {
+    root.querySelector("[data-page-size]")?.addEventListener("change", (event) => {
+      event.currentTarget.form.submit();
+    });
     const sortButton = root.querySelector("[data-sort-control]");
     sortButton?.addEventListener("click", () => {
       const sequence = ["az", "za", "oldest"];
@@ -260,14 +263,6 @@
         select.append(optgroup);
       });
       select.addEventListener("change", () => {
-        if (select.value === "matrix" && question.fieldType !== "matrix") {
-          const matrixCount = currentForm().questions.filter((item) => item.fieldType === "matrix").length;
-          if (matrixCount >= 2) {
-            select.value = question.fieldType;
-            toast("Een formulier mag maximaal 2 matrices bevatten.", true);
-            return;
-          }
-        }
         question.fieldType = select.value;
         renderEditor();
         setDirty();
