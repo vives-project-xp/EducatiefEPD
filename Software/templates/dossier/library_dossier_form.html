@@ -47,7 +47,8 @@
           <div class="dossier-existing-modules">
             {% for checkbox in form.existing_modules %}
               <label class="dossier-existing-module" for="{{ checkbox.id_for_label }}">
-                <span>{{ checkbox.choice_label }}</span>{{ checkbox.tag }}
+                <span class="dossier-existing-module-number" aria-hidden="true"></span>
+                <span class="dossier-existing-module-title">{{ checkbox.choice_label }}</span>{{ checkbox.tag }}
               </label>
             {% endfor %}
           </div>
@@ -55,6 +56,8 @@
       {% else %}
         <p class="empty-state">Er zijn geen bestaande onderdelen voor deze opleiding.</p>
       {% endif %}
+      {{ form.existing_module_order }}
+      {{ form.existing_module_order.errors }}
       <h3>Nieuwe, volledig ingerichte modules</h3>
       <p>Voeg modules toe met titel, instructies en invulvelden. Bij keuzelijsten en matrices kun je ook opties, rijen en kolommen invoeren.</p>
       {{ form.new_modules }}
