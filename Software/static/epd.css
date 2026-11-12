@@ -2295,7 +2295,7 @@ summary {
 }
 
 .library-removal-popup-content {
-  width: min(520px, 100%);
+  width: min(680px, 100%);
   padding: 28px;
   border-radius: 12px;
   background: var(--surface);

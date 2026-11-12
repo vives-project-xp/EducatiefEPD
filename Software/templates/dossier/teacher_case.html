@@ -59,14 +59,54 @@
     <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="library-removal-title">
       <div class="library-removal-popup-content">
         <p class="eyebrow">Bibliotheek gewijzigd</p>
-        <h2 id="library-removal-title">Dossiermodule verwijderd uit de bibliotheek</h2>
-        <p>De module <strong>{{ removed_module.title }}</strong> is uit de bibliotheek verwijderd. Wil je deze ook uit deze conceptcasus verwijderen?</p>
+        <h2 id="library-removal-title">
+          {% if removed_module_is_dossier %}
+            Dossiersjabloon verwijderd uit de bibliotheek
+          {% else %}
+            Dossiermodule verwijderd uit de bibliotheek
+          {% endif %}
+        </h2>
+        <p>De module <strong>{{ removed_module.title }}</strong> is verwijderd. Wil je deze ook uit deze conceptcasus verwijderen?</p>
         <div class="library-removal-actions">
           <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id removed_module.id %}">
             {% csrf_token %}
             <button class="primary button" type="submit">Verwijderen</button>
           </form>
-          <button class="outline button" type="button" onclick="this.closest('.library-removal-popup').remove()">Behouden in concept</button>
+          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id removed_module.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="keep">
+            <button class="outline button" type="submit">Behouden in concept</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+  {% if case.status == 'published' and published_module_change %}
+    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="published-change-title">
+      <div class="library-removal-popup-content">
+        <p class="eyebrow">Bibliotheek gewijzigd</p>
+        <h2 id="published-change-title">
+          {% if published_change_is_removal %}
+            Dossiermodule verwijderd uit de bibliotheek
+          {% else %}
+            Dossiermodule aangepast in de bibliotheek
+          {% endif %}
+        </h2>
+        <p>
+          De module <strong>{{ published_module_change.title }}</strong> is gewijzigd.
+          Kies welke versie je wilt behouden voor de gepubliceerde casus en studentversies.
+        </p>
+        <div class="library-removal-actions">
+          <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id published_module_change.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="keep">
+            <button class="outline button" type="submit">Vorige versie behouden</button>
+          </form>
+          <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id published_module_change.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_students">
+            <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
+          </form>
         </div>
       </div>
     </div>

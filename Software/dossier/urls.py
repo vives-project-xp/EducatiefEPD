@@ -35,6 +35,7 @@ urlpatterns = [
     path("docent/casus/<int:case_id>/module/nieuw/", views.teacher_module_create, name="teacher_module_create"),
     path("docent/casus/<int:case_id>/module/<int:module_id>/", views.teacher_module, name="teacher_module"),
     path("docent/casus/<int:case_id>/module/<int:module_id>/verwijderde-bibliotheekmodule/", views.teacher_removed_module_resolve, name="teacher_removed_module_resolve"),
+    path("docent/casus/<int:case_id>/module/<int:module_id>/bibliotheekwijziging/", views.teacher_published_module_resolve, name="teacher_published_module_resolve"),
     path("docent/casus/<int:case_id>/module/<int:module_id>/veld/nieuw/", views.teacher_module_field, name="teacher_module_field_create"),
     path("docent/casus/<int:case_id>/module/<int:module_id>/veld/<int:field_id>/", views.teacher_module_field, name="teacher_module_field_edit"),
     path("docent/casus/<int:case_id>/module/<int:module_id>/veld/<int:field_id>/verwijderen/", views.teacher_module_field_delete, name="teacher_module_field_delete"),

@@ -208,6 +208,21 @@ def _synchronize_template_module(template, module, fields=None):
     return module
 
 
+def synchronize_template_module(template, module):
+    return _synchronize_template_module(template, module)
+
+
+@transaction.atomic
+def synchronize_module_to_students(module):
+    for student_case in module.case.student_cases.select_for_update().all():
+        synchronize_student_case(student_case)
+
+
+@transaction.atomic
+def remove_module_from_students(module):
+    ModuleResponse.objects.filter(module=module).delete()
+
+
 @transaction.atomic
 def synchronize_template_to_draft_cases(template):
     template = LibraryTemplate.objects.prefetch_related("fields").get(pk=template.pk)
@@ -226,7 +241,7 @@ def synchronize_template_to_draft_cases(template):
 
 
 @transaction.atomic
-def copy_template_to_case(template, case):
+def copy_template_to_case(template, case, source_dossier=None):
     template = LibraryTemplate.objects.select_for_update().prefetch_related("fields").get(
         pk=template.pk
     )
@@ -240,6 +255,9 @@ def copy_template_to_case(template, case):
         return existing
     fields = list(template.fields.all())
     last_position = case.modules.order_by("-position").values_list("position", flat=True).first()
+    configuration = {"library_snapshot": {"title": template.title, "version": template.version}}
+    if source_dossier is not None:
+        configuration["source_library_dossier_id"] = source_dossier.pk
     module = Module.objects.create(
         case=case,
         title=template.title,
@@ -248,7 +266,7 @@ def copy_template_to_case(template, case):
         position=(last_position if last_position is not None else -1) + 1,
         source_template=template,
         source_template_version=template.version,
-        configuration={"library_snapshot": {"title": template.title, "version": template.version}},
+        configuration=configuration,
     )
     ModuleField.objects.bulk_create([
         ModuleField(
@@ -269,7 +287,7 @@ def copy_library_dossier_to_case(dossier, case):
         "module_entries__template__fields"
     ).get(pk=dossier.pk)
     return [
-        copy_template_to_case(entry.template, case)
+        copy_template_to_case(entry.template, case, source_dossier=dossier)
         for entry in dossier.module_entries.all()
         if entry.template.status == LibraryTemplate.Status.ACTIVE
     ]
