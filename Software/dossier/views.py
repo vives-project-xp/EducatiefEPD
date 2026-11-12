@@ -124,6 +124,8 @@ def require_post(request):
 
 def get_student_case(request, case_id):
     case = get_object_or_404(Case.objects.select_related("patient"), id=case_id)
+    if case.status != Case.status.PUBLISHED:
+        raise PermissionDenied
     if not case.allowed_groups.filter(members=request.user).exists():
         raise PermissionDenied
     existing = StudentCase.objects.filter(case=case, student=request.user).first()
@@ -181,7 +183,7 @@ def home(request):
         return redirect("dossier:teacher_dashboard")
     cases = list(
         Case.objects.filter(
-            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user),
+            Q(status=Case.Status.PUBLISHED),
             allowed_groups__members=request.user,
         )
         .select_related("patient")
@@ -744,7 +746,7 @@ def teacher_case_delete(request, case_id):
     if case.student_cases.exists():
         messages.error(
             request,
-            "Deze gearchiveerde casus kan niet worden verwijderd zolang er studentendossiers aan gekoppeld zijn.",
+            "Gearchiveerde casus verwijderen? Dit kan alleen als er geen studentendossiers aan gekoppeld zijn.",
         )
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "case.deleted", case, title=case.title)
