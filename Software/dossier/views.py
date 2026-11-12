@@ -124,7 +124,7 @@ def require_post(request):
 
 def get_student_case(request, case_id):
     case = get_object_or_404(Case.objects.select_related("patient"), id=case_id)
-    if case.status != Case.status.PUBLISHED:
+    if case.status != Case.Status.PUBLISHED:
         raise PermissionDenied
     if not case.allowed_groups.filter(members=request.user).exists():
         raise PermissionDenied
