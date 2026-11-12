@@ -26,7 +26,9 @@ for attempt in range(1, 31):
         time.sleep(2)
 PY
 
-python manage.py migrate --noinput
+if [ "${RUN_MIGRATIONS:-1}" = "1" ]; then
+    python manage.py migrate --noinput
+fi
 python manage.py collectstatic --noinput
 
 if [ "${SEED_DEMO:-0}" = "1" ]; then

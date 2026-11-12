@@ -1,4 +1,10 @@
 .env
+.env.*
+!.env.example
+uploads/
+deploy/
+*.pem
+*.key
 authentik/
 __pycache__/
 *.pyc
