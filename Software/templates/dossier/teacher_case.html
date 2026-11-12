@@ -140,18 +140,27 @@
       <div>
         <p class="eyebrow">Opvolging</p>
         <h2>Studentenversies</h2>
-      </div><span>{{ students|length }} gestart</span>
+      </div><span>{{ students|length }} studenten</span>
     </div>
     <div class="progress-table">
       {% for item in students %}
-        <a href="{% url 'dossier:teacher_student_case' item.id %}">
-          <strong>{{ item.student.get_full_name|default:item.student.username }}</strong>
-          <span>{{ item.get_status_display }}</span>
-          <span>{{ item.progress }}%</span>
-          <time>{{ item.updated_at|date:'d/m/Y H:i' }}</time>
-        </a>
+        {% if item.student_case %}
+          <a href="{% url 'dossier:teacher_student_case' item.student_case.id %}">
+            <strong>{{ item.student.get_full_name|default:item.student.username }}</strong>
+            <span>{{ item.status }}</span>
+            <span>{{ item.progress }}%</span>
+            <time>{{ item.student_case.updated_at|date:'d/m/Y H:i' }}</time>
+          </a>
+        {% else %}
+          <div class="progress-table-row">
+            <strong>{{ item.student.get_full_name|default:item.student.username }}</strong>
+            <span>{{ item.status }}</span>
+            <span>{{ item.progress }}%</span>
+            <time>-</time>
+          </div>
+        {% endif %}
       {% empty %}
-        <p class="empty-state">Nog geen student heeft deze casus gestart.</p>
+        <p class="empty-state">Geen studenten in de gekoppelde lesgroepen.</p>
       {% endfor %}
     </div>
   </section>

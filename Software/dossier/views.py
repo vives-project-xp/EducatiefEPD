@@ -465,7 +465,27 @@ def teacher_case_edit(request, case_id):
 def teacher_case(request, case_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
-    students = list(case.student_cases.select_related("student").all())
+    student_cases = {
+        item.student_id: item
+        for item in case.student_cases.select_related("student").all()
+    }
+    students = get_user_model().objects.filter(
+        epd_profile__role=Profile.Role.STUDENT,
+        epd_teaching_groups__cases=case,
+    ).distinct().order_by("first_name", "last_name", "username")
+    student_rows = []
+    for student in students:
+        student_case = student_cases.get(student.id)
+        student_rows.append({
+            "student": student,
+            "student_case": student_case,
+            "status": (
+                student_case.get_status_display()
+                if student_case
+                else "Nog niet gestart"
+            ),
+            "progress": student_case.progress if student_case else 0,
+        })
     groups = TeachingGroup.objects.filter(education=case.education)
     if not is_admin(request.user):
         groups = groups.filter(teacher=request.user)
@@ -488,7 +508,7 @@ def teacher_case(request, case_id):
         ).select_related("template"),
     )).distinct().order_by("title")
     return render(request, "dossier/teacher_case.html", {
-        "case": case, "students": students,
+        "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
         "available_dossiers": dossiers,
         "assignment_form": AssignmentForm(prefix="assignment"),
