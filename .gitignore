@@ -11,3 +11,7 @@ Software/deploy/deploy.json
 Software/deploy/state.json
 Software/deploy/state.tmp
 Software/deploy/.deploy.lock
+Software/deploy/pull.enabled
+Software/deploy/pull-state.json
+Software/deploy/pull-state.tmp
+Software/deploy/pull.log

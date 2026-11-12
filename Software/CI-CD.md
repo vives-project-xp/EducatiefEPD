@@ -1,121 +1,109 @@
-# Automatische webdeployments naar de VM
+# Automatische webupdates: de VM haalt releases op
 
-Bij iedere push op `main` draait `.github/workflows/tests.yml` de bestaande tests,
-deployregressies en Compose-validatie. Daarna bouwt GitHub het webimage, draait de
-Django/MySQL-suite in **dat image**, controleert productie-statics, echte startup
-en HTTP/databasehealth, en publiceert
-het in `ghcr.io/vives-project-xp/educatiefepd`. Een SSH-job deployt de exacte digest.
-PRs krijgen geen deployment. `workflow_dispatch` maakt handmatig starten mogelijk.
+De VM is bereikbaar als `student@10.20.10.36`. Dat is een privéadres; een publieke
+SSH-ingang is niet vastgesteld. Daarom haalt de VM zelf releases op bij GHCR.
+Deze handleiding vervangt de eerdere SSH-deploymentprocedure.
 
-De SSH-job wordt pas actief wanneer de repositoryvariabele `DEPLOY_ENABLED` op
-`true` staat. Zo kunnen jullie eerst de VM en secrets instellen. Images worden
-al gebouwd en gepubliceerd terwijl deployment uitstaat. Er zijn geen repository
-Deploy keys nodig en de VM hoeft bij een update geen broncode uit GitHub te halen.
+Bij een push op `main` doet `.github/workflows/tests.yml` het volgende:
 
-## 1. Voorwaarden en bestaande VM controleren
+1. Bestaande Django/MySQL-tests, JavaScript-controles en deployregressies uitvoeren.
+2. Een Linux/amd64-webimage bouwen met commit-, main- en workflowrunnummetadata.
+3. De Django/MySQL-suite in datzelfde image draaien, productie-statics verzamelen
+   en echte startup plus HTTP/databasehealth controleren.
+4. Het geteste image publiceren onder een unieke SHA/run/attempt-tag in GHCR.
+5. In een geserialiseerde releasejob de exacte digest promoveren naar het kanaal
+   `ghcr.io/vives-project-xp/educatiefepd:main`. Een achterhaalde commit of lager
+   runnummer mag een nieuwere release niet overschrijven.
 
-Deze route gebruikt de door jullie bevestigde **publiek bereikbare SSH-toegang**.
-`VM_HOST` is het publieke DNS-adres/IP, niet uitsluitend `10.20.10.36`.
-De VM moet uitgaand GHCR kunnen bereiken. De image is Linux/amd64, passend bij de
-standaard GitHub Ubuntu-runner; controleer `uname -m` op de VM (`x86_64`).
+De VM controleert ongeveer iedere minuut het kanaal en deployt alleen een nieuwe
+geldige release. Een ongewijzigde gezonde release doet niets. Mislukte tests
+publiceren geen nieuwe release naar het kanaal. Snelle pushes kunnen worden
+samengenomen: de nieuwste geslaagde, gepromoveerde main-release wordt uitgerold.
+Een release die al wordt uitgevoerd, wordt niet afgebroken voor een volgende push.
 
-De Linux-gebruiker, bijvoorbeeld `student`, heeft Python 3, Docker-toegang zonder
-sudo en Docker Compose v2 nodig, met ondersteuning voor `up --wait` en
-`config --format json`. Gebruik een recente Compose-versie, minimaal 2.24.
-Docker en SSH worden door de VM-beheerder beschikbaar gesteld.
+## Wat is er nog nodig?
 
-Begin vanuit de map waarmee de bestaande EPD-containers gestart zijn:
+- De aangepaste broncode moet op `main` staan en de Actions-workflow moet toegestaan zijn.
+- Actions gebruikt automatisch `GITHUB_TOKEN` om images te publiceren. De organisatie
+  moet pakketpublicatie toestaan; een bestaand package moet deze repository toegang geven.
+- De VM heeft Python >= 3.10, Docker-toegang als `student`, Compose >= 2.24,
+  Linux/amd64 en uitgaande toegang tot GHCR nodig.
+- Voor een privé-package heeft `student` op de VM een werkende `docker login ghcr.io` nodig.
+- Een user-timer voert de poller uit; controleer lingering voor werking na uitloggen/reboot.
+  Bij ontbrekende rechten kan een bestaande actieve cronservice de user-crontab uitvoeren.
 
-```sh
-cd /home/student/EducatiefEPD/Software  # pas aan aan jullie bestaande locatie
-docker compose ps
-docker compose version
-python3 --version
-uname -m
+De SSH-secrets `VM_HOST`, `VM_PORT`, `VM_USER`, `VM_DEPLOY_PATH`, `VM_SSH_KEY`,
+`VM_KNOWN_HOSTS` en de repositoryvariabele `DEPLOY_ENABLED` worden niet meer gebruikt.
+Je kunt ze verwijderen als ze uitsluitend voor deze oude deploymentroute bedoeld
+waren. Verwijder geen persoonlijke SSH-toegang. Het activeren gebeurt op de VM
+met `pull.enabled`, niet via een GitHub-secret of repositoryvariabele.
 
-db_id=$(docker compose ps -q db)
-web_id=$(docker compose ps -q web)
-docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$db_id"
-docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/mysql"}}{{.Name}}{{end}}{{end}}' "$db_id"
-docker inspect --format '{{range .Mounts}}{{if eq .Destination "/app/uploads"}}{{.Source}}{{end}}{{end}}' "$web_id"
-docker port "$web_id" 8001
-```
+## 1. Bestaande VM-configuratie behouden
 
-Bewaar de gevonden **projectnaam**, **MySQL-volumenaam**, **uploadmap** en
-**poortbinding** voor stap 2. Het script vergelijkt opslag met de bestaande
-containers en stopt bij een afwijking. Gebruik geen nieuwe projectnaam bij het
-overnemen van een draaiende installatie. Dat kan een tweede stack opleveren.
+De eerder voorbereide map `/home/student/epd-deploy` blijft bruikbaar:
 
-Controleer dat aanmelden, uploads en de browser-URL al werken. De CI/CD-installatie
-configureert geen nieuwe Authentik-provider, proxy of certificaten. Met
-`DJANGO_DEBUG=0` verwacht de huidige app HTTPS; alleen `SECURE_SSL_REDIRECT=0`
-instellen maakt sessiecookies niet geschikt voor HTTP. Een eventueel bestaande
-HTTP-testconfiguratie wordt overgenomen, niet automatisch gewijzigd.
+- `app.env`: bestaande werkende DB-/OIDC-/Django-configuratie, rechten 0600.
+- `deploy.json`: echte projectnaam, volumenaam, canonieke absolute uploadmap,
+  poortbinding, health-host/URL en image-repository, rechten 0600.
+- `state.json` en `backups/`: behouden als deze al bestaan.
 
-## 2. Vaste deploymap op de VM
+Volgens het VM-rapport is de projectnaam `software`, het volume
+`software_mysql_data`, en de health-URL `http://10.20.10.36:8001/health/`.
+De bestaande HTTP-testconfiguratie gebruikt `DJANGO_DEBUG=1` en
+`SECURE_SSL_REDIRECT=0`. Dit is een testopstelling; de pullroute wijzigt die
+instellingen niet. Voor normaal productiegebruik blijft een correcte HTTPS-
+inrichting nodig. Zet DEBUG niet aan om fouten te verbergen.
 
-Maak op de VM een eigen map voor configuratie, deployscript en back-ups:
+Controleer werkelijke mountnamen en paden wanneer je configuratie afwijkt.
+`media_dir` moet absoluut en canoniek zijn; alleen `uploads` is ongeldig.
+Het script weigert een andere databasevolume-/uploadmount of databasenaam dan
+de bestaande installatie. Maak voor deze overgang geen nieuwe opslag aan.
 
-```sh
-install -d -m 700 /home/student/epd-deploy
-```
+Uploadrechten moeten de containergebruiker toegang geven. Het eerdere VM-rapport
+noemt `o+w` op twee directories; vervang dat waar mogelijk door gerichte eigenaar-,
+groep- of ACL-rechten. Voer geen brede recursieve chmod/chown uit.
 
-Kopieer vanuit deze repository op je **eigen computer** de drie bestanden. Vervang
-`PUBLIEKE_HOST` en indien nodig poort/gebruiker:
+Voor een nog lege VM: installeer eerst de app en Authentik volgens
+[DEPLOYMENT.md](DEPLOYMENT.md) en [authentik/README.md](authentik/README.md).
+De pullroute vereist een bestaande draaiende database en maakt geen accounts aan.
+
+## 2. Nieuwe scripts naar de VM kopiëren
+
+Gebruik bestanden uit de aangepaste checkout. Stop eerst een eventuele bestaande
+pulltimer en laat een lopende release afronden voordat je scripts vervangt.
+Dit betreft geen webcontainerherstart.
+
+Vanuit PowerShell op je eigen computer, in de repositoryroot:
 
 ```powershell
-scp -P 22 Software/deploy/deploy.py Software/deploy/compose.yaml Software/deploy/deploy.example.json student@PUBLIEKE_HOST:/home/student/epd-deploy/
+scp Software/deploy/deploy.py Software/deploy/poll.py Software/deploy/compose.yaml Software/deploy/epd-pull.service Software/deploy/epd-pull.timer Software/deploy/epd-pull.cron student@10.20.10.36:/home/student/epd-deploy/
 ```
 
-Daarna op de **VM**, met het pad naar jullie werkende `.env`:
+Dit gebruikt jouw gewone SSH-toegang op het schoolnetwerk/VPN. GitHub heeft deze
+verbinding niet nodig. Bestaande `app.env`, `deploy.json`, `state.json`,
+`pull-state.json` en back-ups nooit overschrijven met voorbeelden.
+
+Op de VM als `student`:
 
 ```sh
-umask 077
-cp -n /home/student/EducatiefEPD/Software/.env /home/student/epd-deploy/app.env
-cd /home/student/epd-deploy
-cp -n deploy.example.json deploy.json
-chmod 600 app.env deploy.json
-nano deploy.json
+chmod 700 /home/student/epd-deploy
+chmod 600 /home/student/epd-deploy/app.env /home/student/epd-deploy/deploy.json
+python3 -m py_compile /home/student/epd-deploy/deploy.py /home/student/epd-deploy/poll.py
 ```
 
-Vul `deploy.json` in:
+Voor de VM-AI staat een volledige installatieopdracht in
+[VM-PULL-PROMPT.md](VM-PULL-PROMPT.md).
 
-- `project`: exact de projectnaam uit stap 1, vaak `software`.
-- `mysql_volume`: exact het bestaande volume uit stap 1, vaak `software_mysql_data`.
-- `media_dir`: de bestaande absolute uploadmap, zonder symlink.
-- `web_bind`: de bestaande hostbinding, bijvoorbeeld `0.0.0.0`, `127.0.0.1` of
-  het VM-IP. Hostpoort blijft `8001`.
-- `health_host`: een host uit `ALLOWED_HOSTS`, zonder protocol, bijvoorbeeld
-  `epd.example.be` of `10.20.10.36`. Dit is voor de interne HTTP/DB-check.
-- `health_url`: de werkende app-URL met `/health/`, bereikbaar **vanaf de VM**,
-  bijvoorbeeld `https://epd.example.be/health/`. Deze moet rechtstreeks HTTP 200
-  met `{"status":"ok"}` geven, zonder redirect. Geldige HTTPS-certificaten blijven vereist.
-- `image_repository`: `ghcr.io/vives-project-xp/educatiefepd` in kleine letters.
+## 3. GHCR-login controleren
 
-`app.env` bewaart de bestaande DB-/OIDC-instellingen. Wijzig geen databasewachtwoorden
-bij deze overgang. Compose neemt de instellingen expliciet over en geeft het
-MySQL-rootwachtwoord niet aan de webcontainer. `RUN_MIGRATIONS=0` en `SEED_DEMO=0`
-worden voor deployments afgedwongen. Migraties gebeuren in een afzonderlijke stap.
-
-Voor een **lege VM**: richt eerst de app, uploadrechten en Authentik eenmalig in
-volgens [DEPLOYMENT.md](DEPLOYMENT.md) en [authentik/README.md](authentik/README.md),
-met jullie werkelijke VM-URLs/callbacks. Doorloop daarna bovenstaande overname.
-Dit deployscript maakt bewust geen nieuwe database of accounts aan.
-
-## 3. GHCR-toegang op de VM
-
-De workflow publiceert met zijn automatische `GITHUB_TOKEN`; hiervoor voeg je
-geen persoonlijk token aan de workflow toe. De organisatie moet pakketpublicatie
-toestaan. Bij een bestaand package moet deze repository Actions-toegang hebben.
-
-Een nieuw GHCR-package is standaard privé. Laat het privé en geef de VM toegang
-met een **personal access token (classic)** met alleen `read:packages`, van een
-account dat het package mag lezen. Autoriseer organisatie-SSO indien vereist.
-Op de VM, als dezelfde gebruiker die gaat deployen:
+Gebruik de bestaande login als die al is uitgevoerd. Anders maak je in je
+persoonlijke GitHub-account een personal access token **classic** met
+`read:packages`, van een account dat het package mag lezen. Autoriseer organisatie-
+SSO indien vereist. Daarna op de VM als `student`:
 
 ```sh
 read -r -p 'GitHub gebruikersnaam: ' gh_user
-read -r -s -p 'GHCR token (read:packages): ' ghcr_token
+read -r -s -p 'GHCR token: ' ghcr_token
 printf '\n'
 printf '%s' "$ghcr_token" | docker login ghcr.io -u "$gh_user" --password-stdin
 unset ghcr_token
@@ -123,193 +111,176 @@ chmod 700 ~/.docker
 chmod 600 ~/.docker/config.json
 ```
 
-Het token blijft op de VM; stuur het niet in chat en zet het niet in `app.env` of
-Git. Vernieuw het vóór de vervaldatum. Zonder credential helper bewaart Docker
-de login omkeerbaar gecodeerd in de gebruikersconfiguratie.
-Als de beheerder het package bewust publiek maakt, kan de VM anoniem pullen.
-Zie [GitHub: Container registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+Voer iedere `read`-regel uit en vul het antwoord in wanneer de terminal erom vraagt.
+De tokeninvoer is onzichtbaar. Het token hoort niet in chat, Git of `app.env`.
+Een credential helper moet ook zonder interactieve desktopontgrendeling werken
+voor de user-service. Zonder helper is de Docker-configuratie omkeerbaar gecodeerd;
+beperk de bestandsrechten. Een publiek package kan anoniem worden opgehaald.
+Zie [Docker pull](https://docs.docker.com/reference/cli/docker/image/pull/) en
+[GitHub GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
 
-## 4. Aparte SSH-deploysleutel maken
+## 4. Eerst een geteste release publiceren en controleren
 
-Op je **eigen computer**, in PowerShell:
+Laat de aangepaste code via jullie normale proces op `main` terechtkomen.
+Open **GitHub → EducatiefEPD → Actions → Tests → Run workflow → main**.
+Laat alle jobs slagen, inclusief **Publish main release channel for VM**.
+Hiervoor stel je geen VM-secrets of `DEPLOY_ENABLED` in.
 
-```powershell
-ssh-keygen -t ed25519 -C "epd-github-actions" -f "$env:USERPROFILE\.ssh\epd-actions"
-```
-
-Kies een andere bestandsnaam als die al bestaat; overschrijf geen bestaande sleutel.
-Laat de passphrase voor deze afzonderlijke automatiseringssleutel leeg, door bij
-beide passphrasevragen Enter te drukken. De workflow gebruikt geen interactieve agent.
-
-- `epd-actions.pub` is de **publieke** sleutel voor de VM.
-- `epd-actions` is de **private** sleutel voor het GitHub Actions-secret.
-- Geen van beide hoort bij GitHub **Settings → SSH and GPG keys** of **Deploy keys**
-  voor deze verbinding: Actions logt ermee in op Linux, niet op GitHub.
-
-Lees op je computer uitsluitend de publieke sleutel:
-
-```powershell
-Get-Content "$env:USERPROFILE\.ssh\epd-actions.pub"
-```
-
-Log met je bestaande toegang op de VM in en open:
+Voer vervolgens op de VM uit:
 
 ```sh
-install -d -m 700 ~/.ssh
-touch ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-nano ~/.ssh/authorized_keys
+cd /home/student/epd-deploy
+python3 poll.py --check
 ```
 
-Voeg één nieuwe regel toe, zonder bestaande regels te verwijderen:
+Dit haalt het image op en controleert digest, platform, bronrepository, main-label,
+commit en runnummer. Het verandert geen containers, database of deploymentstatus.
+`deploy` in de uitvoer betekent dat een nieuwe release klaarstaat; het is in deze
+checkmodus nog geen daadwerkelijke deployment. `current` betekent dat die release
+al gezond is uitgerold; `needs_retry` vraagt onderzoek van een eerdere poging.
+De lockfile en Docker-imagecache mogen wel ontstaan of bijgewerkt worden.
 
-```text
-restrict ssh-ed25519 PLAK_HIER_DE_PUBLIEKE_SLEUTEL epd-github-actions
-```
+`manifest unknown` of `:main: not found` kan betekenen dat het kanaal nog niet gepubliceerd is. `unauthorized`
+of `denied` wijst op login-/pakketrechten. Geen credentials of netwerkinstellingen
+wijzigen om deze fouten te verbergen; onderzoek eerst de betreffende GitHub-job/login.
 
-`restrict` schakelt forwarding en interactieve PTY uit, maar laat de remote
-deployopdracht toe. Deze sleutel heeft toegang als de gekozen VM-gebruiker;
-bewaar de private sleutel uitsluitend lokaal en als Actions-secret. Docker-toegang
-geeft ruime rechten op de VM. Een aparte deploygebruiker kan later door de beheerder
-worden ingericht als die rechten verder gescheiden moeten worden.
+## 5. Timer installeren en werking na uitloggen vaststellen
 
-Test vanaf je computer:
-
-```powershell
-ssh -T -p 22 -i "$env:USERPROFILE\.ssh\epd-actions" -o IdentitiesOnly=yes student@PUBLIEKE_HOST "python3 --version && docker compose version"
-```
-
-## 5. SSH-hostkey vastleggen
-
-De pipeline vertrouwt alleen een vooraf gecontroleerde hostkey, niet een key die
-tijdens deployment onbevestigd wordt opgehaald. Op de VM, via je vertrouwde sessie:
+De meegeleverde units gebruiken `%h/epd-deploy` en `/usr/bin/python3`. Controleer
+dat die overeenkomen met de werkelijke gebruiker en Python-locatie; pas alleen
+die paden aan indien nodig. Installeer als `student`:
 
 ```sh
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+install -d -m 700 ~/.config/systemd/user
+install -m 600 /home/student/epd-deploy/epd-pull.service ~/.config/systemd/user/epd-pull.service
+install -m 600 /home/student/epd-deploy/epd-pull.timer ~/.config/systemd/user/epd-pull.timer
+systemctl --user daemon-reload
+systemd-analyze --user verify ~/.config/systemd/user/epd-pull.service ~/.config/systemd/user/epd-pull.timer
+loginctl show-user student --property=Linger --value
 ```
 
-Haal op je computer de publieke key op en vergelijk de **SHA256-fingerprint**:
+De laatste opdracht moet voor een blijvende inrichting `yes` geven. Bij `no`
+moet de school-/VM-beheerder eenmalig onderstaande opdracht uitvoeren:
 
-```powershell
-ssh-keyscan -p 22 -t ed25519 PUBLIEKE_HOST 2>$null | Set-Content -Encoding ascii "$env:TEMP\epd-known-hosts"
-ssh-keygen -lf "$env:TEMP\epd-known-hosts"
+```sh
+loginctl enable-linger student
 ```
 
-Alleen bij dezelfde fingerprint gebruik je de inhoud van `epd-known-hosts` als
-`VM_KNOWN_HOSTS`. Gebruik precies dezelfde host en poort als in de workflow.
-Bij een afwijkende poort bevat known_hosts `[host]:poort`. Herhaal de verificatie
-na een herinstallatie van SSH/VM; schakel hostkeycontrole niet uit.
+Daarmee kan de user-manager bij boot starten en na uitloggen blijven draaien.
+Ga niet uit van sudo-rechten voor `student`. Zonder lingering kun je testen zolang
+de gebruikerssessie actief is, maar noem de installatie dan nog niet permanent.
+Bij `Failed to connect to bus` ontbreekt een bruikbare systemd-gebruikerssessie;
+laat de beheerder die herstellen in plaats van de timer als root te installeren.
+Zie [systemd timers](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html)
+en [loginctl lingering](https://www.freedesktop.org/software/systemd/man/latest/loginctl.html).
 
-## 6. GitHub-secrets en inschakelen
+### Alternatief zonder lingering: bestaande cronservice
 
-Ga naar de **repository** → **Settings → Secrets and variables → Actions**.
-Maak onder **Secrets** deze repositorysecrets:
+Als lingering niet beschikbaar is en `student` geen beheerrechten heeft, kun je
+dezelfde poller vanuit een **user-crontab** draaien, mits cron al actief is en
+user-crontabs toegestaan zijn. Controleer `command -v crontab` en
+`systemctl is-active cron` (op sommige distributies heet de service `crond`).
+Ontbreekt of draait cron niet, laat de beheerder één van beide schedulers mogelijk
+maken. Installeer niet stilzwijgend een extra systeemdienst.
 
-- `VM_HOST`: publiek IP/DNS-adres, zonder `ssh://` of poort.
-- `VM_PORT`: bijvoorbeeld `22` (zonder secret gebruikt de workflow ook 22).
-- `VM_USER`: bijvoorbeeld `student`.
-- `VM_DEPLOY_PATH`: `/home/student/epd-deploy`, absoluut en zonder spaties.
-- `VM_SSH_KEY`: volledige inhoud van de private `epd-actions`, inclusief
-  `BEGIN OPENSSH PRIVATE KEY` en `END OPENSSH PRIVATE KEY`.
-- `VM_KNOWN_HOSTS`: volledige, geverifieerde known_hosts-regel uit stap 5.
+Gebruik óf cron óf de systemd-timer. Pauzeer nieuwe starts en laat een eventuele
+lopende deploy afronden voordat je wisselt. Maak een afgeschermde back-up van de
+bestaande `crontab -l`; bewaar alle bestaande taken. Open daarna `crontab -e` en
+voeg de ene taakregel uit `epd-pull.cron` toe. De template veronderstelt
+`/home/student/epd-deploy` en `/usr/bin/python3`; controleer die paden.
+Gebruik niet `crontab epd-pull.cron`, want dat zou andere bestaande taken vervangen.
 
-Je kunt de private sleutel op je eigen Windows-computer rechtstreeks naar het
-klembord kopiëren, zonder hem in chat of terminaluitvoer te zetten:
+De taak draait iedere minuut, ook na uitloggen en na boot zodra cron actief is.
+Dezelfde lokale vlag, VM-lock en statuscontrole beschermen de uitvoering.
+Controleer dat de cronservice voor boot ingeschakeld is; een echte herstart is
+zonder aparte test geen bewezen rebootcontrole. Logging staat bij deze variant in
+`/home/student/epd-deploy/pull.log`; bewaak de bestandsgrootte en bewaartermijn.
+Zie de [Debian crontab-handleiding](https://manpages.debian.org/trixie/cron/crontab.5.en.html).
 
-```powershell
-Get-Content -Raw "$env:USERPROFILE\.ssh\epd-actions" | Set-Clipboard
+## 6. Automatische updates activeren
+
+Deze stap kan de eerste echte deployment en downtime starten. Voer hem uit wanneer
+de check in stap 4 slaagt, de bestaande opslag klopt en het onderhoudsvenster past.
+
+Voor de systemd-variant:
+
+```sh
+cd /home/student/epd-deploy
+touch pull.enabled
+chmod 600 pull.enabled
+systemctl --user enable --now epd-pull.timer
+systemctl --user start epd-pull.service
+systemctl --user status epd-pull.timer --no-pager
+journalctl --user -u epd-pull.service -n 100 --no-pager
 ```
 
-Plak in het GitHub-secret en wis daarna het klembord. Voor `VM_KNOWN_HOSTS`:
+De eerste controle is na ongeveer 30 seconden, daarna ongeveer 60 seconden na het
+eindigen van de vorige controle/deployment. Handmatig `start epd-pull.service`
+start direct een controle; systemd start geen tweede instantie als die al loopt.
+De poller en handmatige deployer gebruiken bovendien dezelfde VM-lock.
 
-```powershell
-Get-Content -Raw "$env:TEMP\epd-known-hosts" | Set-Clipboard
+Voor de cronvariant: installeer de ene user-crontaak, maak `pull.enabled` met 0600
+en controleer na de volgende minuut `tail -n 100 ~/epd-deploy/pull.log`. Je kunt
+ook meteen `python3 ~/epd-deploy/poll.py` uitvoeren; de lock voorkomt overlap.
+
+Controleer na de eerste release: `state.json` heeft status `healthy`, de health-URL
+geeft HTTP 200, en aanmelden, een casus openen en een upload werken. De tests op
+`/health/` bewijzen op zichzelf geen werkende OIDC-login of volledige casusflow.
+
+## 7. Onderhoud, pauzeren en herstel
+
+Pauzeren zonder een lopende migratie af te breken:
+
+```sh
+rm -f /home/student/epd-deploy/pull.enabled
+systemctl --user disable --now epd-pull.timer
 ```
 
-Repositorysecrets vereisen write-toegang bij een organisatierepo of collaborator-
-toegang bij een persoonlijke repo. Vraag bij ontbrekende toegang de beheerder om
-de instellingen eenmalig te doen. Voor deze workflow hoeft geen GitHub Environment
-of self-hosted runner te worden aangemaakt.
-Zie [GitHub: Actions-secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets).
+Stop hierbij niet de `.service` als die aan het deployen is. Laat de lopende
+release afronden; een volgende poll slaat over zolang het vlagbestand ontbreekt.
+Activeer opnieuw met de opdrachten uit stap 6.
+Bij cron is het verwijderen van `pull.enabled` voldoende om volgende deploys te
+pauzeren; verwijder desgewenst alleen de EPD-regel uit de crontab, niet andere taken.
 
-Laat de codewijzigingen op `main` terechtkomen. De eerste run kan al een image
-publiceren terwijl deployment nog uitstaat. Zet, wanneer VM, registrylogin en
-SSH-secrets gereed zijn, onder **Variables** de repositoryvariabele:
+De releaseprocedure blijft: bestaande opslag/databasekeuze controleren, image pull
+en commitlabelcontrole, Django/databasecheck, collectstatic en uploadrechten;
+daarna webstop, consistente DB-/uploadsback-up, migratie eenmaal, alleen web
+vervangen en interne plus externe HTTP/databasehealth controleren. Er is downtime
+tijdens back-up/migratie/start. Andere schrijvers moeten ook stil staan. Authentik
+wordt niet opnieuw ingericht of herstart.
 
-```text
-DEPLOY_ENABLED = true
+`state.json` bewaart de daadwerkelijke deploystatus, vorige image en back-uplocatie.
+`pull-state.json` onthoudt de laatste poging. Een mislukte of afgebroken release
+wordt **niet iedere minuut opnieuw gemigreerd**. Na diagnose kun je, met
+`pull.enabled` aanwezig, expliciet opnieuw proberen:
+
+```sh
+python3 /home/student/epd-deploy/poll.py --retry
 ```
 
-Ga naar **Actions → Tests → Run workflow → main**. Daarna triggert iedere push op
-`main` vanzelf de keten. De bestaande checknamen blijven behouden voor eventuele
-branch protection. Bescherm `main` met reviews en vereiste tests, want code op main
-kan via deze workflow op de VM worden uitgevoerd.
+Een nieuwe release met een hoger runnummer mag normaal verder. Een lager runnummer
+wordt genegeerd; gewijzigde inhoud onder hetzelfde runnummer wordt geweigerd.
+Publiceer bij zo'n conflict een nieuwe workflow_dispatch/main-run, geen herbouw
+onder hetzelfde reeds gebruikte runnummer. Verwijder de statusbestanden niet om
+deze bescherming te omzeilen.
 
-## 7. Wat gebeurt er tijdens een release?
+Bij register-/netwerkfouten blijft de app zoals hij was en probeert de volgende
+timer opnieuw contact. Bij een back-upfout vóór migratie start de oude container
+weer, behalve na een eerdere onzekere schemawijziging. Na migratiefouten of een
+ongezonde nieuwe versie gebeurt geen blinde rollback of automatische DB-restore.
+Onderzoek logs/status en publiceer een passende reparatie.
 
-1. Alleen succesvolle tests kunnen de imagejob vrijgeven. De gepubliceerde digest
-   komt van het image waarin ook de Django-tests en `collectstatic` slaagden.
-2. GitHub laat één deployjob tegelijk lopen en annuleert geen lopende deploy voor
-   een nieuwe push. Een inmiddels achterhaalde main-commit wordt overgeslagen;
-   snelle opeenvolgende pushes kunnen zo in één nieuwste deployment samenkomen.
-3. De VM neemt een bestandslock en weigert oudere workflowrunnummers. Eenzelfde
-   runnummer mag uitsluitend dezelfde commit en digest opnieuw proberen.
-4. Controle bestaande opslag en back-updatabasenaam, pull image, controle commitlabel, Django-/databasecheck,
-   `collectstatic` en schrijfbaarheid van uploads. Tot hier blijft web draaien.
-5. Web stopt tijdelijk. De VM maakt `mysql.sql`, `uploads.tar.gz` en een kopie van
-   lokale configuratie in een afgeschermde `backups/<tijd>-<commit>/`.
-   `BACKUP_COMPLETE` verschijnt alleen als beide back-upcommando's slaagden.
-6. Een tijdelijke container voert `migrate` eenmaal uit. Daarna wordt alleen `web`
-   vervangen met `--no-deps --no-build`; de startentrypoint migreert niet opnieuw.
-7. De containerhealthcheck controleert HTTP én database. Daarna controleert de VM
-   ook `health_url`. Pas dan krijgt `state.json` status `healthy`.
+Releaseback-ups bevatten MySQL, uploads en lokale configuratie; bewaar ze ook
+versleuteld buiten de VM, bewaak schijfruimte en oefen herstel op een aparte DB.
+Authentik/PostgreSQL/media vragen afzonderlijke back-ups. Oude images en back-ups
+worden niet automatisch verwijderd. Gebruik nooit `docker compose down -v`.
+Zie [DEPLOYMENT.md](DEPLOYMENT.md) voor herstelcontroles.
 
-Er is **downtime tijdens back-up, migratie en webstart**. De database blijft draaien;
-schrijvers buiten deze webapp moeten tijdens dit onderhoudsvenster eveneens stil
-staan. Authentik en zijn gegevens blijven onaangeraakt. Test na de eerste deployment
-zelf aanmelden, één casus en een upload; `/health/` bewijst geen werkende OIDC-login.
+De vaste deployscripts/Compose worden niet door applicatie-updates overschreven.
+Bij een nieuw deploymentcontract installeer je die bewust opnieuw nadat een
+eventuele lopende release is afgerond, met behoud van lokale config/status/back-ups.
 
-De vaste VM-bestanden `deploy.py` en `compose.yaml` worden niet via SSH overschreven.
-Bij toekomstige wijzigingen aan het deploymentcontract kopieer je die bewust
-opnieuw, wanneer geen deployment loopt. `app.env`, `deploy.json`, `state.json` en
-back-ups nooit overschrijven met repositoryvoorbeelden.
-
-## 8. Fouten, herstel en back-ups
-
-- **Tests/build/pull/preflight faalt:** bestaande webcontainer blijft beschikbaar.
-- **Back-up faalt vóór migratie:** het script start de bestaande webcontainer weer,
-  tenzij een eerdere mislukte migratie de schema-compatibiliteit onzeker maakte.
-- **Migratie faalt:** bestaande web blijft gestopt; inspecteer de fout en herstel
-  met een nieuwe commit. MySQL-schemawijzigingen zijn niet volledig transactioneel.
-- **Nieuwe web/health faalt:** workflow faalt, geen automatische database-restore.
-  Inspecteer containerstatus/logs, `state.json` en de back-up. De kandidaat kan
-  deels draaien; voer bij herstel bewust onderhoud uit.
-- **SSH valt weg/job wordt handmatig geannuleerd:** controleer eerst op de VM of
-  het proces nog loopt en welke status opgeslagen is. Start geen handmatige
-  migratie daarnaast. Het VM-lock voorkomt twee gelijktijdige scriptdeployments.
-- **Rerun:** kies na een verbindingsfout bij voorkeur *Re-run failed jobs*, zodat
-  dezelfde image-output wordt gebruikt. *Re-run all jobs* bouwt opnieuw; een andere
-  digest met hetzelfde runnummer wordt bewust geweigerd. Gebruik dan een nieuwe
-  workflow_dispatch/main-run met een hoger runnummer.
-
-Een vorige image terugzetten is alleen verantwoord als het huidige schema daarmee
-compatibel is. `state.json` bewaart de vorige succesvolle release en iedere back-up
-het oude image-ID. Normaal herstel: een corrigerende main-commit met compatibele
-migraties. Verwijder `state.json` niet om een oudere release te forceren.
-
-Voor een noodzakelijke database-restore: blokkeer writes, maak eerst een extra
-back-up van de fouttoestand, herstel DB en uploads uit hetzelfde gecontroleerde
-back-uppunt en kies de bijpassende applicatieversie. Nieuwe gegevens na het
-back-uppunt gaan daarbij verloren; daarom doet het script dit nooit automatisch.
-Oefen het herstel eerst op een aparte database volgens [DEPLOYMENT.md](DEPLOYMENT.md).
-
-De lokale releaseback-ups zijn geen bescherming tegen verlies van de VM. Kopieer
-ze versleuteld naar opslag buiten de VM, bewaak vrije schijfruimte en spreek een
-bewaartermijn af. Authentik/PostgreSQL en Authentik-media vragen een **afzonderlijke**
-regelmatige back-up. Het script verwijdert geen oude back-ups of images automatisch.
-Gebruik nooit `docker compose down -v` voor deze omgeving.
-
-## Lokale/CI-controles
+## Controles voor deze code
 
 ```sh
 python3 -m unittest discover -s Software/deploy/tests -v
@@ -317,6 +288,7 @@ python3 Software/deploy/tests/check_compose.py
 sh -n Software/entrypoint.sh
 ```
 
-De regressies simuleren Docker-fouten en controleren dat een opslagwissel,
-achterhaalde release, back-upfout, migratiefout en ongezonde nieuwe versie correct
-worden afgehandeld. Ze vervangen geen echte VM-/SSH-/back-uphersteltest.
+Regressies controleren opslagbehoud, migratie-/healthfouten, kanaalpromotievolgorde,
+digestselectie, metadata, pauzeren, herhaalde pogingen en expliciete retry. Dat is
+geen bewijs van een echte GHCR-publicatie, permanente VM-timer of back-uprestore;
+die controles moeten bij installatie daadwerkelijk uitgevoerd worden.

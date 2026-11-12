@@ -1,0 +1,13 @@
+[Unit]
+Description=Check and deploy tested Educatief EPD main release
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/epd-deploy
+ExecStart=/usr/bin/python3 %h/epd-deploy/poll.py
+UMask=0077
+# A deployment/migration must not be killed by the usual short service timeout.
+TimeoutStartSec=infinity
+TimeoutStopSec=infinity
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,3 @@
+# User crontab fallback for student, when systemd lingering is unavailable.
+# Install this alongside existing crontab entries; choose cron OR the systemd timer.
+* * * * * /bin/sh -c 'umask 077; PATH=/usr/local/bin:/usr/bin:/bin /usr/bin/python3 /home/student/epd-deploy/poll.py >> /home/student/epd-deploy/pull.log 2>&1'
