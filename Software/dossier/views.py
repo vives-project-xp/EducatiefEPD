@@ -221,7 +221,7 @@ def case_detail(request, case_id):
         }:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            selected.answer = request.POST.get("answer", "").strip()
+            selected.answer = clean_html(request.POST.get("answer", "").strip())
             if request.POST.get("action") == "submit":
                 if not selected.answer:
                     messages.error(request, "Vul eerst een antwoord in.")

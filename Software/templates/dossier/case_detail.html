@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="case-viewer">
@@ -17,7 +18,7 @@
       {% if selected %}
         <h2>{{ selected.phase }}: {{ selected.title }}</h2>
         <div class="assignment-content">
-          {% autoescape off %}{{ selected.content|linebreaks }}{% endautoescape %}
+          {{ selected.content|safe_clean }}
         </div>
         <form method="post" class="answer-form">
           {% csrf_token %}
@@ -27,7 +28,7 @@
           {% if selected.feedback %}
             <div class="feedback">
               <strong>Feedback docent</strong>
-              {% autoescape off %}{{ selected.feedback|linebreaks }}{% endautoescape %}
+              {{ selected.feedback|safe_clean }}
             </div>
           {% endif %}
           {% if not student_case.locked and selected.status != 'submitted' and selected.status != 'approved' %}

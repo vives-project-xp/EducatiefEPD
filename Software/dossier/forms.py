@@ -6,6 +6,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import ValidationError
 
 from .matrix import blank, convert_base_values, empty_values, fingerprint, legacy_definition, normalize_definition
+from .services import clean_html
 
 from .models import (
     Assignment, Case, Education, FieldDefinition, LibraryField, LibraryTemplate,
@@ -67,6 +68,9 @@ class AssignmentForm(forms.ModelForm):
                 "placeholder": "Schrijf hier de beschrijving of instructies van de opdracht"
                 })
             }
+
+    def clean_content(self):
+        return clean_html(self.cleaned_data.get("content") or "")
 
 
 class ModuleForm(forms.ModelForm):
@@ -463,6 +467,9 @@ class ReviewForm(forms.Form):
         label="Beoordeling",
         choices=[("approved", "Goedgekeurd"), ("resubmit", "Opnieuw inleveren")],
     )
+
+    def clean_feedback(self):
+        return clean_html(self.cleaned_data.get("feedback") or "")
     feedback = forms.CharField(
         label="Feedback", required=False, widget=forms.Textarea(attrs={"rows": 3, "class": "js-tinymce"})
     )

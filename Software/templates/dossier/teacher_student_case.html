@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
@@ -23,7 +24,7 @@
             <span class="state status-{{ submission.status }}">{{ submission.get_status_display }}</span>
           </header>
           <div class="student-answer">
-            {% autoescape off %}{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}{% endautoescape %}
+            {{ submission.answer|default:'Nog niet ingevuld'|safe_clean }}
           </div>
           {% if submission.status in 'approved,resubmit' %}
             <div class="previous-review">
@@ -32,7 +33,7 @@
                 <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
               {% endif %}
               {% if submission.feedback %}
-                <div class="previous-review-feedback">{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}</div>
+                <div class="previous-review-feedback">{{ submission.feedback|safe_clean }}</div>
               {% endif %}
             </div>
           {% endif %}
