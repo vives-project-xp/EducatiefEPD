@@ -2928,6 +2928,16 @@ summary {
   background: #fff;
 }
 
+.library-dossier-form .dossier-existing-module-number {
+  min-width: 1.5em;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.library-dossier-form .dossier-existing-module-title {
+  flex: 1;
+}
+
 .library-dossier-form .dossier-existing-module input {
   flex: 0 0 auto;
   width: auto;

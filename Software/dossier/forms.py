@@ -222,6 +222,10 @@ class LibraryDossierForm(forms.ModelForm):
         required=False,
         widget=forms.CheckboxSelectMultiple,
     )
+    existing_module_order = forms.CharField(
+        required=False,
+        widget=forms.HiddenInput,
+    )
     new_modules = forms.CharField(
         label="Nieuwe modules",
         required=False,
@@ -252,6 +256,10 @@ class LibraryDossierForm(forms.ModelForm):
             self.fields["existing_modules"].initial = self.instance.modules.filter(
                 pk__in=self.fields["existing_modules"].queryset.values("pk")
             )
+            module_ids = self.instance.module_entries.filter(
+                template__in=self.fields["existing_modules"].queryset
+            ).order_by("position", "id").values_list("template_id", flat=True)
+            self.initial["existing_module_order"] = json.dumps(list(module_ids))
         if not self.is_bound:
             self.initial["new_modules"] = "[]"
 
@@ -266,7 +274,29 @@ class LibraryDossierForm(forms.ModelForm):
         if not isinstance(new_modules, list):
             self.add_error("new_modules", "De nieuwe modules moeten een lijst vormen.")
             new_modules = []
-        existing_modules = cleaned.get("existing_modules", [])
+        existing_modules = list(cleaned.get("existing_modules", []))
+        raw_module_order = cleaned.get("existing_module_order", "")
+        try:
+            module_order = json.loads(raw_module_order or "[]")
+        except json.JSONDecodeError:
+            self.add_error("existing_module_order", "De volgorde van de modules is ongeldig.")
+            module_order = []
+        if (
+            not isinstance(module_order, list)
+            or any(type(module_id) is not int or module_id < 1 for module_id in module_order)
+            or len(module_order) != len(set(module_order))
+            or set(module_order) != {module.id for module in existing_modules}
+        ):
+            if raw_module_order:
+                self.add_error(
+                    "existing_module_order",
+                    "Selecteer de bestaande modules opnieuw in de gewenste volgorde.",
+                )
+            module_order = [module.id for module in existing_modules]
+        modules_by_id = {module.id: module for module in existing_modules}
+        existing_modules = [modules_by_id[module_id] for module_id in module_order]
+        cleaned["existing_modules"] = existing_modules
+        cleaned["existing_module_order"] = module_order
         existing_titles = {module.title.casefold() for module in existing_modules}
         validated_modules = []
         titles = set()

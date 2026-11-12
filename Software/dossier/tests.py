@@ -920,6 +920,7 @@ class EpdWorkflowTests(TestCase):
             "description": "",
             "education": self.education.id,
             "existing_modules": [str(module.id) for module in modules],
+            "existing_module_order": json.dumps([module.id for module in reversed(modules)]),
             "new_modules": "[]",
         })
         self.assertRedirects(response, reverse("dossier:library_list"))
@@ -929,6 +930,10 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(
             set(dossier.modules.values_list("id", flat=True)),
             {module.id for module in modules},
+        )
+        self.assertEqual(
+            list(dossier.module_entries.values_list("template_id", flat=True)),
+            [module.id for module in reversed(modules)],
         )
 
     def test_invalid_library_choice_field_shows_validation_errors(self):
