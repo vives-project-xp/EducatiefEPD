@@ -87,6 +87,12 @@ jobs:
         run: sh -n Software/entrypoint.sh
       - name: Validate production Compose with dummy configuration
         run: python Software/deploy/tests/check_compose.py
+      - name: Validate user timer and service
+        run: |
+          runtime_dir=$(mktemp -d)
+          trap 'rm -rf -- "$runtime_dir"' EXIT
+          XDG_RUNTIME_DIR="$runtime_dir" systemd-analyze --user verify \
+            Software/deploy/epd-pull.service Software/deploy/epd-pull.timer
 
   image:
     name: Build, test and publish web image
@@ -122,6 +128,8 @@ jobs:
           docker build --pull \
             --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "io.educatiefepd.ref=refs/heads/main" \
+            --label "io.educatiefepd.run-number=$GITHUB_RUN_NUMBER" \
             --tag "$image" Software
       - name: Test the actual image with MySQL and production static collection
         run: |
@@ -164,16 +172,19 @@ jobs:
           echo "image=$digest_ref" >> "$GITHUB_OUTPUT"
           echo "Image: \`$digest_ref\`" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy:
-    name: Deploy web to VM
+  release:
+    name: Publish main release channel for VM
     needs: image
-    # Enable after VM configuration and secrets are installed.
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     concurrency:
-      group: epd-production
+      group: epd-main-release
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
       - name: Skip a superseded main commit
         id: current
         env:
@@ -182,39 +193,17 @@ jobs:
         run: |
           head=$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)
           if [[ "$head" == "$GITHUB_SHA" ]]; then
-            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
           else
-            echo 'A newer main commit exists; skipping this deployment.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'A newer main commit exists; skipping release promotion.' >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Deploy exact digest via verified SSH host
-        if: steps.current.outputs.deploy == 'true'
+      - name: Promote tested digest to main channel
+        if: steps.current.outputs.publish == 'true'
         env:
-          VM_HOST: ${{ secrets.VM_HOST }}
-          VM_PORT: ${{ secrets.VM_PORT }}
-          VM_USER: ${{ secrets.VM_USER }}
-          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
-          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
-          VM_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
           RELEASE_IMAGE: ${{ needs.image.outputs.image }}
         run: |
-          set -euo pipefail
-          VM_PORT=${VM_PORT:-22}
-          [[ "$VM_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
-          [[ "$VM_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
-          [[ "$VM_PORT" =~ ^[0-9]{1,5}$ ]] && ((10#$VM_PORT > 0 && 10#$VM_PORT < 65536))
-          [[ "$VM_DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]]
-          [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/[a-z0-9_./-]+@sha256:[0-9a-f]{64}$ ]]
-          [[ -n "$VM_SSH_KEY" && -n "$VM_KNOWN_HOSTS" ]]
-          ssh_dir=$(mktemp -d)
-          trap 'rm -rf -- "$ssh_dir"' EXIT
-          chmod 700 "$ssh_dir"
-          printf '%s\n' "$VM_SSH_KEY" | tr -d '\r' > "$ssh_dir/key"
-          printf '%s\n' "$VM_KNOWN_HOSTS" | tr -d '\r' > "$ssh_dir/known_hosts"
-          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
-          ssh -T -p "$VM_PORT" -i "$ssh_dir/key" \
-            -o BatchMode=yes -o IdentitiesOnly=yes -o ForwardAgent=no \
-            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "$VM_USER@$VM_HOST" \
-            "python3 '$VM_DEPLOY_PATH/deploy.py' '$RELEASE_IMAGE' '$GITHUB_SHA' '$GITHUB_RUN_NUMBER'"
-          echo "Deployed commit \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          python3 Software/deploy/promote.py "$RELEASE_IMAGE" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER"

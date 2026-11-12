@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Educatief EPD main release about every minute
+
+[Timer]
+OnStartupSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=epd-pull.service
+
+[Install]
+WantedBy=timers.target
