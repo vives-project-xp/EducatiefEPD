@@ -74,12 +74,14 @@ class EpdWorkflowTests(TestCase):
         )
 
     def test_student_home_lists_newest_cases_first(self):
+        self.case.publish()
+        self.case.save()
         newer_patient = Patient.objects.create(
             name="Nieuw, Nina", reference="TEST-002", created_by=self.teacher
         )
         newer_case = Case.objects.create(
             title="A-casus", patient=newer_patient, education=self.education,
-            course="Vroedkunde", created_by=self.teacher,
+            course="Vroedkunde", created_by=self.teacher, status=Case.Status.PUBLISHED,
         )
         newer_case.allowed_groups.add(self.group)
         Case.objects.filter(pk=self.case.pk).update(
@@ -90,6 +92,9 @@ class EpdWorkflowTests(TestCase):
         response = self.client.get(reverse("dossier:home"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A-casus")
+        self.assertContains(response, "Testcasus")
+        self.assertEqual([case.pk for case in response.context["cases"]], [newer_case.pk, self.case.pk])
         self.assertLess(
             response.content.find(b"A-casus"),
             response.content.find(b"Testcasus"),
@@ -294,7 +299,7 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertFalse(StudentCase.objects.filter(student=self.student).exists())
 
-    def test_student_copy_is_complete_and_immutable_from_source_changes(self):
+    def test_student_copy_preserves_initial_values_until_synchronization(self):
         anamnese = self.case.modules.get(title="Anamnese")
         symptom_field = anamnese.fields.get(label="Huidige klachten en symptomen")
         anamnese.base_data = {symptom_field.key: "Hoofdpijn"}
@@ -505,25 +510,36 @@ class EpdWorkflowTests(TestCase):
         self.assertNotContains(self.client.get(reverse("dossier:home")), self.case.title)
         self.assertTrue(StudentCase.objects.filter(id=student_case.id).exists())
 
-    def test_student_copy_does_not_gain_later_assignments_or_modules(self):
+    def test_active_student_copy_receives_later_assignments_and_modules_once(self):
         self.case.publish()
         self.case.save()
         copy, _ = start_student_case(self.case, self.student)
         assignment_count = copy.assignment_submissions.count()
         module_count = copy.module_responses.count()
-        Assignment.objects.create(case=self.case, phase="Later", title="Nieuw", position=99)
+        added_assignment = Assignment.objects.create(
+            case=self.case, phase="Later", title="Nieuw", content="Nieuwe instructie", position=99,
+        )
         template = LibraryTemplate.objects.create(
             title="Extra", category=LibraryTemplate.Category.MODULE,
             education=self.education, created_by=self.teacher,
         )
         from .services import copy_template_to_case
-        copy_template_to_case(template, self.case)
-        start_student_case(self.case, self.student)
-        self.assertEqual(copy.assignment_submissions.count(), assignment_count)
-        self.assertEqual(copy.module_responses.count(), module_count)
+        added_module = copy_template_to_case(template, self.case)
+        for _ in range(2):
+            reopened, created = start_student_case(self.case, self.student)
+            self.assertFalse(created)
+            self.assertEqual(reopened.pk, copy.pk)
+            self.assertEqual(copy.assignment_submissions.count(), assignment_count + 1)
+            self.assertEqual(copy.module_responses.count(), module_count + 1)
+        submission = copy.assignment_submissions.get(assignment=added_assignment)
+        self.assertEqual(submission.content, "Nieuwe instructie")
+        self.assertEqual(submission.answer, "")
+        self.assertEqual(submission.status, AssignmentSubmission.Status.TODO)
+        self.assertEqual(copy.module_responses.get(module=added_module).title, "Extra")
         newer, _ = start_student_case(self.case, self.other_student)
         self.assertEqual(newer.assignment_submissions.count(), assignment_count + 1)
         self.assertEqual(newer.module_responses.count(), module_count + 1)
+        self.assertNotEqual(newer.assignment_submissions.get(assignment=added_assignment).pk, submission.pk)
 
     def test_teacher_can_manage_group_and_copy_own_template(self):
         self.client.login(username="teacher", password="testpass")
