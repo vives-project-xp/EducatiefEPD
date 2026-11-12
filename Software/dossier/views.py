@@ -63,6 +63,7 @@ from .models import (
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case,
     module_schema, start_student_case, clean_html,
+    synchronize_template_to_draft_cases,
 )
 
 
@@ -1528,8 +1529,12 @@ def library_template(request, template_id=None):
         else:
             item.version += 1
         item.save()
+        updated_modules = synchronize_template_to_draft_cases(item)
         audit(request, "library.updated" if template else "library.created", item)
-        messages.success(request, "Bibliotheektemplate bewaard. Bestaande casuskopieën blijven ongewijzigd.")
+        messages.success(
+            request,
+            f"Bibliotheektemplate bewaard. {updated_modules} conceptmodule(s) bijgewerkt.",
+        )
         return redirect("dossier:library_detail", template_id=item.id)
     if template:
         return render(request, "dossier/library_detail.html", {
@@ -1557,8 +1562,12 @@ def library_field(request, template_id, field_id=None):
         item.save()
         template.version += 1
         template.save(update_fields=["version", "updated_at"])
+        updated_modules = synchronize_template_to_draft_cases(template)
         audit(request, "library_field.updated" if field else "library_field.created", item)
-        messages.success(request, "Templateveld bewaard.")
+        messages.success(
+            request,
+            f"Templateveld bewaard. {updated_modules} conceptmodule(s) bijgewerkt.",
+        )
         return redirect("dossier:library_detail", template_id=template.id)
     return render(request, "dossier/field_editor.html", {
         "form": form, "title": "Templateveld aanpassen" if field else "Templateveld toevoegen",
@@ -1596,7 +1605,11 @@ def library_field_delete(request, template_id, field_id):
     field.delete()
     template.version += 1
     template.save(update_fields=["version", "updated_at"])
-    messages.success(request, "Onderdeel verwijderd. Bestaande casuskopieën blijven behouden.")
+    updated_modules = synchronize_template_to_draft_cases(template)
+    messages.success(
+        request,
+        f"Onderdeel verwijderd. {updated_modules} conceptmodule(s) bijgewerkt.",
+    )
     return redirect("dossier:library_detail", template_id=template.id)
 
 

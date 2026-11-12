@@ -7,6 +7,7 @@ import nh3
 from .models import (
     AssignmentSubmission,
     AuditEvent,
+    Case,
     LibraryDossier,
     LibraryTemplate,
     Module,
@@ -153,6 +154,77 @@ def start_student_case(case, student):
     return student_case, created
 
 
+def _template_module_kind(template, fields):
+    kind_map = {
+        LibraryTemplate.Category.MODULE: Module.Kind.FORM,
+        LibraryTemplate.Category.QUESTIONNAIRE: Module.Kind.QUESTIONNAIRE,
+        LibraryTemplate.Category.MATRIX: Module.Kind.MATRIX,
+    }
+    kind = kind_map[template.category]
+    if template.category == LibraryTemplate.Category.MODULE and not fields:
+        kind = Module.Kind.INFORMATION
+    return kind
+
+
+def _synchronize_template_module(template, module, fields=None):
+    fields = list(fields if fields is not None else template.fields.all())
+    module.title = template.title
+    module.kind = _template_module_kind(template, fields)
+    module.instructions = template.instructions
+    module.source_template_version = template.version
+    configuration = dict(module.configuration or {})
+    configuration["library_snapshot"] = {
+        **dict(configuration.get("library_snapshot") or {}),
+        "title": template.title,
+        "version": template.version,
+    }
+    module.configuration = configuration
+    module.save(update_fields=[
+        "title", "kind", "instructions", "source_template_version", "configuration"
+    ])
+
+    existing_fields = {field.key: field for field in module.fields.all()}
+    source_keys = {field.key for field in fields}
+    for source_field in fields:
+        values = {
+            "label": source_field.label,
+            "field_type": source_field.field_type,
+            "help_text": source_field.help_text,
+            "required": source_field.required,
+            "position": source_field.position,
+            "options": deepcopy(source_field.options),
+            "rows": deepcopy(source_field.rows),
+            "columns": deepcopy(source_field.columns),
+            "matrix_definition": deepcopy(source_field.matrix_definition),
+        }
+        field = existing_fields.get(source_field.key)
+        if field is None:
+            ModuleField.objects.create(module=module, key=source_field.key, **values)
+        else:
+            for name, value in values.items():
+                setattr(field, name, value)
+            field.save(update_fields=list(values))
+    module.fields.exclude(key__in=source_keys).delete()
+    return module
+
+
+@transaction.atomic
+def synchronize_template_to_draft_cases(template):
+    template = LibraryTemplate.objects.prefetch_related("fields").get(pk=template.pk)
+    fields = list(template.fields.all())
+    modules = Module.objects.filter(
+        source_template=template,
+        case__status=Case.Status.DRAFT,
+    ).prefetch_related("fields")
+    updated_modules = 0
+    for module in modules:
+        if module.source_template_version == template.version:
+            continue
+        _synchronize_template_module(template, module, fields)
+        updated_modules += 1
+    return updated_modules
+
+
 @transaction.atomic
 def copy_template_to_case(template, case):
     template = LibraryTemplate.objects.select_for_update().prefetch_related("fields").get(
@@ -160,20 +232,18 @@ def copy_template_to_case(template, case):
     )
     existing = case.modules.filter(source_template=template).first()
     if existing:
+        if (
+            case.status == Case.Status.DRAFT
+            and existing.source_template_version != template.version
+        ):
+            _synchronize_template_module(template, existing, list(template.fields.all()))
         return existing
-    kind_map = {
-        LibraryTemplate.Category.MODULE: Module.Kind.FORM,
-        LibraryTemplate.Category.QUESTIONNAIRE: Module.Kind.QUESTIONNAIRE,
-        LibraryTemplate.Category.MATRIX: Module.Kind.MATRIX,
-    }
-    module_kind = kind_map[template.category]
-    if template.category == LibraryTemplate.Category.MODULE and not template.fields.exists():
-        module_kind = Module.Kind.INFORMATION
+    fields = list(template.fields.all())
     last_position = case.modules.order_by("-position").values_list("position", flat=True).first()
     module = Module.objects.create(
         case=case,
         title=template.title,
-        kind=module_kind,
+        kind=_template_module_kind(template, fields),
         instructions=template.instructions,
         position=(last_position if last_position is not None else -1) + 1,
         source_template=template,
@@ -188,7 +258,7 @@ def copy_template_to_case(template, case):
             options=field.options, rows=field.rows, columns=field.columns,
             matrix_definition=deepcopy(field.matrix_definition),
         )
-        for field in template.fields.all()
+        for field in fields
     ])
     return module
 
