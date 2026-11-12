@@ -330,12 +330,17 @@ def prepare_schema_fields(schema, data, *, errors=None, pending_observations=Non
 def parsed_module_data(request, schema, current_data):
     data = dict(current_data)
     missing = []
+    action = request.POST.get("action", "save")
+    observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
     for field in schema:
         key = field["key"]
         field_type = field["type"]
         if field_type == FieldDefinition.FieldType.OBSERVATION:
             current = data.get(key, [])
             value = list(current) if isinstance(current, list) else []
+            if observation_key != key:
+                data[key] = value
+                continue
             entry = {
                 name: request.POST.get(f"observation_{name}_{key}", "").strip()
                 for name in ("timestamp", "value", "note")
@@ -530,18 +535,30 @@ def format_observation_timestamp(value):
     return parsed.strftime("%d/%m/%Y %H:%M")
 
 
-def parsed_function_data(request, snapshots, current_data):
+def parsed_function_data(
+    request, snapshots, current_data, *, function_id=None, form_key=None,
+    require_complete=False,
+):
     data = dict(current_data)
     function_data = dict(data.get("_functions", {}))
     missing = []
+    action = request.POST.get("action", "save")
+    observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
     for snapshot in snapshots:
         for form in (snapshot.definition or {}).get("forms", []):
             form_id = form.get("id", form.get("position", 0))
+            current_form_key = f"{snapshot.id}-{form_id}"
+            if function_id is not None and snapshot.id != function_id:
+                continue
+            if form_key is not None and current_form_key != form_key:
+                continue
             for question in form.get("questions", []):
                 field_type = question.get("fieldType")
                 question_id = question.get("id", question.get("position", 0))
                 key = f"{snapshot.id}_{form_id}_{question_id}"
                 prefix = f"function_{key}"
+                if observation_key is not None and key != observation_key:
+                    continue
                 if field_type == "matrix":
                     definition = question.get("matrixDefinition") or legacy_definition(
                         question.get("rows", []), question.get("columns", [])
@@ -637,7 +654,7 @@ def parsed_function_data(request, snapshots, current_data):
                     if field_type == "text":
                         value = clean_html(value)
                         has_value = bool(value.strip())
-                if question.get("required") and not has_value:
+                if require_complete and question.get("required") and not has_value:
                     missing.append(question.get("question", "Dit veld"))
                 function_data[key] = value
     data["_functions"] = function_data
@@ -699,16 +716,32 @@ def dossier(request, case_id):
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            form_result = parse_module_form(request.POST, selected.schema, selected.data)
-            missing = [
-                message
-                for field_errors in form_result.errors.values()
-                for message in field_errors
-            ]
-            data = form_result.data if not form_result.errors else None
+            action = request.POST.get("action", "save")
+            observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+            function_observation_keys = {
+                f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+                for snapshot in selected_snapshots
+                for form in (snapshot.definition or {}).get("forms", [])
+                for question in form.get("questions", [])
+                if question.get("fieldType") in {"observation", "observatie"}
+            }
+            function_observation_action = observation_key in function_observation_keys
+            if function_observation_action:
+                data = selected.data
+            else:
+                form_result = parse_module_form(request.POST, selected.schema, selected.data)
+                missing = [
+                    message
+                    for field_errors in form_result.errors.values()
+                    for message in field_errors
+                ]
+                data = form_result.data if not form_result.errors else None
             function_data, function_missing = parsed_function_data(
                 request, selected_snapshots,
                 data if data is not None else selected.data,
+                function_id=selected_function_id,
+                form_key=active_form_key,
+                require_complete=action == "save",
             )
             if function_missing:
                 missing.extend(function_missing)
@@ -1199,31 +1232,7 @@ def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
-    if request.method == "POST":
-        module = Module.objects.select_for_update().get(pk=module.pk)
-    schema = module_schema(module)
-    form_result = None
-    if request.method == "POST":
-        form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
-        if form_result.errors:
-            messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
-        else:
-            data, missing = parsed_module_data(request, schema, module.base_data)
-            function_data, function_missing = parsed_function_data(
-                request, module.function_snapshots.all(),
-                data if data is not None else module.base_data,
-            )
-            missing.extend(function_missing)
-            if not missing and data is not None and function_data is not None:
-                module.base_data = function_data
-                module.save(update_fields=["base_data"])
-                audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
-                messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
-            elif missing:
-                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
-        if not form_result.errors and not missing:
-            return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
-    function_snapshots = module.function_snapshots.all()
+    function_snapshots = list(module.function_snapshots.all())
     function_id = request.POST.get("function") or request.GET.get("function")
     try:
         selected_function_id = int(function_id) if function_id else None
@@ -1232,9 +1241,68 @@ def teacher_module(request, case_id, module_id):
     available_function_ids = [snapshot.id for snapshot in function_snapshots]
     if selected_function_id not in available_function_ids:
         selected_function_id = available_function_ids[0] if available_function_ids else None
-    function_forms = prepare_function_forms(function_snapshots, module.base_data)
+    active_form_key = request.POST.get("form") or request.GET.get("form")
+    if request.method == "POST":
+        module = Module.objects.select_for_update().get(pk=module.pk)
+    schema = module_schema(module)
+    form_result = None
+    if request.method == "POST":
+        action = request.POST.get("action", "save")
+        observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+        function_observation_keys = {
+            f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+            for snapshot in function_snapshots
+            for form in (snapshot.definition or {}).get("forms", [])
+            for question in form.get("questions", [])
+            if question.get("fieldType") in {"observation", "observatie"}
+        }
+        function_observation_action = observation_key in function_observation_keys
+        module_observation_keys = {
+            field["key"] for field in schema if field["type"] == FieldDefinition.FieldType.OBSERVATION
+        }
+        module_observation_action = observation_key in module_observation_keys
+        if function_observation_action:
+            data, missing = module.base_data, []
+        else:
+            form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
+            if form_result.errors:
+                messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+            data = form_result.data if not form_result.errors else None
+            if module_observation_action:
+                missing = []
+            else:
+                data, missing = (
+                    parsed_module_data(request, schema, module.base_data)
+                    if data is not None else (None, [])
+                )
+        function_data, function_missing = parsed_function_data(
+            request, function_snapshots,
+            data if data is not None else module.base_data,
+            function_id=selected_function_id,
+            form_key=active_form_key,
+            require_complete=False,
+        )
+        missing.extend(function_missing)
+        if function_observation_action:
+            data = module.base_data
+        if not missing and data is not None and function_data is not None:
+            module.base_data = function_data
+            module.save(update_fields=["base_data"])
+            audit(request, "base_dossier.updated", module, observations_added=(
+                form_result.added_observations if form_result else []
+            ))
+            messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
+        elif missing:
+            messages.error(request, f"Controleer de gemarkeerde velden: {', '.join(missing)}.")
+        if not missing and (form_result is None or not form_result.errors):
+            return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
+    function_forms = prepare_function_forms(function_snapshots, module.base_data, active_form_key=active_form_key)
     for function in function_forms:
         function["active"] = function["id"] == selected_function_id
+    active_form_key = next(
+        (form["key"] for function in function_forms if function["active"] for form in function["forms"] if form["active"]),
+        "",
+    )
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
         "fields": prepare_schema_fields(
@@ -1244,6 +1312,7 @@ def teacher_module(request, case_id, module_id):
         ),
         "function_forms": function_forms,
         "selected_function_id": selected_function_id,
+        "active_form_key": active_form_key,
     })
 
 

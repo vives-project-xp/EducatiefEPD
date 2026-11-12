@@ -64,6 +64,9 @@
             {% empty %}
               <p class="empty-state">Dit formulier bevat geen vragen.</p>
             {% endfor %}
+            {% if function_save and not locked %}
+              <button class="primary button function-save" type="submit" name="action" value="save">Bewaren</button>
+            {% endif %}
           </section>
         {% empty %}
           <p class="empty-state">Deze functie bevat geen formulieren.</p>

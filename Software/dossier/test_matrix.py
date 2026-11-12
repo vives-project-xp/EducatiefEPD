@@ -187,7 +187,18 @@ class MatrixWorkflowTests(TestCase):
     def test_both_editors_save_matrix_other_fields_and_observation_together(self):
         for user, url, record, attribute in [(self.student, self.url, self.response, "data"), (self.teacher, self.base_url, self.module, "base_data")]:
             self.client.force_login(user)
-            result = self.client.post(url, self.post_data(action="add_observation:obs", observation_timestamp_obs="2026-10-15T12:00", observation_value_obs="Controle", observation_note_obs="Notitie"))
+            result = self.client.post(url, self.post_data())
+            self.assertEqual(result.status_code, 302)
+            result = self.client.post(
+                url,
+                {
+                    "module": self.response.pk,
+                    "action": "add_observation:obs",
+                    "observation_timestamp_obs": "2026-10-15T12:00",
+                    "observation_value_obs": "Controle",
+                    "observation_note_obs": "Notitie",
+                },
+            )
             self.assertEqual(result.status_code, 302)
             record.refresh_from_db(); data = getattr(record, attribute)
             self.assertEqual(data["sheet"]["cells"]["r0"]["c1"], "36.75")

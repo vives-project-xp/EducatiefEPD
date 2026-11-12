@@ -51,7 +51,7 @@
           <input type="hidden" name="function" value="{{ selected_function_id }}">
           <input type="hidden" name="form" value="{{ active_form_key|default:'' }}">
           {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
-          {% include 'dossier/_function_snapshots.html' with locked=student_case.locked %}
+          {% include 'dossier/_function_snapshots.html' with locked=student_case.locked function_save=True %}
           {% if not student_case.locked and selected.kind != 'information' and fields or not student_case.locked and selected.kind != 'information' and selected_function.answerable %}
             <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
           {% endif %}

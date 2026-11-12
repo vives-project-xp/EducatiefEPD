@@ -195,25 +195,38 @@ class ModuleWorkflowTests(TestCase):
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute), original)
 
-    def test_both_save_buttons_store_other_edits_and_pending_observations(self):
+    def test_save_and_observation_buttons_have_separate_scope(self):
         for role in ("student", "teacher"):
-            for action in ("save", "add_observation:observations"):
-                with self.subTest(role=role, action=action):
-                    url, record, attribute = self.target(role)
-                    setattr(record, attribute, {})
-                    record.save()
-                    result = self.client.post(url, self.form_data(
-                        action=action, field_text="Ook bewaren", observation_timestamp_observations="2026-10-15T12:00",
-                        observation_value_observations="Observatie", observation_note_observations="Toelichting",
-                    ))
-                    self.assertEqual(result.status_code, 302)
-                    record.refresh_from_db()
-                    stored = getattr(record, attribute)
-                    self.assertEqual(stored["text"], "Ook bewaren")
-                    self.assertEqual(stored["matrix"]["0_0"], "0")
-                    self.assertEqual(stored["observations"], [{"timestamp": "2026-10-15T12:00", "value": "Observatie", "note": "Toelichting"}])
+            with self.subTest(role=role, action="save"):
+                url, record, attribute = self.target(role)
+                setattr(record, attribute, {})
+                record.save()
+                result = self.client.post(url, self.form_data(
+                    action="save", field_text="Ook bewaren", observation_timestamp_observations="2026-10-15T12:00",
+                    observation_value_observations="Observatie", observation_note_observations="Toelichting",
+                ))
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Ook bewaren")
+                self.assertEqual(stored["matrix"]["0_0"], "0")
+                self.assertFalse(stored.get("observations"))
+            with self.subTest(role=role, action="add_observation"):
+                url, record, attribute = self.target(role)
+                setattr(record, attribute, {})
+                record.save()
+                result = self.client.post(url, self.form_data(
+                    action="add_observation:observations", field_text="Niet bewaren",
+                    observation_timestamp_observations="2026-10-15T12:00",
+                    observation_value_observations="Observatie", observation_note_observations="Toelichting",
+                ))
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertFalse(stored.get("text"))
+                self.assertEqual(stored["observations"], [{"timestamp": "2026-10-15T12:00", "value": "Observatie", "note": "Toelichting"}])
 
-    def test_pending_observation_is_only_appended_after_other_errors_are_corrected(self):
+    def test_observation_addition_does_not_save_other_errors(self):
         for role in ("student", "teacher"):
             with self.subTest(role=role):
                 url, record, attribute = self.target(role)
@@ -222,14 +235,10 @@ class ModuleWorkflowTests(TestCase):
                     observation_timestamp_observations="2026-10-15T12:00", observation_value_observations="Nieuwe meting",
                 )
                 result = self.client.post(url, payload)
-                self.assertEqual(result.status_code, 200)
-                self.assertContains(result, 'value="Nieuwe meting"')
-                record.refresh_from_db()
-                self.assertFalse(getattr(record, attribute).get("observations"))
-                payload["field_number"] = "12"
-                self.assertEqual(self.client.post(url, payload).status_code, 302)
+                self.assertEqual(result.status_code, 302)
                 record.refresh_from_db()
                 self.assertEqual(len(getattr(record, attribute)["observations"]), 1)
+                self.assertFalse(getattr(record, attribute).get("number"))
 
     def test_invalid_observation_prevents_partial_save(self):
         for role in ("student", "teacher"):
@@ -240,12 +249,11 @@ class ModuleWorkflowTests(TestCase):
                     observation_timestamp_observations="ongeldig", observation_value_observations="Wel ingevuld",
                 ))
                 self.assertEqual(result.status_code, 200)
-                self.assertContains(result, 'value="Onbewaard"')
                 self.assertContains(result, 'value="ongeldig"')
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute), {})
 
-    def test_multiple_pending_observations_save_together(self):
+    def test_observation_button_only_adds_target_observation(self):
         self.response.schema.append({"key": "second", "type": "observation", "label": "Tweede observatie"})
         self.response.save()
         self.client.force_login(self.student)
@@ -257,7 +265,7 @@ class ModuleWorkflowTests(TestCase):
         self.assertEqual(result.status_code, 302)
         self.response.refresh_from_db()
         self.assertEqual(self.response.data["observations"][0]["value"], "Eerste")
-        self.assertEqual(self.response.data["second"][0]["value"], "Tweede")
+        self.assertFalse(self.response.data.get("second"))
 
     def test_locked_student_dossier_rejects_both_save_buttons(self):
         self.client.force_login(self.student)

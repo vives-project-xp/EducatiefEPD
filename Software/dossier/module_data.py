@@ -120,13 +120,15 @@ def parse_module_form(post, schema, current_data, *, edit_readonly=False):
 
     for field in schema:
         key, field_type = field["key"], field["type"]
+        if observation_key is not None and field_type != "observation":
+            continue
         if field_type == "observation":
             entry = {
                 name: post.get(f"observation_{name}_{key}", "")
                 for name in ("timestamp", "value", "note")
             }
             pending[key] = entry
-            if key == observation_key or any(value.strip() for value in entry.values()):
+            if key == observation_key:
                 normalized = {name: value.strip() for name, value in entry.items()}
                 if not valid_observation(normalized):
                     pending_errors[key] = ["Geef een geldig tijdstip en een observatie op."]

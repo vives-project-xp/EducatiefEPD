@@ -70,4 +70,4 @@ class FunctionTypeRenderingTests(SimpleTestCase):
         self.assertIn("Nog geen observaties.", html)
         self.assertIn("observation_timestamp_1_2_0", html)
         self.assertIn("observation_value_1_2_0", html)
-        self.assertIn("Observatie en wijzigingen bewaren", html)
+        self.assertIn("Observatie toevoegen", html)

@@ -6,6 +6,6 @@
     <input type="{% if field.errors %}text{% else %}datetime-local{% endif %}" name="observation_timestamp_{{ field.key }}" value="{{ field.pending_observation.timestamp }}" aria-label="{{ field.label }}: tijdstip" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
     <input id="{% if function_observation %}function_{% else %}field_{% endif %}{{ field.key }}" name="observation_value_{{ field.key }}" value="{{ field.pending_observation.value }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
     <input name="observation_note_{{ field.key }}" value="{{ field.pending_observation.note }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
-    <button class="outline button" name="action" value="{% if function_observation %}save{% else %}add_observation:{{ field.key }}{% endif %}">Observatie en wijzigingen bewaren</button>
+    <button class="outline button" name="action" value="add_observation:{{ field.key }}">Observatie toevoegen</button>
   </div>
 {% endif %}
