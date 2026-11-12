@@ -6,6 +6,7 @@ from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import ValidationError
 
 from .matrix import blank, convert_base_values, empty_values, fingerprint, legacy_definition, normalize_definition
+from .widgets import PatientImageInput
 
 from .models import (
     Assignment, Case, Education, FieldDefinition, LibraryField, LibraryTemplate,
@@ -24,9 +25,12 @@ class PatientForm(forms.ModelForm):
         labels = {
             "name": "Naam patiënt", "reference": "Fictieve referentie",
             "birth_date": "Geboortedatum", "gender": "Geslacht",
-            "image": "Upload hier een afbeelding", "context": "Korte context",
+            "image": "Patiëntafbeelding", "context": "Korte context",
         }
-        widgets = {"birth_date": forms.DateInput(attrs={"type": "date"})}
+        widgets = {
+            "birth_date": forms.DateInput(attrs={"type": "date"}),
+            "image": PatientImageInput(attrs={"accept": "image/*"}),
+        }
 
     def clean_image(self):
         upload = self.cleaned_data.get("image")

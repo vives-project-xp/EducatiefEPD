@@ -1195,6 +1195,50 @@ summary {
   font-size: 0.8rem;
 }
 
+.patient-image-widget {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.patient-image-widget [hidden] {
+  display: none !important;
+}
+
+.patient-image-preview img {
+  display: block;
+  max-width: 100%;
+  width: 160px;
+  height: 120px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.patient-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.patient-image-actions .button {
+  border: 1px solid var(--line);
+  min-height: 42px;
+}
+
+.patient-image-actions .button:focus-visible {
+  outline: 2px solid var(--blue-dark);
+  outline-offset: 3px;
+}
+
+.patient-image-status {
+  margin: 0;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
 .editor-form ul {
   color: var(--red);
 }
