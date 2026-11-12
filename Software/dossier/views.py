@@ -87,7 +87,10 @@ def require_teacher(user):
 
 def teacher_cases(user):
     cases = Case.objects.select_related("patient", "created_by").prefetch_related(
-        "modules__fields", "assignments", "student_cases__student"
+        "modules__fields",
+        "assignments",
+        "student_cases__student",
+        "allowed_groups__members__epd_profile",
     )
     return cases if is_admin(user) else cases.filter(created_by=user)
 
@@ -407,6 +410,15 @@ def teacher_dashboard(request):
         cases = cases.filter(status=status)
     if query:
         cases = cases.filter(Q(title__icontains=query) | Q(patient__name__icontains=query))
+    cases = list(cases.order_by("-updated_at", "-pk"))
+    for case in cases:
+        case.assigned_student_count = len({
+            student.id
+            for group in case.allowed_groups.all()
+            for student in group.members.all()
+            if getattr(getattr(student, "epd_profile", None), "role", None)
+            == Profile.Role.STUDENT
+        })
     counts = {key: teacher_cases(request.user).filter(status=key).count() for key in Case.Status.values}
     return render(request, "dossier/teacher_dashboard.html", {
         "cases": cases, "status_filter": status, "query": query, "counts": counts,
