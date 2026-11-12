@@ -173,16 +173,42 @@ class MatrixWorkflowTests(TestCase):
         student_case, _ = start_student_case(new_case, self.other)
         self.assertEqual(student_case.module_responses.get().schema[0]["matrix_definition"], sheet())
 
-    def test_two_student_snapshots_remain_independent_after_source_changes(self):
-        self.module.fields.filter(key="sheet").update(matrix_definition=legacy_definition(["Nieuw"], ["Nieuw"]))
+    def test_source_matrix_syncs_to_each_student_without_sharing_answers(self):
+        original = {"sheet": values(), "other": "Bestaand studentantwoord"}
+        self.response.data = deepcopy(original)
+        self.response.save()
+        updated_definition = legacy_definition(["Nieuw"], ["Nieuw"])
+        self.module.fields.filter(key="sheet").update(matrix_definition=updated_definition)
         self.field.matrix_definition = legacy_definition(["Bron"], ["Bron"]); self.field.save()
         self.client.force_login(self.student)
-        self.assertEqual(self.client.post(self.url, self.post_data()).status_code, 302)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
         self.response.refresh_from_db()
-        self.assertEqual(self.response.schema[0]["matrix_definition"], sheet())
+        self.assertEqual(self.response.schema[0]["matrix_definition"], updated_definition)
+        self.assertEqual(self.response.data, original)
+
+        # Old input no longer matches the new grid; rejection must preserve saved answers.
+        self.assertEqual(self.client.post(self.url, self.post_data()).status_code, 200)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data, original)
+        first_values = {"version": 2, "cells": {"r0": {"c0": "Antwoord student 1"}}}
+        self.assertEqual(self.client.post(self.url, self.post_data(first_values)).status_code, 302)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data["sheet"], first_values)
+
         other = self.other_case.module_responses.get(module=self.module)
         self.assertEqual(other.schema[0]["matrix_definition"], sheet())
         self.assertEqual(other.data, {})
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        other.refresh_from_db()
+        self.assertEqual(other.schema[0]["matrix_definition"], updated_definition)
+        self.assertEqual(other.data, {})
+        second_values = {"version": 2, "cells": {"r0": {"c0": "Antwoord student 2"}}}
+        self.assertEqual(self.client.post(self.url, self.post_data(second_values, module=other.pk)).status_code, 302)
+        other.refresh_from_db()
+        self.response.refresh_from_db()
+        self.assertEqual(other.data["sheet"], second_values)
+        self.assertEqual(self.response.data["sheet"], first_values)
 
     def test_both_editors_save_matrix_other_fields_and_observation_together(self):
         for user, url, record, attribute in [(self.student, self.url, self.response, "data"), (self.teacher, self.base_url, self.module, "base_data")]:

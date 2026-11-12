@@ -142,22 +142,43 @@ class ModuleWorkflowTests(TestCase):
         self.student_case.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
 
-    def test_complete_snapshot_submits_despite_new_source_requirements(self):
-        self.save_response(self.complete_data())
+    def test_new_source_requirement_syncs_and_blocks_submission_until_completed(self):
+        original = self.complete_data()
+        self.save_response(original)
         ModuleField.objects.create(module=self.module, key="later", label="Later toegevoegd", field_type="short_text", required=True)
         self.client.force_login(self.student)
+        self.assertRedirects(self.client.post(self.submit_url), f"{self.dossier_url}?module={self.response.pk}&validate=1")
+        self.student_case.refresh_from_db()
+        self.response.refresh_from_db()
+        self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
+        self.assertIsNone(self.student_case.submitted_at)
+        self.assertEqual(self.response.data, original)
+        self.assertTrue(next(field for field in self.response.schema if field["key"] == "later")["required"])
+        self.assertFalse(AuditEvent.objects.filter(action="student_case.submitted").exists())
+
+        self.assertEqual(self.client.post(self.dossier_url, self.form_data(field_later="Nieuw veld ingevuld")).status_code, 302)
         self.assertRedirects(self.client.post(self.submit_url), reverse("dossier:case_detail", args=[self.case.pk]))
         self.student_case.refresh_from_db()
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data, {**original, "later": "Nieuw veld ingevuld"})
         self.assertEqual(self.student_case.status, StudentCase.Status.SUBMITTED)
         self.assertIsNotNone(self.student_case.submitted_at)
         self.assertEqual(AuditEvent.objects.filter(action="student_case.submitted").count(), 1)
 
-    def test_snapshot_requirement_survives_source_becoming_optional(self):
+    def test_source_fields_becoming_optional_sync_and_allow_submission(self):
+        original = {"text": "Bestaand studentantwoord"}
+        self.save_response(original)
         self.module.fields.update(required=False)
         self.client.force_login(self.student)
-        self.client.post(self.submit_url)
+        self.assertRedirects(self.client.post(self.submit_url), reverse("dossier:case_detail", args=[self.case.pk]))
         self.student_case.refresh_from_db()
-        self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
+        self.response.refresh_from_db()
+        self.assertTrue(self.response.schema)
+        self.assertTrue(all(not field["required"] for field in self.response.schema))
+        self.assertEqual(self.response.data, original)
+        self.assertEqual(self.student_case.status, StudentCase.Status.SUBMITTED)
+        self.assertIsNotNone(self.student_case.submitted_at)
+        self.assertEqual(AuditEvent.objects.filter(action="student_case.submitted").count(), 1)
 
     def test_complete_modules_do_not_bypass_assignment_submission(self):
         self.save_response(self.complete_data())
@@ -246,8 +267,11 @@ class ModuleWorkflowTests(TestCase):
                 self.assertEqual(getattr(record, attribute), {})
 
     def test_multiple_pending_observations_save_together(self):
-        self.response.schema.append({"key": "second", "type": "observation", "label": "Tweede observatie"})
-        self.response.save()
+        ModuleField.objects.create(
+            module=self.module, key="second", field_type="observation",
+            label="Tweede observatie", position=7,
+        )
+        self.assertNotIn("second", {field["key"] for field in self.response.schema})
         self.client.force_login(self.student)
         result = self.client.post(self.dossier_url, self.form_data(
             action="add_observation:observations", observation_timestamp_observations="2026-10-15T12:00",
@@ -256,6 +280,7 @@ class ModuleWorkflowTests(TestCase):
         ))
         self.assertEqual(result.status_code, 302)
         self.response.refresh_from_db()
+        self.assertIn("second", {field["key"] for field in self.response.schema})
         self.assertEqual(self.response.data["observations"][0]["value"], "Eerste")
         self.assertEqual(self.response.data["second"][0]["value"], "Tweede")
 
