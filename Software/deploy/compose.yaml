@@ -1,0 +1,73 @@
+# Standalone VM configuration. Existing project, database volume and uploads MUST match.
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?}
+      MYSQL_USER: ${MYSQL_USER:?}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+    command: [--character-set-server=utf8mb4, --collation-server=utf8mb4_0900_ai_ci]
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h localhost -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    image: ${EPD_IMAGE:?Use deploy.py with an immutable image digest}
+    restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - "${WEB_BIND:?}:8001:8001"
+    volumes:
+      - type: bind
+        source: ${MEDIA_HOST_DIR:?Absolute existing uploads directory required}
+        target: /app/uploads
+        bind:
+          create_host_path: false
+    environment:
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+      SECRET_KEY: ${SECRET_KEY:?}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-1}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?}
+      MYSQL_USER: ${MYSQL_USER:?}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MEDIA_ROOT: /app/uploads
+      RUN_MIGRATIONS: "0"
+      SEED_DEMO: "0"
+      DEPLOY_HEALTH_HOST: ${DEPLOY_HEALTH_HOST:?}
+      OIDC_ENABLED: ${OIDC_ENABLED:-0}
+      EMERGENCY_LOGIN_ENABLED: ${EMERGENCY_LOGIN_ENABLED:-0}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_RP_CLIENT_ID: ${OIDC_RP_CLIENT_ID:-}
+      OIDC_RP_CLIENT_SECRET: ${OIDC_RP_CLIENT_SECRET:-}
+      OIDC_OP_AUTHORIZATION_ENDPOINT: ${OIDC_OP_AUTHORIZATION_ENDPOINT:-}
+      OIDC_OP_TOKEN_ENDPOINT: ${OIDC_OP_TOKEN_ENDPOINT:-}
+      OIDC_TOKEN_HOST_HEADER: ${OIDC_TOKEN_HOST_HEADER:-}
+      OIDC_OP_USER_ENDPOINT: ${OIDC_OP_USER_ENDPOINT:-}
+      OIDC_OP_JWKS_ENDPOINT: ${OIDC_OP_JWKS_ENDPOINT:-}
+      OIDC_END_SESSION_ENDPOINT: ${OIDC_END_SESSION_ENDPOINT:-}
+      OIDC_GROUP_CLAIM: ${OIDC_GROUP_CLAIM:-groups}
+      OIDC_STUDENT_GROUPS: ${OIDC_STUDENT_GROUPS:-epd-studenten}
+      OIDC_TEACHER_GROUPS: ${OIDC_TEACHER_GROUPS:-epd-docenten}
+      OIDC_ADMIN_GROUPS: ${OIDC_ADMIN_GROUPS:-epd-beheerders}
+    healthcheck:
+      test: [CMD, python, /app/healthcheck.py]
+      interval: 5s
+      timeout: 15s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  mysql_data:
+    external: true
+    name: ${MYSQL_VOLUME_NAME:?Existing database volume required}

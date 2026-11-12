@@ -64,6 +64,64 @@ def module_schema(module):
 
 
 @transaction.atomic
+def synchronize_student_case(student_case):
+    if student_case.locked:
+        return False
+
+    changed = False
+    assignments = list(student_case.case.assignments.all())
+    submissions = {
+        submission.assignment_id: submission
+        for submission in student_case.assignment_submissions.all()
+        if submission.assignment_id is not None
+    }
+    for assignment in assignments:
+        submission = submissions.get(assignment.id)
+        if submission is None:
+            submission = AssignmentSubmission(student_case=student_case, assignment=assignment)
+            submission.hydrate_from_source()
+            submission.save()
+            changed = True
+            continue
+        source_values = (assignment.phase, assignment.title, assignment.content, assignment.position)
+        current_values = (submission.phase, submission.title, submission.content, submission.position)
+        if source_values != current_values:
+            submission.hydrate_from_source()
+            submission.save(update_fields=["phase", "title", "content", "position", "updated_at"])
+            changed = True
+
+    modules = list(student_case.case.modules.prefetch_related("fields").all())
+    responses = {
+        response.module_id: response
+        for response in student_case.module_responses.all()
+        if response.module_id is not None
+    }
+    for module in modules:
+        response = responses.get(module.id)
+        schema = module_schema(module)
+        if response is None:
+            response = ModuleResponse(student_case=student_case, module=module)
+            response.hydrate_from_source()
+            response.schema = schema
+            response.data = deepcopy(module.base_data)
+            response.save()
+            changed = True
+            continue
+        source_values = (module.title, module.kind, module.instructions, module.position, schema)
+        current_values = (
+            response.title, response.kind, response.instructions, response.position, response.schema
+        )
+        if source_values != current_values:
+            response.hydrate_from_source()
+            response.schema = schema
+            response.save(update_fields=[
+                "title", "kind", "instructions", "position", "schema", "updated_at"
+            ])
+            changed = True
+    return changed
+
+
+@transaction.atomic
 def start_student_case(case, student):
     student_case, created = StudentCase.objects.select_for_update().get_or_create(
         case=case, student=student
@@ -90,6 +148,8 @@ def start_student_case(case, student):
             response.schema = module_schema(module)
             response.data = deepcopy(module.base_data)
             response.save()
+    else:
+        synchronize_student_case(student_case)
     return student_case, created
 
 

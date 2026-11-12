@@ -1,0 +1,9 @@
+{
+  "project": "software",
+  "mysql_volume": "software_mysql_data",
+  "media_dir": "/home/student/EducatiefEPD/Software/uploads",
+  "web_bind": "0.0.0.0",
+  "health_host": "epd.example.be",
+  "health_url": "https://epd.example.be/health/",
+  "image_repository": "ghcr.io/vives-project-xp/educatiefepd"
+}

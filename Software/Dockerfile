@@ -28,7 +28,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
 COPY --chown=epd:epd . .
-RUN mkdir -p /app/staticfiles \
+RUN mkdir -p /app/staticfiles /app/uploads \
     && chown -R epd:epd /app \
     && sed -i 's/\r$//' /app/entrypoint.sh \
     && chmod +x /app/entrypoint.sh

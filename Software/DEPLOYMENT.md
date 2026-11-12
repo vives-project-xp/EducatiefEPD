@@ -1,5 +1,9 @@
 # MySQL-deployment
 
+Voor automatische updates bij pushes op `main`, zie [CI-CD.md](CI-CD.md).
+Volg na de overstap de releaseprocedure daar; de onderstaande buildcommando's
+blijven bedoeld voor een lokaal gebouwde installatie.
+
 Het platform gebruikt uitsluitend MySQL 8.4. De database is alleen bereikbaar op het interne Docker-netwerk en publiceert geen hostpoort.
 
 ## Aanmelden via Authentik

@@ -44,6 +44,20 @@ def provision():
             user.save(update_fields=["password"])
         user.groups.add(group)
 
+    base_url = required("EPD_BASE_URL").rstrip("/")
+    redirect_uris = [
+        {
+            "matching_mode": "strict",
+            "url": f"{base_url}/oidc/callback/",
+            "redirect_uri_type": "authorization",
+        },
+        {
+            "matching_mode": "strict",
+            "url": f"{base_url}/accounts/login/",
+            "redirect_uri_type": "logout",
+        },
+    ]
+
     for slug, client_id, secret_name, title in (
         ("educatief-epd", "educatief-epd-local", "EPD_OIDC_CLIENT_SECRET", "Educatief EPD lokaal"),
         (
@@ -63,18 +77,7 @@ def provision():
                 "client_id": client_id,
                 "client_secret": required(secret_name),
                 "grant_types": ["authorization_code"],
-                "_redirect_uris": [
-                    {
-                        "matching_mode": "strict",
-                        "url": "http://localhost:8001/oidc/callback/",
-                        "redirect_uri_type": "authorization",
-                    },
-                    {
-                        "matching_mode": "strict",
-                        "url": "http://localhost:8001/accounts/login/",
-                        "redirect_uri_type": "logout",
-                    },
-                ],
+                "_redirect_uris": redirect_uris,
                 "signing_key": CertificateKeyPair.objects.get(
                     name="authentik Internal JWT Certificate"
                 ),

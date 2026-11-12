@@ -6,6 +6,33 @@
   const moduleTemplate = document.getElementById("module-template");
   const fieldTemplate = document.getElementById("module-field-template");
   const serializedModules = document.getElementById("id_new_modules");
+  const moduleOrderInput = document.getElementById("id_existing_module_order");
+  const existingModuleCheckboxes = [...form.querySelectorAll('input[name="existing_modules"]')];
+  let selectedModuleOrder = [];
+
+  try {
+    const initialOrder = JSON.parse(moduleOrderInput.value || "[]");
+    if (Array.isArray(initialOrder)) selectedModuleOrder = initialOrder;
+  } catch (error) {
+    selectedModuleOrder = [];
+  }
+
+  function updateExistingModuleOrder() {
+    const checkedIds = new Set(
+      existingModuleCheckboxes.filter((checkbox) => checkbox.checked).map((checkbox) => Number(checkbox.value))
+    );
+    selectedModuleOrder = selectedModuleOrder.filter((moduleId) => checkedIds.has(moduleId));
+    for (const checkbox of existingModuleCheckboxes) {
+      const moduleId = Number(checkbox.value);
+      if (checkbox.checked && !selectedModuleOrder.includes(moduleId)) {
+        selectedModuleOrder.push(moduleId);
+      }
+      const number = selectedModuleOrder.indexOf(moduleId);
+      checkbox.closest(".dossier-existing-module").querySelector(".dossier-existing-module-number").textContent =
+        number === -1 ? "" : `${number + 1}.`;
+    }
+    moduleOrderInput.value = JSON.stringify(selectedModuleOrder);
+  }
 
   const splitLines = (value) => value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 
@@ -66,6 +93,10 @@
     for (const module of initialModules) addModule(module);
   }
 
+  for (const checkbox of existingModuleCheckboxes) {
+    checkbox.addEventListener("change", updateExistingModuleOrder);
+  }
+  updateExistingModuleOrder();
   document.getElementById("add-module").addEventListener("click", () => addModule());
   form.addEventListener("submit", () => {
     const modules = [...modulesContainer.querySelectorAll(".dossier-module-editor")].map((module) => {

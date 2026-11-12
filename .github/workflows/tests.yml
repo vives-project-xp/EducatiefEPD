@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   django-tests:
@@ -69,3 +73,148 @@ jobs:
           done
       - name: Matrix core tests
         run: node --test Software/tests/matrix-core.test.mjs
+
+  deploy-checks:
+    name: Deployment regression checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s Software/deploy/tests -v
+      - name: Validate entrypoint syntax
+        run: sh -n Software/entrypoint.sh
+      - name: Validate production Compose with dummy configuration
+        run: python Software/deploy/tests/check_compose.py
+
+  image:
+    name: Build, test and publish web image
+    needs: [django-tests, static-and-node, deploy-checks]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: epd_image_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image for the tested commit
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}:sha-${GITHUB_SHA}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          echo "RELEASE_TAG=$image" >> "$GITHUB_ENV"
+          docker build --pull \
+            --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$image" Software
+      - name: Test the actual image with MySQL and production static collection
+        run: |
+          docker run --rm --network host --entrypoint sh \
+            -e SECRET_KEY=ci-only-not-secret -e DJANGO_DEBUG=1 \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e MYSQL_DATABASE=epd_image_ci -e MYSQL_USER=root -e MYSQL_PASSWORD=root \
+            -e MYSQL_HOST=127.0.0.1 -e MYSQL_PORT=3306 \
+            "$RELEASE_TAG" -ec 'python manage.py check &&
+              python manage.py makemigrations --check --dry-run &&
+              python manage.py test --verbosity 1 &&
+              DJANGO_DEBUG=0 python manage.py collectstatic --noinput'
+      - name: Smoke test real image startup and HTTP/database health
+        run: |
+          trap 'docker rm -f epd-image-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name epd-image-smoke --network host \
+            -e SECRET_KEY=ci-only-not-secret -e DJANGO_DEBUG=0 \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1 -e DEPLOY_HEALTH_HOST=127.0.0.1 \
+            -e MYSQL_DATABASE=epd_image_ci -e MYSQL_USER=root -e MYSQL_PASSWORD=root \
+            -e MYSQL_HOST=127.0.0.1 -e MYSQL_PORT=3306 "$RELEASE_TAG"
+          for attempt in $(seq 1 60); do
+            if docker exec epd-image-smoke python /app/healthcheck.py >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs epd-image-smoke
+          exit 1
+      - name: Publish the tested image
+        id: publish
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          docker push "$RELEASE_TAG"
+          digest_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$RELEASE_TAG")
+          [[ "$digest_ref" =~ ^ghcr\.io/.+@sha256:[0-9a-f]{64}$ ]]
+          echo "image=$digest_ref" >> "$GITHUB_OUTPUT"
+          echo "Image: \`$digest_ref\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy web to VM
+    needs: image
+    # Enable after VM configuration and secrets are installed.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: epd-production
+      cancel-in-progress: false
+    steps:
+      - name: Skip a superseded main commit
+        id: current
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          head=$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'A newer main commit exists; skipping this deployment.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Deploy exact digest via verified SSH host
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_PORT: ${{ secrets.VM_PORT }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+          VM_DEPLOY_PATH: ${{ secrets.VM_DEPLOY_PATH }}
+          RELEASE_IMAGE: ${{ needs.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          VM_PORT=${VM_PORT:-22}
+          [[ "$VM_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$VM_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]
+          [[ "$VM_PORT" =~ ^[0-9]{1,5}$ ]] && ((10#$VM_PORT > 0 && 10#$VM_PORT < 65536))
+          [[ "$VM_DEPLOY_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]]
+          [[ "$RELEASE_IMAGE" =~ ^ghcr\.io/[a-z0-9_./-]+@sha256:[0-9a-f]{64}$ ]]
+          [[ -n "$VM_SSH_KEY" && -n "$VM_KNOWN_HOSTS" ]]
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          chmod 700 "$ssh_dir"
+          printf '%s\n' "$VM_SSH_KEY" | tr -d '\r' > "$ssh_dir/key"
+          printf '%s\n' "$VM_KNOWN_HOSTS" | tr -d '\r' > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/key" "$ssh_dir/known_hosts"
+          ssh -T -p "$VM_PORT" -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o ForwardAgent=no \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "$VM_USER@$VM_HOST" \
+            "python3 '$VM_DEPLOY_PATH/deploy.py' '$RELEASE_IMAGE' '$GITHUB_SHA' '$GITHUB_RUN_NUMBER'"
+          echo "Deployed commit \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"

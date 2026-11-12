@@ -6,3 +6,8 @@ plan.md
 AGENTS.md
 MEMORY.md
 *.jpg
+Software/deploy/app.env
+Software/deploy/deploy.json
+Software/deploy/state.json
+Software/deploy/state.tmp
+Software/deploy/.deploy.lock
