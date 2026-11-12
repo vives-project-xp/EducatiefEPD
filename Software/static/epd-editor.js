@@ -40,12 +40,32 @@ document.addEventListener('DOMContentLoaded', () => {
     tinymce.init({
       selector: 'textarea.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
       license_key: 'gpl',
-      base_url: '/static/tinymce',
-      suffix: '.min',
       menubar: false,
-      plugins: 'lists link table',
-      toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | importdocx exportdocx',
+      plugins: 'lists link table image',
+      toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | image importdocx exportdocx',
       color_cols: 5,
+      file_picker_types: 'image',
+      file_picker_callback(callback, value, meta) {
+        if (meta.filetype !== 'image') return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = () => {
+          const file = input.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const id = `blobid${Date.now()}`;
+            const blobCache = tinymce.activeEditor.editorUpload.blobCache;
+            const base64 = reader.result.split(',')[1];
+            const blobInfo = blobCache.create(id, file, base64);
+            blobCache.add(blobInfo);
+            callback(blobInfo.blobUri(), { title: file.name });
+          };
+          reader.readAsDataURL(file);
+        };
+        input.click();
+      },
       setup(editor) {
         editor.ui.registry.addButton('importdocx', {
           text: 'Import Word', onAction: () => importDocx(editor),
@@ -84,7 +104,7 @@ function importDocx(editor) {
     body.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
     const response = await fetch('/import/docx/', { method: 'POST', body });
     let data = {};
-    try { data = await response.json(); } catch (e) {}  
+    try { data = await response.json(); } catch (error) {}
     if (!response.ok) return alert(data.error || `Import mislukt (HTTP ${response.status}).`);
     editor.insertContent(data.html);
   };

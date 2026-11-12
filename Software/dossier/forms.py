@@ -2,6 +2,7 @@ import json
 
 from django import forms
 from django.utils.text import slugify
+from django.core.files.uploadedfile import UploadedFile
 from django.core.exceptions import ValidationError
 
 from .matrix import blank, convert_base_values, empty_values, fingerprint, legacy_definition, normalize_definition
@@ -23,9 +24,15 @@ class PatientForm(forms.ModelForm):
         labels = {
             "name": "Naam patiënt", "reference": "Fictieve referentie",
             "birth_date": "Geboortedatum", "gender": "Geslacht",
-            "image": "URL patiëntfoto", "context": "Korte context",
+            "image": "Upload hier een afbeelding", "context": "Korte context",
         }
         widgets = {"birth_date": forms.DateInput(attrs={"type": "date"})}
+
+    def clean_image(self):
+        upload = self.cleaned_data.get("image")
+        if isinstance(upload, UploadedFile) and upload.size > 10 * 1024 * 1024:
+            raise forms.ValidationError("De foto mag maximaal 10 MB groot zijn.")
+        return upload
 
 
 class CaseForm(forms.ModelForm):

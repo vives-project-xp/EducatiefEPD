@@ -6,6 +6,9 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "uploads")))
+MEDIA_URL = "/uploads/"
+
 
 def env_bool(name, default=False):
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
