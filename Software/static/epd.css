@@ -2336,7 +2336,7 @@ summary {
   margin: 14px 0;
   padding: 14px;
   background: #f7f8fa;
-  line-height: 1.5;
+  line-height: 1.2;
 }
 
 .student-answer img {
@@ -2346,6 +2346,17 @@ summary {
 
 .student-answer table {
   max-width: 100%;
+}
+
+.student-answer p,
+.previous-review-feedback p {
+  margin: 0 0 10px;
+  line-height: 1.2;
+}
+
+.student-answer p:last-child,
+.previous-review-feedback p:last-child {
+  margin-bottom: 0;
 }
 
 .review-form {
@@ -2368,6 +2379,50 @@ summary {
 }
 .review-actions {
   margin: 10px 0px;
+}
+
+.review-field-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.button-copy-answer {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--blue);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.button-copy-answer:hover {
+  background: var(--blue);
+  color: #fff;
+}
+
+.previous-review {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: 6px;
+  background: #f7f9fc;
+  display: grid;
+  gap: 6px;
+}
+
+.previous-review small {
+  color: #667;
+}
+
+.previous-review-feedback {
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
 }
 
 .response-detail {
