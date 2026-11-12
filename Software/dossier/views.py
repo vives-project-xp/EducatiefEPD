@@ -524,6 +524,9 @@ def teacher_case(request, case_id):
         "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
         "available_dossiers": dossiers,
+        "removed_module": case.modules.filter(
+            source_template__status=LibraryTemplate.Status.ARCHIVED,
+        ).select_related("source_template").first(),
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
 
@@ -861,6 +864,31 @@ def teacher_module(request, case_id, module_id):
             pending_observations=form_result.pending_observations if form_result else None,
         ),
     })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def teacher_removed_module_resolve(request, case_id, module_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    if case.status != Case.Status.DRAFT:
+        raise PermissionDenied
+    if case.student_cases.exists():
+        messages.error(
+            request,
+            "Deze module kan niet worden verwijderd omdat de casus al studentversies bevat.",
+        )
+        return redirect("dossier:teacher_case", case_id=case.id)
+    module = get_object_or_404(
+        case.modules.select_for_update().select_related("source_template"),
+        id=module_id,
+        source_template__status=LibraryTemplate.Status.ARCHIVED,
+    )
+    audit(request, "module.deleted", module, title=module.title)
+    module.delete()
+    messages.success(request, "De verwijderde bibliotheekmodule is uit de conceptcasus verwijderd.")
+    return redirect("dossier:teacher_case", case_id=case.id)
 
 
 @login_required

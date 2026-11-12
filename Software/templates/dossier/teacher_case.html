@@ -55,6 +55,22 @@
       <button class="outline button">Toewijzing bewaren</button>
     </form>
   </section>
+  {% if case.status == 'draft' and removed_module %}
+    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="library-removal-title">
+      <div class="library-removal-popup-content">
+        <p class="eyebrow">Bibliotheek gewijzigd</p>
+        <h2 id="library-removal-title">Dossiermodule verwijderd uit de bibliotheek</h2>
+        <p>De module <strong>{{ removed_module.title }}</strong> is uit de bibliotheek verwijderd. Wil je deze ook uit deze conceptcasus verwijderen?</p>
+        <div class="library-removal-actions">
+          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id removed_module.id %}">
+            {% csrf_token %}
+            <button class="primary button" type="submit">Verwijderen</button>
+          </form>
+          <button class="outline button" type="button" onclick="this.closest('.library-removal-popup').remove()">Behouden in concept</button>
+        </div>
+      </div>
+    </div>
+  {% endif %}
   <section class="editor-section">
     <div class="section-heading">
       <h2>Dossier uit bibliotheek toevoegen</h2>
@@ -98,14 +114,17 @@
         </div>
       </div>
       {% for module in case.modules.all %}
-        <a class="content-row linked" href="{% url 'dossier:teacher_module' case.id module.id %}">
-          <span>{{ forloop.counter }}</span>
-          <div>
-            <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
-            <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
-          </div>
-          <b>›</b>
-        </a>{% empty %}<p>Nog geen dossiermodules. Kies hierboven een dossiersjabloon of voeg een los bibliotheekonderdeel toe.</p>
+        <div class="content-row module-row">
+          <a class="module-row-link" href="{% url 'dossier:teacher_module' case.id module.id %}">
+            <span>{{ forloop.counter }}</span>
+            <div>
+              <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
+              <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
+            </div>
+            <b>›</b>
+          </a>
+        </div>
+      {% empty %}<p>Nog geen dossiermodules. Kies hierboven een dossiersjabloon of voeg een los bibliotheekonderdeel toe.</p>
       {% endfor %}
     </section>
     <section class="editor-section">
