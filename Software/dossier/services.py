@@ -1,4 +1,5 @@
 from copy import deepcopy
+from urllib.parse import urlparse
 
 from django.db import transaction
 
@@ -206,6 +207,23 @@ def copy_library_dossier_to_case(dossier, case):
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
+# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
+_UNSAFE_LINK_SCHEMES = {"data", "javascript"}
+
+
+def _reject_unsafe_link(tag, attr, value):
+    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
+    if attr == "href" and value:
+        if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
+            return None
+    return value
+
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})
+    return nh3.clean(
+        value,
+        tags=ALLOWED_TAGS,
+        attributes={"a": {"href"}, "img": {"src", "alt"}},
+        url_schemes={"http", "https", "mailto", "data"},
+        attribute_filter=_reject_unsafe_link,
+    )
