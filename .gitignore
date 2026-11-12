@@ -7,7 +7,9 @@ AGENTS.md
 MEMORY.md
 *.jpg
 Software/deploy/app.env
+Software/deploy/app.env.example
 Software/deploy/deploy.json
+Software/deploy/deployexample.json
 Software/deploy/state.json
 Software/deploy/state.tmp
 Software/deploy/.deploy.lock
