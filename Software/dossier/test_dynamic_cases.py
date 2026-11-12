@@ -7,8 +7,9 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .models import (
-    Assignment, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField,
-    LibraryTemplate, Patient, Profile, TeachingGroup,
+    Assignment, Case, Education, LibraryDossier, LibraryDossierModule,
+    LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase,
+    TeachingGroup,
 )
 from .services import copy_library_dossier_to_case, start_student_case
 
@@ -107,6 +108,70 @@ class DynamicCaseTests(TestCase):
         again, created = start_student_case(existing, student)
         self.assertFalse(created)
         self.assertEqual(again.pk, first.pk)
+
+    def test_active_student_cases_receive_source_updates_without_losing_answers(self):
+        case = self.new_case("DYNAMIC-SYNC")
+        assignment = Assignment.objects.create(
+            case=case, phase="Eerste", title="Eerste opdracht", content="Oude instructie"
+        )
+        module = Module.objects.create(
+            case=case, title="Intake", instructions="Oude module-instructie"
+        )
+        ModuleField.objects.create(
+            module=module, key="klachten", label="Klachten", field_type="long_text"
+        )
+        student = get_user_model().objects.create_user("sync-student")
+        student_case, _ = start_student_case(case, student)
+        response = student_case.module_responses.get(module=module)
+        response.data = {"klachten": "Bestaand antwoord"}
+        response.save(update_fields=["data"])
+        submission = student_case.assignment_submissions.get(assignment=assignment)
+        submission.answer = "Bestaand antwoord op opdracht"
+        submission.save(update_fields=["answer"])
+
+        assignment.title = "Nieuwe opdrachtnaam"
+        assignment.content = "Nieuwe instructie"
+        assignment.save()
+        Assignment.objects.create(
+            case=case, phase="Tweede", title="Nieuwe opdracht", content="Extra opdracht"
+        )
+        module.title = "Nieuwe mod bijnaam"
+        module.instructions = "Nieuwe module-instructie"
+        module.save(update_fields=["title", "instructions"])
+        ModuleField.objects.create(
+            module=module, key="allergieën", label="Allergieën", field_type="short_text"
+        )
+
+        start_student_case(case, student)
+
+        response.refresh_from_db()
+        submission.refresh_from_db()
+        self.assertEqual(response.title, "Nieuwe mod bijnaam")
+        self.assertEqual(response.instructions, "Nieuwe module-instructie")
+        self.assertEqual(response.data, {"klachten": "Bestaand antwoord"})
+        self.assertEqual({field["key"] for field in response.schema}, {"klachten", "allergieën"})
+        self.assertEqual(submission.title, "Nieuwe opdrachtnaam")
+        self.assertEqual(submission.content, "Nieuwe instructie")
+        self.assertEqual(submission.answer, "Bestaand antwoord op opdracht")
+        self.assertEqual(student_case.assignment_submissions.count(), 2)
+
+    def test_submitted_student_cases_are_not_synchronized(self):
+        case = self.new_case("DYNAMIC-LOCKED")
+        Assignment.objects.create(case=case, title="Oude opdracht")
+        module = Module.objects.create(case=case, title="Oude module")
+        student = get_user_model().objects.create_user("locked-sync-student")
+        student_case, _ = start_student_case(case, student)
+        student_case.status = StudentCase.Status.SUBMITTED
+        student_case.save(update_fields=["status"])
+        Assignment.objects.create(case=case, title="Nieuwe opdracht")
+        module.title = "Nieuwe module"
+        module.save(update_fields=["title"])
+
+        start_student_case(case, student)
+
+        student_case.refresh_from_db()
+        self.assertEqual(student_case.assignment_submissions.count(), 1)
+        self.assertEqual(student_case.module_responses.get().title, "Oude module")
 
     def test_empty_case_cannot_be_published_before_choosing_modules(self):
         case = self.new_case()
