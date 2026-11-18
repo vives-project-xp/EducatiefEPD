@@ -3731,6 +3731,10 @@ summary {
   min-width: 0;
 }
 
+.function-viewer-body:not(:has(> .selection-list)) > .function-viewer-content {
+  grid-column: 1 / -1;
+}
+
 .function-viewer-body > .selection-list {
   margin: 0;
   padding: 16px;

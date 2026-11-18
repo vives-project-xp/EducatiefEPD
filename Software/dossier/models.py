@@ -588,6 +588,7 @@ class ModuleResponse(models.Model):
     schema = models.JSONField(default=list, blank=True)
     position = models.PositiveIntegerField(default=0)
     data = models.JSONField(default=dict, blank=True)
+    source_data = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

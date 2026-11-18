@@ -316,3 +316,18 @@ class ModuleWorkflowTests(TestCase):
         self.client.post(url, self.form_data(field_text="Nieuwe voorinvulling"))
         self.response.refresh_from_db()
         self.assertEqual(self.response.data, {})
+
+    def test_case_edits_reach_started_student_without_overwriting_student_answers(self):
+        url, _, _ = self.target("teacher")
+        self.client.post(url, self.form_data(field_text="Nieuwe voorinvulling"))
+        self.response.data = {"text": "Studentantwoord"}
+        self.response.save(update_fields=["data", "updated_at"])
+
+        self.client.force_login(self.student)
+        result = self.client.get(self.dossier_url, {"module": self.response.pk})
+
+        self.assertEqual(result.status_code, 200)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data["text"], "Studentantwoord")
+        self.assertEqual(self.response.data["number"], "0")
+        self.assertEqual(self.response.source_data["text"], "Nieuwe voorinvulling")

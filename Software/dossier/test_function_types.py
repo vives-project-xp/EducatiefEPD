@@ -43,7 +43,7 @@ class FunctionTypeRenderingTests(SimpleTestCase):
         forms = prepare_function_forms([self.snapshot(field_types)], {})
         return render_to_string(
             "dossier/_function_snapshots.html",
-            {"function_forms": forms, "locked": False, "student_dossier": False},
+            {"function_forms": forms, "locked": False, "student_dossier": False, "function_save": True},
         )
 
     def test_registry_contains_a_renderer_input_for_every_type(self):
@@ -71,3 +71,9 @@ class FunctionTypeRenderingTests(SimpleTestCase):
         self.assertIn("observation_timestamp_1_2_0", html)
         self.assertIn("observation_value_1_2_0", html)
         self.assertIn("Observatie toevoegen", html)
+
+    def test_save_is_hidden_for_display_only_forms_and_rendered_once_for_answerable_forms(self):
+        display_only = self.render(["image", "link", "info"])
+        self.assertNotIn('class="primary button function-save"', display_only)
+        answerable = self.render(["image", "text", "info"])
+        self.assertEqual(answerable.count('class="primary button function-save"'), 1)

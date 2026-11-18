@@ -72,7 +72,7 @@ from .models import (
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
     build_library_structure, build_sidebar_structure,
-    ensure_default_templates, module_schema,
+    ensure_default_templates, module_schema, sync_student_module_response,
     start_student_case, clean_html,
 )
 
@@ -499,6 +499,10 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                 "title": form.get("title", ""),
                 "key": f"{snapshot.id}-{form.get('id', form.get('position', 0))}",
                 "fields": fields,
+                "answerable": any(
+                    field["type"] not in {"image", "link", "info", "unknown"}
+                    for field in fields
+                ),
             })
         prepared.append({
             "id": snapshot.id,
@@ -506,11 +510,7 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
             "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
             "kind_code": snapshot.kind,
             "forms": forms,
-            "answerable": any(
-                field["type"] not in {"image", "link", "info", "unknown"}
-                for form in forms
-                for field in form["fields"]
-            ),
+            "answerable": any(form["answerable"] for form in forms),
         })
     if selected_function_id is not None:
         prepared = [item for item in prepared if item["id"] == selected_function_id]
@@ -667,6 +667,9 @@ def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
+    if request.method == "GET":
+        for response in student_case.module_responses.select_related("module").prefetch_related("module__fields"):
+            sync_student_module_response(response)
     if request.method == "POST":
         student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
@@ -752,9 +755,12 @@ def dossier(request, case_id):
             else:
                 selected.data = data
                 selected.save(update_fields=["data", "updated_at"])
-                message = "Dossieronderdeel en observaties bewaard." if form_result.added_observations else "Dossieronderdeel bewaard."
+                added_observations = bool(form_result and form_result.added_observations)
+                message = "Dossieronderdeel en observaties bewaard." if added_observations else "Dossieronderdeel bewaard."
                 messages.success(request, message)
-                audit(request, "module_response.updated", selected, observations_added=len(form_result.added_observations))
+                audit(request, "module_response.updated", selected, observations_added=(
+                    len(form_result.added_observations) if form_result else 0
+                ))
         redirect_params = {"module": selected.id}
         if selected_function_id is not None:
             redirect_params["function"] = selected_function_id

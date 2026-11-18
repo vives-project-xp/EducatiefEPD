@@ -46,7 +46,7 @@ class MatrixEditor {
         window.addEventListener('beforeunload', event => { if (this.dirty && !this.form?.dataset.submitting) { event.preventDefault(); event.returnValue = ''; } });
         this.form?.addEventListener('submit', () => { this.finishEdit(); this.sync(); this.form.dataset.submitting = 'true'; });
         // Other fields and pending observations share the same save transaction.
-        this.form?.addEventListener('input', () => { this.dirty = true; });
+        this.form?.addEventListener('input', event => { if (event.isTrusted) this.dirty = true; });
     }
     state() { return {sheet: this.sheet, values: this.values}; }
     designing() { return this.designer && !this.preview; }

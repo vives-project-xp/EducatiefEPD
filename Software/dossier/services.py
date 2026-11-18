@@ -65,6 +65,31 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def sync_student_module_response(response):
+    """Refresh a student's structure from the case while preserving their edits."""
+    module = response.module
+    if module is None:
+        return False
+    live_schema = module_schema(module)
+    current_data = deepcopy(response.data or {})
+    source_data = deepcopy(response.source_data or {})
+    base_data = deepcopy(module.base_data or {})
+    for key, default in base_data.items():
+        if key not in current_data or current_data.get(key) == source_data.get(key):
+            current_data[key] = deepcopy(default)
+    changed = (
+        response.schema != live_schema
+        or response.data != current_data
+        or response.source_data != base_data
+    )
+    if changed:
+        response.schema = live_schema
+        response.data = current_data
+        response.source_data = base_data
+        response.save(update_fields=["schema", "data", "source_data", "updated_at"])
+    return changed
+
+
 def build_function_hierarchy(functions):
     return [{
         "id": function["id"],
@@ -289,6 +314,7 @@ def start_student_case(case, student):
             response.hydrate_from_source()
             response.schema = module_schema(module)
             response.data = deepcopy(module.base_data)
+            response.source_data = deepcopy(module.base_data)
             response.save()
     return student_case, created
 
