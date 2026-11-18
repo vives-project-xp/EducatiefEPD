@@ -3725,6 +3725,10 @@ summary {
   align-items: start;
 }
 
+.function-viewer.has-function-navigation .function-viewer-body:not(:has(> .selection-list)) {
+  display: block;
+}
+
 .function-viewer-body > .selection-list,
 .function-viewer-content {
   width: 100%;
@@ -3893,6 +3897,24 @@ summary {
 
 .base-dossier-functions > .function-viewers {
   min-width: 0;
+  width: 100%;
+}
+
+.base-dossier-functions .function-viewer,
+.base-dossier-functions .function-viewer:not([hidden]) .function-viewer-body,
+.base-dossier-functions .function-viewer-content,
+.base-dossier-functions .function-form {
+  width: 100%;
+  min-width: 0;
+}
+
+.base-dossier-functions .function-viewer.has-function-navigation .function-viewer-body:not(:has(> .selection-list)) {
+  display: block;
+}
+
+.base-dossier-functions .function-viewer:not(.has-function-navigation) .function-viewer-content,
+.base-dossier-functions .function-viewer.has-function-navigation .function-viewer-body:not(:has(> .selection-list)) .function-viewer-content {
+  grid-column: 1 / -1;
 }
 
 .base-dossier-functions > .selection-list {
@@ -3905,7 +3927,7 @@ summary {
 }
 
 @container (min-width: 680px) {
-  .base-dossier-functions {
+  .base-dossier-functions:has(> .selection-list) {
     display: grid;
     grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     align-items: start;
@@ -3945,45 +3967,7 @@ summary {
     width: 100%;
   }
 
-  .base-dossier-functions:has(> .selection-list) > .function-viewers,
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]),
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]) .function-viewer-body {
-    display: contents;
-  }
-
   .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer[hidden] {
     display: none;
-  }
-
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]) .function-viewer-header {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]) .function-form-navigation {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]) .function-viewer-content {
-    grid-column: 2;
-    grid-row: 2;
-  }
-
-  .base-dossier-functions > .function-viewers .function-viewer.has-function-navigation .function-viewer-body {
-    display: grid;
-    grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
-  }
-
-  .base-dossier-functions > .function-viewers .function-viewer.has-function-navigation .function-form-navigation {
-    grid-column: 1;
-  }
-
-  .base-dossier-functions > .function-viewers .function-viewer.has-function-navigation .function-viewer-content {
-    grid-column: 2;
-  }
-
-  .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer:not([hidden]) .function-viewer-body {
-    display: contents;
   }
 }
