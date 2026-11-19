@@ -402,10 +402,15 @@ def dossier(request, case_id):
             audit(request, "module_response.created", registration)
             messages.success(request, "Nieuwe registratie aangemaakt.")
             return entry_redirect(selected, registration)
-        target = selected.responses.filter(pk=request.POST.get("registratie")).first()
+        target_pk = request.POST.get("registratie")
+        target = next((item for item in selected.responses if str(item.pk) == target_pk), None)
         if target is None:
             raise Http404
+        is_published = target.status == ModuleResponse.Status.PUBLISHED
         if action == "delete":
+            if is_published:
+                messages.error(request, "Een gepubliceerde registratie kan niet worden verwijderd. Zet haar eerst terug naar concept.")
+                return entry_redirect(selected, target)
             audit(request, "module_response.deleted", target)
             target.delete()
             messages.success(request, "Registratie verwijderd.")
@@ -414,14 +419,43 @@ def dossier(request, case_id):
                 return entry_redirect(selected, remaining[0])
             return entry_redirect(selected)
         if action == "edit":
+            if is_published:
+                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
+            return entry_redirect(selected, target)
+        if action == "unpublish":
+            if not is_published:
+                messages.error(request, "Deze registratie is nog niet gepubliceerd.")
+                return entry_redirect(selected, target)
+            target.status = ModuleResponse.Status.CONCEPT
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.unpublished", target)
+            messages.success(request, "Registratie teruggezet naar concept. Je kunt haar opnieuw bewerken.")
+            return entry_redirect(selected, target)
+        if action == "publish" and not any(key.startswith("field_") for key in request.POST):
+            if is_published:
+                messages.error(request, "Deze registratie is al gepubliceerd.")
+                return entry_redirect(selected, target)
+            target.status = ModuleResponse.Status.PUBLISHED
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.published", target)
+            messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+            return entry_redirect(selected, target)
+        if is_published:
+            messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
             return entry_redirect(selected, target)
 
         form_result = parse_module_form(request.POST, target.schema, target.data)
         if not form_result.errors:
             target.data = form_result.data
-            target.save(update_fields=["data", "updated_at"])
-            messages.success(request, "Registratie en observaties bewaard." if form_result.added_observations else "Registratie bewaard.")
-            audit(request, "module_response.updated", target, observations_added=len(form_result.added_observations))
+            if action == "publish":
+                target.status = ModuleResponse.Status.PUBLISHED
+                target.save(update_fields=["data", "status", "updated_at"])
+                messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+                audit(request, "module_response.published", target, observations_added=len(form_result.added_observations))
+            else:
+                target.save(update_fields=["data", "updated_at"])
+                messages.success(request, "Registratie en observaties bewaard." if form_result.added_observations else "Registratie bewaard.")
+                audit(request, "module_response.updated", target, observations_added=len(form_result.added_observations))
             return entry_redirect(selected, target)
         messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         view_mode = "invoer"
@@ -469,6 +503,10 @@ def dossier(request, case_id):
         "selected_registration": selected_registration,
         "view_mode": view_mode,
         "fields": fields,
+        "form_locked": bool(student_case.locked or (
+            selected_registration is not None
+            and selected_registration.status == ModuleResponse.Status.PUBLISHED
+        )),
     })
 
 

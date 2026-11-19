@@ -44,8 +44,8 @@
         {% if not student_case.locked %}
           <div class="registration-bar">
             <div class="view-toggle">
-              <a class="button {% if view_mode == 'lijst' %}primary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=lijst{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Lijst</a>
-              <a class="button {% if view_mode == 'invoer' %}primary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=invoer{% if selected_registration %}&amp;registratie={{ selected_registration.id }}{% endif %}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Invoer</a>
+              <a class="button {% if view_mode == 'lijst' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=lijst{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Lijst</a>
+              <a class="button {% if view_mode == 'invoer' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=invoer{% if selected_registration %}&amp;registratie={{ selected_registration.id }}{% endif %}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Invoer</a>
             </div>
             <form method="post" class="registration-actions">
               {% csrf_token %}
@@ -62,11 +62,11 @@
             <p class="empty-state">Nog geen registraties voor dit onderdeel.</p>
           {% endfor %}
         {% elif selected_registration %}
-          {% if registrations|length > 1 %}
+          {% if registrations %}
             <form method="get" class="registration-select-form">
               <input type="hidden" name="module" value="{{ selected.meta_key }}">
               <input type="hidden" name="weergave" value="invoer">
-              <label for="id_registratie_select">Registratie</label>
+              <label for="id_registratie_select">Registraties: </label>
               <select id="id_registratie_select" name="registratie" onchange="this.form.submit()">
                 {% for registration in registrations %}
                   <option value="{{ registration.id }}" {% if registration.id == selected_registration.id %}selected{% endif %}>{{ registration.display_name }}</option>
@@ -80,12 +80,18 @@
           <form method="post" class="module-form">{% csrf_token %}
             <input type="hidden" name="module" value="{{ selected.meta_key }}">
             <input type="hidden" name="registratie" value="{{ selected_registration.id }}">
-            {% if not student_case.locked and selected_registration.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
-            {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
+            {% if not form_locked and selected_registration.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
+            {% include 'dossier/_dynamic_fields.html' with locked=form_locked %}
             {% if not student_case.locked and selected_registration.kind != 'information' %}
               <div class="registration-actions">
-                <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
-                <button class="button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
+                {% if selected_registration.status == 'published' %}
+                  <p class="muted">Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar terug naar concept om alsnog te wijzigen.</p>
+                  <button class="button" type="submit" name="action" value="unpublish">Terug naar concept</button>
+                {% else %}
+                  <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
+                  <button class="button" type="submit" name="action" value="publish">Publiceren</button>
+                  <button class="outline button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
+                {% endif %}
               </div>
             {% endif %}
           </form>

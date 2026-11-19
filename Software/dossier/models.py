@@ -544,6 +544,10 @@ class AssignmentSubmission(models.Model):
 
 
 class ModuleResponse(models.Model):
+    class Status(models.TextChoices):
+        CONCEPT = "concept", "Concept"
+        PUBLISHED = "published", "Gepubliceerd"
+
     student_case = models.ForeignKey(
         StudentCase, on_delete=models.CASCADE, related_name="module_responses"
     )
@@ -560,6 +564,7 @@ class ModuleResponse(models.Model):
     schema = models.JSONField(default=list, blank=True)
     position = models.PositiveIntegerField(default=0)
     data = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONCEPT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
