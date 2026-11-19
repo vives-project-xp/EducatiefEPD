@@ -63,6 +63,8 @@ from .models import (
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case,
     module_schema, start_student_case, clean_html,
+    remove_module_from_students, synchronize_module_to_students,
+    synchronize_template_module,
 )
 
 
@@ -87,7 +89,10 @@ def require_teacher(user):
 
 def teacher_cases(user):
     cases = Case.objects.select_related("patient", "created_by").prefetch_related(
-        "modules__fields", "assignments", "student_cases__student"
+        "modules__fields",
+        "assignments",
+        "student_cases__student",
+        "allowed_groups__members__epd_profile",
     )
     return cases if is_admin(user) else cases.filter(created_by=user)
 
@@ -407,6 +412,15 @@ def teacher_dashboard(request):
         cases = cases.filter(status=status)
     if query:
         cases = cases.filter(Q(title__icontains=query) | Q(patient__name__icontains=query))
+    cases = list(cases.order_by("-updated_at", "-pk"))
+    for case in cases:
+        case.assigned_student_count = len({
+            student.id
+            for group in case.allowed_groups.all()
+            for student in group.members.all()
+            if getattr(getattr(student, "epd_profile", None), "role", None)
+            == Profile.Role.STUDENT
+        })
     counts = {key: teacher_cases(request.user).filter(status=key).count() for key in Case.Status.values}
     return render(request, "dossier/teacher_dashboard.html", {
         "cases": cases, "status_filter": status, "query": query, "counts": counts,
@@ -465,6 +479,27 @@ def teacher_case_edit(request, case_id):
 def teacher_case(request, case_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
+    student_cases = {
+        item.student_id: item
+        for item in case.student_cases.select_related("student").all()
+    }
+    students = get_user_model().objects.filter(
+        epd_profile__role=Profile.Role.STUDENT,
+        epd_teaching_groups__cases=case,
+    ).distinct().order_by("first_name", "last_name", "username")
+    student_rows = []
+    for student in students:
+        student_case = student_cases.get(student.id)
+        student_rows.append({
+            "student": student,
+            "student_case": student_case,
+            "status": (
+                student_case.get_status_display()
+                if student_case
+                else "Nog niet gestart"
+            ),
+            "progress": student_case.progress if student_case else 0,
+        })
     groups = TeachingGroup.objects.filter(education=case.education)
     if not is_admin(request.user):
         groups = groups.filter(teacher=request.user)
@@ -491,10 +526,76 @@ def teacher_case(request, case_id):
             template__status=LibraryTemplate.Status.ACTIVE
         ).select_related("template"),
     )).distinct().order_by("title")
+    case_modules = list(case.modules.select_related("source_template").all())
+    archived_dossier_ids = {
+        str(dossier_id)
+        for dossier_id in LibraryDossier.objects.filter(
+            status=LibraryDossier.Status.ARCHIVED,
+        ).values_list("id", flat=True)
+    }
+    def module_source_removed(module):
+        source_dossier_id = module.configuration.get("source_library_dossier_id")
+        return (
+            module.source_template
+            and module.source_template.status == LibraryTemplate.Status.ARCHIVED
+        ) or str(source_dossier_id) in archived_dossier_ids
+
+    draft_module_change = next((
+        module for module in case_modules
+        if (
+            case.status in {Case.Status.DRAFT, Case.Status.ARCHIVED}
+            and module.source_template
+            and (
+                (
+                    module_source_removed(module)
+                    and not module.configuration.get("library_removal_handled")
+                )
+                or (
+                    module.source_template.status == LibraryTemplate.Status.ACTIVE
+                    and module.source_template_version != module.source_template.version
+                    and module.configuration.get("library_change_handled_version")
+                    != module.source_template.version
+                )
+            )
+        )
+    ), None)
+    published_module_change = next((
+        module for module in case_modules
+        if (
+            case.status == Case.Status.PUBLISHED
+            and module.source_template
+            and (
+                (
+                    module_source_removed(module)
+                    and not module.configuration.get("library_removal_handled")
+                )
+                or (
+                    module.source_template.status == LibraryTemplate.Status.ACTIVE
+                    and module.source_template_version != module.source_template.version
+                    and module.configuration.get("library_change_handled_version")
+                    != module.source_template.version
+                )
+            )
+        )
+    ), None)
+    def module_change_is_removal(module):
+        return module_source_removed(module)
+
     return render(request, "dossier/teacher_case.html", {
-        "case": case, "students": students,
+        "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
         "available_dossiers": dossiers,
+        "draft_module_change": draft_module_change,
+        "published_module_change": published_module_change,
+        "draft_change_is_removal": (
+            draft_module_change is not None
+            and module_change_is_removal(draft_module_change)
+        ),
+        "published_change_is_removal": (
+            published_module_change is not None
+            and module_change_is_removal(published_module_change)
+        ),
+        "case_modules": case_modules,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
 
@@ -832,6 +933,117 @@ def teacher_module(request, case_id, module_id):
             pending_observations=form_result.pending_observations if form_result else None,
         ),
     })
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def teacher_removed_module_resolve(request, case_id, module_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    if case.status not in {Case.Status.DRAFT, Case.Status.ARCHIVED}:
+        raise PermissionDenied
+    action = request.POST.get("action", "remove")
+    module = get_object_or_404(
+        case.modules.select_for_update().select_related("source_template"),
+        id=module_id,
+    )
+    source_dossier_id = module.configuration.get("source_library_dossier_id")
+    dossier_removed = LibraryDossier.objects.filter(
+        id=source_dossier_id,
+        status=LibraryDossier.Status.ARCHIVED,
+    ).exists()
+    template_removed = (
+        module.source_template
+        and module.source_template.status == LibraryTemplate.Status.ARCHIVED
+    )
+    template = module.source_template
+    template_updated = (
+        template
+        and template.status == LibraryTemplate.Status.ACTIVE
+        and module.source_template_version != template.version
+    )
+    if not (template_removed or dossier_removed or template_updated):
+        raise PermissionDenied
+    if action == "keep":
+        configuration = dict(module.configuration or {})
+        if template_removed or dossier_removed:
+            configuration["library_removal_handled"] = True
+        else:
+            configuration["library_change_handled_version"] = template.version
+        module.configuration = configuration
+        module.save(update_fields=["configuration"])
+        messages.success(request, "De module blijft behouden in de casus.")
+        return redirect("dossier:teacher_case", case_id=case.id)
+    if action != "remove":
+        raise PermissionDenied
+    if template_updated:
+        synchronize_template_module(template, module)
+        messages.success(request, "De bibliotheekwijziging is toegepast op de casus.")
+        return redirect("dossier:teacher_case", case_id=case.id)
+    if case.student_cases.exists():
+        messages.error(
+            request,
+            "Deze module kan niet worden verwijderd omdat de casus al studentversies bevat.",
+        )
+        return redirect("dossier:teacher_case", case_id=case.id)
+    audit(request, "module.deleted", module, title=module.title)
+    module.delete()
+    messages.success(request, "De verwijderde bibliotheekmodule is uit de casus verwijderd.")
+    return redirect("dossier:teacher_case", case_id=case.id)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def teacher_published_module_resolve(request, case_id, module_id):
+    require_teacher(request.user)
+    case = editable_case(request.user, case_id)
+    if case.status != Case.Status.PUBLISHED:
+        raise PermissionDenied
+    module = get_object_or_404(
+        case.modules.select_for_update().select_related("source_template"),
+        id=module_id,
+    )
+    action = request.POST.get("action")
+    configuration = dict(module.configuration or {})
+    template = module.source_template
+    template_removed = template and template.status == LibraryTemplate.Status.ARCHIVED
+    dossier_id = configuration.get("source_library_dossier_id")
+    dossier_removed = LibraryDossier.objects.filter(
+        id=dossier_id,
+        status=LibraryDossier.Status.ARCHIVED,
+    ).exists()
+    template_updated = (
+        template
+        and template.status == LibraryTemplate.Status.ACTIVE
+        and module.source_template_version != template.version
+    )
+    if not (template_removed or dossier_removed or template_updated):
+        raise PermissionDenied
+    if action == "keep":
+        if template_removed or dossier_removed:
+            configuration["library_removal_handled"] = True
+        else:
+            configuration["library_change_handled_version"] = template.version
+        module.configuration = configuration
+        module.save(update_fields=["configuration"])
+        messages.success(request, "De wijziging blijft alleen in de bibliotheek staan.")
+        return redirect("dossier:teacher_case", case_id=case.id)
+    if action not in {"accept", "sync_students"}:
+        raise PermissionDenied
+    if template_removed or dossier_removed:
+        if action == "sync_students":
+            remove_module_from_students(module)
+        audit(request, "module.deleted", module, title=module.title)
+        module.delete()
+        messages.success(request, "De verwijderde module is uit de gepubliceerde casus verwijderd.")
+    else:
+        synchronize_template_module(template, module)
+        if action == "sync_students":
+            synchronize_module_to_students(module)
+        messages.success(request, "De bibliotheekwijziging is toegepast op de gepubliceerde casus.")
+    return redirect("dossier:teacher_case", case_id=case.id)
 
 
 @login_required
@@ -1509,7 +1721,10 @@ def library_template(request, template_id=None):
             item.version += 1
         item.save()
         audit(request, "library.updated" if template else "library.created", item)
-        messages.success(request, "Bibliotheektemplate bewaard. Bestaande casuskopieën blijven ongewijzigd.")
+        messages.success(
+            request,
+            "Bibliotheektemplate bewaard.",
+        )
         return redirect("dossier:library_detail", template_id=item.id)
     if template:
         return render(request, "dossier/library_detail.html", {
@@ -1538,7 +1753,10 @@ def library_field(request, template_id, field_id=None):
         template.version += 1
         template.save(update_fields=["version", "updated_at"])
         audit(request, "library_field.updated" if field else "library_field.created", item)
-        messages.success(request, "Templateveld bewaard.")
+        messages.success(
+            request,
+            "Templateveld bewaard.",
+        )
         return redirect("dossier:library_detail", template_id=template.id)
     return render(request, "dossier/field_editor.html", {
         "form": form, "title": "Templateveld aanpassen" if field else "Templateveld toevoegen",
@@ -1576,7 +1794,10 @@ def library_field_delete(request, template_id, field_id):
     field.delete()
     template.version += 1
     template.save(update_fields=["version", "updated_at"])
-    messages.success(request, "Onderdeel verwijderd. Bestaande casuskopieën blijven behouden.")
+    messages.success(
+        request,
+        "Onderdeel verwijderd.",
+    )
     return redirect("dossier:library_detail", template_id=template.id)
 
 
