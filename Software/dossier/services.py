@@ -292,6 +292,44 @@ def copy_library_dossier_to_case(dossier, case):
         if entry.template.status == LibraryTemplate.Status.ACTIVE
     ]
 
+
+@transaction.atomic
+def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
+    entries = list(
+        dossier.module_entries.select_related("template").filter(
+            template__status=LibraryTemplate.Status.ACTIVE,
+        )
+    )
+    added_entries = [
+        entry for entry in entries if entry.template_id not in previous_template_ids
+    ]
+    current_template_ids = {entry.template_id for entry in entries}
+
+    case_ids = Module.objects.filter(
+        configuration__source_library_dossier_id=dossier.pk,
+    ).values_list("case_id", flat=True).distinct()
+    cases = Case.objects.filter(id__in=case_ids)
+    added_modules = 0
+    for case in cases:
+        for module in case.modules.select_for_update().all():
+            configuration = dict(module.configuration or {})
+            if str(configuration.get("source_library_dossier_id")) == str(dossier.pk):
+                if module.source_template_id not in current_template_ids:
+                    configuration["library_dossier_module_removed"] = True
+                else:
+                    configuration.pop("library_dossier_module_removed", None)
+                module.configuration = configuration
+                module.save(update_fields=["configuration"])
+        for entry in added_entries:
+            if case.modules.filter(source_template=entry.template).exists():
+                continue
+            module = copy_template_to_case(entry.template, case, source_dossier=dossier)
+            module.source_template_version = max(entry.template.version - 1, 0)
+            module.save(update_fields=["source_template_version"])
+            added_modules += 1
+    return added_modules
+
+
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
 
