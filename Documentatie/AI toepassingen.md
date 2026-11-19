@@ -259,3 +259,4 @@ Bestanden onder `Software/templates/dossier/` zijn HTML-templates met Django Tem
 Als een functie data blijvend moet bewaren, wordt het Python-model aangepast in `Software/dossier/models.py` en maakt Django op basis daarvan een Python-migratie onder `Software/dossier/migrations/`. Die migratie wordt gegenereerd met `python manage.py makemigrations dossier`; maak geen leeg migratiebestand met de hand. Gebruik `Software/dossier/tests.py` voor Python-tests en mock de AI-client zodat tests geen echte provider of API-kosten nodig hebben.
 
 Bijvoorbeeld: voor alleen dossiersamenvattingen maak je de map `Software/dossier/ai/` met `__init__.py`, `client.py`, `prompts.py`, `schemas.py` en `summaries.py`. Je maakt daarnaast alleen de noodzakelijke aanpassingen aan Django-view, URL, bestaand template en tests. De overige modules en templates maak je pas aan wanneer je die functies daadwerkelijk gaat bouwen.
+ 
