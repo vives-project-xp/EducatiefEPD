@@ -55,27 +55,30 @@
       <button class="outline button">Toewijzing bewaren</button>
     </form>
   </section>
-  {% if case.status == 'draft' and removed_module %}
-    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="library-removal-title">
+  {% if draft_module_change %}
+    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="draft-change-title">
       <div class="library-removal-popup-content">
         <p class="eyebrow">Bibliotheek gewijzigd</p>
-        <h2 id="library-removal-title">
-          {% if removed_module_is_dossier %}
-            Dossiersjabloon verwijderd uit de bibliotheek
-          {% else %}
+        <h2 id="draft-change-title">
+          {% if draft_change_is_removal %}
             Dossiermodule verwijderd uit de bibliotheek
+          {% else %}
+            Dossiermodule aangepast in de bibliotheek
           {% endif %}
         </h2>
-        <p>De module <strong>{{ removed_module.title }}</strong> is verwijderd. Wil je deze ook uit deze conceptcasus verwijderen?</p>
+        <p>
+          De module <strong>{{ draft_module_change.title }}</strong> is gewijzigd.
+          Kies welke versie je wilt behouden voor deze casus.
+        </p>
         <div class="library-removal-actions">
-          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id removed_module.id %}">
-            {% csrf_token %}
-            <button class="primary button" type="submit">Verwijderen</button>
-          </form>
-          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id removed_module.id %}">
+          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id draft_module_change.id %}">
             {% csrf_token %}
             <input type="hidden" name="action" value="keep">
-            <button class="outline button" type="submit">Behouden in concept</button>
+            <button class="outline button" type="submit">Vorige versie behouden</button>
+          </form>
+          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id draft_module_change.id %}">
+            {% csrf_token %}
+            <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
           </form>
         </div>
       </div>
