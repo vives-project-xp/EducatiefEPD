@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy"))
 import poll
 import promote
 
@@ -202,7 +202,7 @@ class LinuxPollCLITests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        source = Path(__file__).resolve().parents[1]
+        source = Path(__file__).resolve().parents[2] / "deploy"
         for filename in ("poll.py", "deploy.py"):
             shutil.copyfile(source / filename, self.root / filename)
         poll.save_json(self.root / "deploy.json", {

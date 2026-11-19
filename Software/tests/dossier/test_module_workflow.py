@@ -5,11 +5,11 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import escape
 
-from .models import (
+from dossier.models import (
     Assignment, AssignmentSubmission, AuditEvent, Case, Education, Module,
     ModuleField, Patient, Profile, StudentCase, TeachingGroup,
 )
-from .services import start_student_case
+from dossier.services import start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

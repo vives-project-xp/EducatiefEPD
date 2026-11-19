@@ -10,14 +10,14 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
-from .forms import LibraryFieldForm
-from .matrix import (
+from dossier.forms import LibraryFieldForm
+from dossier.matrix import (
     convert_base_values, empty_values, fingerprint, legacy_definition,
     normalize_definition, normalize_value, validate_values,
 )
-from .models import Assignment, AssignmentSubmission, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
-from .module_data import parse_module_form
-from .services import copy_library_dossier_to_case, copy_template_to_case, start_student_case
+from dossier.models import Assignment, AssignmentSubmission, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
+from dossier.module_data import parse_module_form
+from dossier.services import copy_library_dossier_to_case, copy_template_to_case, start_student_case
 
 
 def sheet():

@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location("epd_deploy", Path(__file__).parents[1] / "deploy.py")
+SPEC = importlib.util.spec_from_file_location("epd_deploy", Path(__file__).parents[2] / "deploy" / "deploy.py")
 deploy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(deploy)
 IMAGE = "ghcr.io/example/epd@sha256:" + "a" * 64

@@ -7,7 +7,7 @@ import tempfile
 
 
 def main():
-    compose = Path(__file__).resolve().parents[1] / "compose.yaml"
+    compose = Path(__file__).resolve().parents[2] / "deploy" / "compose.yaml"
     with tempfile.TemporaryDirectory() as temporary:
         app_env = Path(temporary) / "app.env"
         values = {

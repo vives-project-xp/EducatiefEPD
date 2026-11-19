@@ -2,11 +2,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (
+from dossier.models import (
     Assignment, AuditEvent, Case, Education, Module, ModuleField, Patient,
     Profile, TeachingGroup,
 )
-from .services import start_student_case
+from dossier.services import start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
