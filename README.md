@@ -3,7 +3,7 @@
 [![VIVES Elektronica-ICT](https://img.shields.io/badge/VIVES-Elektronica--ICT-blue)](https://www.vives.be/nl/technology/elektronica-ict)
 [![Project Experience](https://img.shields.io/badge/Project-Experience-brightgreen)](https://github.com/vives-project-xp)
 
-<img src="./media/Foto_EPD.jpg">
+<img src="./Media/Afbeeldingen/Foto_EPD.jpg">
 
 Een educatief elektronisch patiëntendossier voor zorgopleidingen. Docenten moeten fictieve
 patiëntcasussen en basisdossiers kunnen voorbereiden, terwijl iedere student een eigen
@@ -82,7 +82,7 @@ EducatiefEPD/
 | <img src="https://github.com/simonheja.png" width="64" alt="Simon Moyaert"> | Simon Moyaert | Ontwikkelaar |
 
 
-<img src="./media/Poster P.E. Educatief EPD.png">
+<img src="./Media/Afbeeldingen/Poster P.E. Educatief EPD.png">
 
 
 
