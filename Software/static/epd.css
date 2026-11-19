@@ -2603,6 +2603,61 @@ summary {
   padding: 13px 0;
 }
 
+.registration-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0;
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.registration-select-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.registration-select-form select {
+  min-width: 260px;
+}
+
+.registration-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  background: #fff;
+}
+
+.registration-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.registration-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.module-group-title {
+  margin: 16px 0 0;
+}
+
+.button.danger {
+  color: #b42318;
+  border-color: #b42318;
+}
+
 .response-detail summary {
   color: var(--ink);
 }

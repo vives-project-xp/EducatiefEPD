@@ -12,7 +12,6 @@ from .models import (
     LibraryTemplate,
     Module,
     ModuleField,
-    ModuleResponse,
     StudentCase,
 )
 
@@ -64,6 +63,33 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def new_registration(student_case, module, *, author):
+    """Maakt een nieuwe, lege registratie (invulling) voor één module van een dossier."""
+    if student_case.locked:
+        raise ValueError("Een ingeleverd dossier kan niet bewerkt worden.")
+    with transaction.atomic():
+        response = student_case.module_responses.create(module=module)
+        response.hydrate_from_source()
+        response.schema = module_schema(module)
+        response.data = deepcopy(module.base_data)
+        response.created_by = author
+        response.save()
+    return response
+
+
+def _filled(value):
+    if isinstance(value, dict):
+        return any(_filled(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_filled(item) for item in value)
+    return bool(value)
+
+
+def registration_is_empty(response):
+    """True als de registratie bij geen enkel schema-veld een waarde bevat."""
+    return not any(_filled(response.data.get(field.get("key"))) for field in response.schema)
+
+
 @transaction.atomic
 def synchronize_student_case(student_case):
     if student_case.locked:
@@ -92,33 +118,29 @@ def synchronize_student_case(student_case):
             changed = True
 
     modules = list(student_case.case.modules.prefetch_related("fields").all())
-    responses = {
-        response.module_id: response
-        for response in student_case.module_responses.all()
-        if response.module_id is not None
-    }
+    responses_by_module = {}
+    for response in student_case.module_responses.all():
+        if response.module_id is not None:
+            responses_by_module.setdefault(response.module_id, []).append(response)
     for module in modules:
-        response = responses.get(module.id)
         schema = module_schema(module)
-        if response is None:
-            response = ModuleResponse(student_case=student_case, module=module)
-            response.hydrate_from_source()
-            response.schema = schema
-            response.data = deepcopy(module.base_data)
-            response.save()
+        module_responses = responses_by_module.get(module.id, [])
+        if not module_responses:
+            new_registration(student_case, module, author=student_case.student)
             changed = True
             continue
         source_values = (module.title, module.kind, module.instructions, module.position, schema)
-        current_values = (
-            response.title, response.kind, response.instructions, response.position, response.schema
-        )
-        if source_values != current_values:
-            response.hydrate_from_source()
-            response.schema = schema
-            response.save(update_fields=[
-                "title", "kind", "instructions", "position", "schema", "updated_at"
-            ])
-            changed = True
+        for response in module_responses:
+            current_values = (
+                response.title, response.kind, response.instructions, response.position, response.schema
+            )
+            if source_values != current_values:
+                response.hydrate_from_source()
+                response.schema = schema
+                response.save(update_fields=[
+                    "title", "kind", "instructions", "position", "schema", "updated_at"
+                ])
+                changed = True
     return changed
 
 
@@ -144,11 +166,7 @@ def start_student_case(case, student):
             submission.save()
 
         for module in case.modules.prefetch_related("fields").all():
-            response = ModuleResponse(student_case=student_case, module=module)
-            response.hydrate_from_source()
-            response.schema = module_schema(module)
-            response.data = deepcopy(module.base_data)
-            response.save()
+            new_registration(student_case, module, author=student)
     else:
         synchronize_student_case(student_case)
     return student_case, created

@@ -68,9 +68,11 @@
     </section>
     <section class="editor-section">
       <h2>Ingevuld patiëntendossier</h2>
-      {% for module in student_case.module_responses.all %}
+      {% for group in module_groups %}
+      <h3 class="module-group-title">{{ group.title }}</h3>
+      {% for module in group.registrations %}
       <details class="response-detail">
-        <summary>{{ module.title }}</summary>
+        <summary>Registratie van {{ module.display_name }}</summary>
         {% for field in module.display_values %}
           <div class="response-value"><strong>{{ field.label }}</strong>
             {% if field.matrix_payload %}
@@ -82,9 +84,10 @@
             {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
           </div>
         {% empty %}
-        <p>Dit onderdeel bevat geen invulvelden.</p>
+        <p>Deze registratie is nog leeg.</p>
         {% endfor %}
       </details>
+      {% endfor %}
       {% endfor %}
     </section>
   </div>

@@ -560,15 +560,28 @@ class ModuleResponse(models.Model):
     schema = models.JSONField(default=list, blank=True)
     position = models.PositiveIntegerField(default=0)
     data = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="module_responses",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["position", "id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["student_case", "module"], name="unique_module_response"
-            )
-        ]
+        ordering = ["position", "created_at", "id"]
+
+    @property
+    def author_name(self):
+        if self.created_by:
+            return self.created_by.get_full_name() or self.created_by.get_username()
+        return "Onbekend"
+
+    @property
+    def display_name(self):
+        return f"{self.author_name} – {timezone.localtime(self.created_at):%d-%m-%Y %H:%M}"
 
     def hydrate_from_source(self):
         if self.module:
