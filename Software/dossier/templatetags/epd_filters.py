@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from django import template
-from django.utils.html import mark_safe
+from django.utils.html import escape, mark_safe
 
 from ..services import clean_html
 
@@ -58,3 +58,24 @@ def format_field_value(value, field_type):
     if isinstance(value, (list, tuple)):
         return "; ".join(str(entry) for entry in value)
     return str(value)
+
+
+@register.filter
+def render_observations(value):
+    """Render een lijst observaties als leesbare HTML-rijen (veiligs ge-escaped)."""
+    if not isinstance(value, (list, tuple)):
+        return mark_safe('<p class="muted">Nog geen observaties.</p>')
+    rows = []
+    for observation in value:
+        if not isinstance(observation, dict):
+            continue
+        timestamp = format_field_value(observation.get("timestamp", ""), "datetime") or "Geen tijdstip"
+        obs_value = escape(observation.get("value", ""))
+        note = escape(observation.get("note", ""))
+        rows.append(
+            f'<div class="observation-row"><time>{escape(timestamp)}</time>'
+            f"<strong>{obs_value}</strong><span>{note}</span></div>"
+        )
+    if not rows:
+        return mark_safe('<p class="muted">Nog geen observaties.</p>')
+    return mark_safe(f'<div class="observation-list">{"".join(rows)}</div>')
