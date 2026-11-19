@@ -803,10 +803,30 @@
         note.placeholder = "Toelichting";
         note.setAttribute("aria-label", "Observaties: toelichting");
         entry.append(note);
-        const save = node("button", "outline button", "Observatie en wijzigingen bewaren");
-        save.type = "button";
-        save.disabled = true;
-        entry.append(save);
+        const add = node("button", "outline button", "Observatie toevoegen");
+        add.type = "button";
+        add.addEventListener("click", () => {
+          if (!timestamp.value || !value.value.trim()) {
+            value.setCustomValidity("Vul een observatie in voordat je deze toevoegt.");
+            value.reportValidity();
+            value.addEventListener("input", () => value.setCustomValidity(""), {once: true});
+            return;
+          }
+          list.querySelector(".muted")?.remove();
+          const row = node("div", "observation-row");
+          const time = node("time");
+          time.textContent = timestamp.value;
+          const strong = node("strong");
+          strong.textContent = value.value.trim();
+          const span = node("span");
+          span.textContent = note.value.trim();
+          row.append(time, strong, span);
+          list.append(row);
+          timestamp.value = "";
+          value.value = "";
+          note.value = "";
+        });
+        entry.append(add);
         group.append(entry);
         return group;
       }

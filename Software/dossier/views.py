@@ -63,6 +63,7 @@ from .models import (
     LibraryField,
     LibraryTemplate,
     Module,
+    ModuleResponse,
     ManagedForm,
     ManagedQuestion,
     Profile,
@@ -338,6 +339,15 @@ def parsed_module_data(request, schema, current_data):
         if field_type == FieldDefinition.FieldType.OBSERVATION:
             current = data.get(key, [])
             value = list(current) if isinstance(current, list) else []
+            try:
+                staged = json.loads(request.POST.get(f"pending_observations_{key}", "[]"))
+            except (TypeError, ValueError, RecursionError):
+                staged = []
+            if isinstance(staged, list):
+                value = [
+                    *value,
+                    *[row for row in staged if isinstance(row, dict)],
+                ]
             if observation_key != key:
                 data[key] = value
                 continue
@@ -443,6 +453,7 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                     continue
                 value = function_data.get(key, {} if mapped_type == "matrix" else "")
                 if mapped_type == "observation" and isinstance(value, list):
+                    original_observations = deepcopy(value)
                     value = [
                         {
                             **observation,
@@ -453,11 +464,14 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
                         for observation in value
                         if isinstance(observation, dict)
                     ]
+                else:
+                    original_observations = None
                 item = {
                     "key": key,
                     "label": question.get("question", ""),
                     "type": mapped_type,
                     "required": question.get("required", False),
+                    "original_observations": original_observations,
                     "unit": question.get("unit", ""),
                     "options": question.get("options", []),
                     "columns": question.get("columns", []),
@@ -524,6 +538,114 @@ def prepare_function_forms(snapshots, data, selected_function_id=None, active_fo
             form["show_title"] = multiple_forms or form["title"] != function["title"]
     return prepared
 
+
+@login_required
+@require_POST
+@transaction.atomic
+def save_form(request):
+    try:
+        payload = json.loads(request.POST.get("payload", "{}"))
+    except (TypeError, ValueError, RecursionError):
+        return JsonResponse({"error": "De formuliergegevens zijn ongeldig. Geen waarden zijn bewaard."}, status=400)
+    if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
+        return JsonResponse({"error": "De formuliergegevens zijn ongeldig. Geen waarden zijn bewaard."}, status=400)
+
+    module_id = payload.get("module_id")
+    if not isinstance(module_id, int):
+        return JsonResponse({"error": "Het dossieronderdeel kon niet worden gevonden."}, status=404)
+    answers = payload["answers"]
+    form_key = payload.get("form_key")
+    function_id = payload.get("function_id")
+
+    if function_id is not None:
+        if not isinstance(function_id, int):
+            return JsonResponse({"error": "Het formulier kon niet worden gevonden."}, status=404)
+
+    for key, value in list(answers.items()):
+        if isinstance(value, dict) and value.get("type") == "file":
+            upload = request.FILES.get(value.get("name", ""))
+            if upload:
+                max_size = 300000 if "image" in str(value.get("name", "")) else 5000000
+                filename = get_valid_filename(upload.name) or "upload"
+                path = f"function_answers/{uuid4().hex}_{filename}"
+                answers[key] = default_storage.url(default_storage.save(path, upload))
+            else:
+                answers[key] = ""
+        elif isinstance(value, list) and key and (
+            payload.get("form_key") != "module"
+            or key
+        ):
+            if any(isinstance(row, dict) and (
+                "timestamp" in row or "value" in row or "note" in row
+            ) for row in value):
+                normalized_observations = []
+                for row in value:
+                    if not isinstance(row, dict):
+                        return JsonResponse({"error": "Een observatie bevat ongeldige gegevens. Geen waarden zijn bewaard."}, status=400)
+                    timestamp = row.get("timestamp")
+                    observation_value = row.get("value")
+                    note = row.get("note", "")
+                    if not isinstance(timestamp, str) or not isinstance(observation_value, str):
+                        return JsonResponse({"error": "Geef voor elke observatie een tijdstip en een waarde op."}, status=400)
+                    if not observation_value.strip():
+                        return JsonResponse({"error": "Geef voor elke observatie een waarde op."}, status=400)
+                    try:
+                        datetime.fromisoformat(timestamp)
+                    except ValueError:
+                        return JsonResponse({"error": "Geef voor elke observatie een geldig tijdstip op."}, status=400)
+                    if not isinstance(note, str):
+                        return JsonResponse({"error": "De observatietoelichting is ongeldig."}, status=400)
+                    normalized_observations.append({
+                        "timestamp": timestamp,
+                        "value": observation_value.strip(),
+                        "note": note.strip(),
+                    })
+                answers[key] = normalized_observations
+
+    if is_teacher(request.user):
+        module = get_object_or_404(Module.objects.prefetch_related("function_snapshots"), pk=module_id)
+        editable_case(request.user, module.case_id)
+        if function_id is not None and not module.function_snapshots.filter(pk=function_id).exists():
+            return JsonResponse({"error": "Het formulier behoort niet tot dit dossieronderdeel."}, status=403)
+        data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
+        if form_key == "module":
+            for key, value in answers.items():
+                if isinstance(value, dict) and "legacyCells" in value:
+                    value = value["legacyCells"]
+                data[key] = value
+        else:
+            function_data = deepcopy(data.get("_functions", {}) if isinstance(data.get("_functions"), dict) else {})
+            for key, value in answers.items():
+                function_data[key] = value
+            data["_functions"] = function_data
+        module.base_data = data
+        module.save(update_fields=["base_data"])
+        audit(request, "base_dossier.updated", module)
+        return JsonResponse({"message": "Bewaard."})
+
+    response = get_object_or_404(
+        ModuleResponse.objects.select_related("student_case", "module"),
+        pk=module_id,
+        student_case__student=request.user,
+    )
+    student_case = response.student_case
+    if student_case.locked:
+        return JsonResponse({"error": "Dit dossier is ingediend en kan niet meer worden gewijzigd."}, status=403)
+    data = deepcopy(response.data if isinstance(response.data, dict) else {})
+    if form_key == "module":
+        for key, value in answers.items():
+            if isinstance(value, dict) and "legacyCells" in value:
+                value = value["legacyCells"]
+            data[key] = value
+    else:
+        function_data = deepcopy(data.get("_functions", {}) if isinstance(data.get("_functions"), dict) else {})
+        for key, value in answers.items():
+            function_data[key] = value
+        data["_functions"] = function_data
+    response.data = data
+    response.save(update_fields=["data", "updated_at"])
+    audit(request, "module_response.updated", response)
+    return JsonResponse({"message": "Bewaard."})
 
 def format_observation_timestamp(value):
     if not value:
@@ -596,6 +718,14 @@ def parsed_function_data(
                     }
                     current_value = function_data.get(key, [])
                     value = current_value if isinstance(current_value, list) else []
+                    try:
+                        staged = json.loads(request.POST.get(f"pending_observations_{key}", "[]"))
+                    except (TypeError, ValueError, RecursionError):
+                        staged = []
+                    if isinstance(staged, list):
+                        staged_rows = [row for row in staged if isinstance(row, dict)]
+                        if staged_rows:
+                            value = [*value, *staged_rows]
                     if any(entry.values()):
                         try:
                             datetime.fromisoformat(entry["timestamp"])
@@ -791,6 +921,10 @@ def dossier(request, case_id):
         "selected_function_id": selected_function_id,
         "show_form_navigation": show_form_navigation,
         "errors": errors,
+        "answerable_fields": any(
+            item["type"] not in {"image", "link", "info", "unknown"}
+            for item in (selected.schema if selected else [])
+        ),
     })
 
 
@@ -1319,6 +1453,10 @@ def teacher_module(request, case_id, module_id):
         "function_forms": function_forms,
         "selected_function_id": selected_function_id,
         "active_form_key": active_form_key,
+        "answerable_fields": any(
+            item["type"] not in {"image", "link", "info", "unknown"}
+            for item in schema
+        ),
     })
 
 

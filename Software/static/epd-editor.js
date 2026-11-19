@@ -47,6 +47,10 @@ document.addEventListener('DOMContentLoaded', () => {
       toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | importdocx exportdocx',
       color_cols: 5,
       setup(editor) {
+        editor.on('change input', () => {
+          const target = editor.getElement();
+          target?.dispatchEvent(new Event('epd:dirty', {bubbles: true}));
+        });
         editor.ui.registry.addButton('importdocx', {
           text: 'Import Word', onAction: () => importDocx(editor),
         });
@@ -70,25 +74,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (panel) panel.hidden = item !== button || expanded;
       });
     });
-
-    const dirtyForms = [...document.querySelectorAll('form.module-form, form.base-dossier-form')];
-    dirtyForms.forEach((form) => {
-      form.dataset.dirty = 'false';
-      form.addEventListener('input', (event) => {
-        if (event.isTrusted) form.dataset.dirty = 'true';
-      });
-      form.addEventListener('change', (event) => {
-        if (event.isTrusted) form.dataset.dirty = 'true';
-      });
-      form.addEventListener('submit', () => { form.dataset.submitting = 'true'; });
-    });
-    browser.addEventListener('beforeunload', (event) => {
-      if (dirtyForms.some((form) => form.dataset.dirty === 'true' && form.dataset.submitting !== 'true')) {
-        event.preventDefault();
-        event.returnValue = '';
-      }
-    });
   });
+
 });
 
 function importDocx(editor) {

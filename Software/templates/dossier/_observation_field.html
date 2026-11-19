@@ -2,10 +2,16 @@
   {% for observation in field.value %}<div class="observation-row"><time>{{ observation.timestamp|default:'Geen tijdstip' }}</time><strong>{{ observation.value }}</strong><span>{{ observation.note }}</span></div>{% empty %}<p class="muted">Nog geen observaties.</p>{% endfor %}
 </div>
 {% if not locked %}
-  <div class="observation-entry">
-    <input type="{% if field.errors %}text{% else %}datetime-local{% endif %}" name="observation_timestamp_{{ field.key }}" value="{{ field.pending_observation.timestamp }}" aria-label="{{ field.label }}: tijdstip" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
-    <input id="{% if function_observation %}function_{% else %}field_{% endif %}{{ field.key }}" name="observation_value_{{ field.key }}" value="{{ field.pending_observation.value }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie" {% if field.errors %}aria-invalid="true" aria-describedby="errors_{{ field.key }}"{% endif %}>
-    <input name="observation_note_{{ field.key }}" value="{{ field.pending_observation.note }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
-    <button class="outline button" name="action" value="add_observation:{{ field.key }}">Observatie toevoegen</button>
+  <div class="observation-entry" data-observation-entry="{{ field.key }}">
+    <input type="hidden" name="existing_observations_{{ field.key }}" value="{% if field.original_observations %}[{% for observation in field.original_observations %}{&quot;timestamp&quot;:&quot;{{ observation.timestamp|escapejs }}&quot;,&quot;value&quot;:&quot;{{ observation.value|escapejs }}&quot;,&quot;note&quot;:&quot;{{ observation.note|escapejs }}&quot;}{% if not forloop.last %},{% endif %}{% endfor %}]{% elif field.value %}[{% for observation in field.value %}{&quot;timestamp&quot;:&quot;{{ observation.timestamp|escapejs }}&quot;,&quot;value&quot;:&quot;{{ observation.value|escapejs }}&quot;,&quot;note&quot;:&quot;{{ observation.note|escapejs }}&quot;}{% if not forloop.last %},{% endif %}{% endfor %}]{% else %}[]{% endif %}">
+    <div class="observation-new-rows" data-new-observation-rows></div>
+    <button class="outline button" type="button" data-add-observation="{{ field.key }}">Observatie toevoegen</button>
+    <template data-observation-template>
+      <div class="observation-edit-row">
+        <input type="{% if field.errors %}text{% else %}datetime-local{% endif %}" name="observation_timestamp_{{ field.key }}" value="{{ field.pending_observation.timestamp }}" aria-label="{{ field.label }}: tijdstip" {% if field.errors %}aria-invalid="true"{% endif %}>
+        <input name="observation_value_{{ field.key }}" value="{{ field.pending_observation.value }}" placeholder="Waarde of observatie" aria-label="{{ field.label }}: waarde of observatie" {% if field.errors %}aria-invalid="true"{% endif %}>
+        <input name="observation_note_{{ field.key }}" value="{{ field.pending_observation.note }}" placeholder="Toelichting" aria-label="{{ field.label }}: toelichting">
+      </div>
+    </template>
   </div>
 {% endif %}

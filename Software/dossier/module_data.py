@@ -128,6 +128,17 @@ def parse_module_form(post, schema, current_data, *, edit_readonly=False):
                 for name in ("timestamp", "value", "note")
             }
             pending[key] = entry
+            try:
+                staged = json.loads(post.get(f"pending_observations_{key}", "[]"))
+            except (TypeError, ValueError, RecursionError):
+                staged = []
+            if isinstance(staged, list):
+                staged_rows = [row for row in staged if isinstance(row, dict)]
+                if staged_rows:
+                    existing = data.get(key, [])
+                    if not isinstance(existing, list):
+                        existing = []
+                    data[key] = [*existing, *staged_rows]
             if key == observation_key:
                 normalized = {name: value.strip() for name, value in entry.items()}
                 if not valid_observation(normalized):

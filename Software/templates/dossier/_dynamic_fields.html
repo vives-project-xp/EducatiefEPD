@@ -1,3 +1,5 @@
+{% if fields %}
+<section data-save-form data-form-key="module">
 {% for field in fields %}
   <div class="dynamic-field {% if field.required %}required{% endif %}">
     <label for="field_{{ field.key }}">{{ field.label }}{% if field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>
@@ -34,3 +36,9 @@
     {% if field.errors %}<ul class="errorlist danger" id="errors_{{ field.key }}" role="alert">{% for error in field.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
   </div>
 {% endfor %}
+{% if not locked and answerable_fields %}
+  <button class="primary button" type="button" data-form-save disabled>Bewaren</button>
+  <p class="epd-save-status" role="status" aria-live="polite"></p>
+{% endif %}
+</section>
+{% endif %}

@@ -1,9 +1,11 @@
 from copy import deepcopy
+import json
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import escape
+from django.utils import timezone
 
 from .models import (
     Assignment, AssignmentSubmission, AuditEvent, Case, Education, Module,
@@ -78,6 +80,73 @@ class ModuleWorkflowTests(TestCase):
     def save_response(self, data):
         self.response.data = data
         self.response.save()
+
+    def test_shared_save_form_endpoint_preserves_observations_and_saves_text_matrix(self):
+        existing = [{"timestamp": "2026-10-14T10:30", "value": "Bestaand", "note": "Bewaren"}]
+        for role in ("teacher", "student"):
+            with self.subTest(role=role):
+                url, record, attribute = self.target(role)
+                base = {
+                    "text": "Oud",
+                    "observations": existing,
+                    "matrix": {"0_0": "Oud", "0_1": "", "1_0": "", "1_1": ""},
+                }
+                setattr(record, attribute, base)
+                record.save()
+                self.client.force_login(self.teacher if role == "teacher" else self.student)
+                payload = {
+                    "module_id": record.pk,
+                    "function_id": None,
+                    "form_key": "module",
+                    "answers": {
+                        "text": "Nieuw",
+                        "matrix": {"legacyCells": {"0_0": "Nieuw"}},
+                        "observations": existing + [{
+                            "timestamp": "2026-10-15T12:00",
+                            "value": "Tweede",
+                            "note": "Nieuw",
+                        }],
+                    },
+                }
+                result = self.client.post("/dossier/save-form/", {
+                    "payload": json.dumps(payload),
+                })
+                self.assertEqual(result.status_code, 200)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Nieuw")
+                self.assertEqual(stored["observations"], existing + [{
+                    "timestamp": "2026-10-15T12:00",
+                    "value": "Tweede",
+                    "note": "Nieuw",
+                }])
+                self.assertEqual(stored["matrix"]["0_0"], "Nieuw")
+
+    def test_shared_save_form_endpoint_rejects_locked_and_invalid_observation(self):
+        self.client.force_login(self.student)
+        invalid = {
+            "module_id": self.response.pk,
+            "function_id": None,
+            "form_key": "module",
+            "answers": {"observations": [{
+                "timestamp": "ongeldig",
+                "value": "Niet opslaan",
+                "note": "",
+            }]},
+        }
+        result = self.client.post("/dossier/save-form/", {"payload": json.dumps(invalid)})
+        self.assertEqual(result.status_code, 400)
+        self.student_case.status = StudentCase.Status.SUBMITTED
+        self.student_case.submitted_at = timezone.now()
+        self.student_case.save(update_fields=["status", "submitted_at"])
+        valid = {
+            "module_id": self.response.pk,
+            "function_id": None,
+            "form_key": "module",
+            "answers": {"text": "Mag niet"},
+        }
+        result = self.client.post("/dossier/save-form/", {"payload": json.dumps(valid)})
+        self.assertEqual(result.status_code, 403)
 
     def test_incomplete_drafts_can_be_saved_by_student_and_teacher(self):
         for role in ("student", "teacher"):
@@ -194,6 +263,50 @@ class ModuleWorkflowTests(TestCase):
                 self.assertNotContains(result, '<script>alert("test")</script>')
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute), original)
+
+    def test_explicit_save_persists_client_staged_observation(self):
+        url, record, attribute = self.target("teacher")
+        setattr(record, attribute, {})
+        record.save()
+        payload = self.form_data(
+            action="save",
+            pending_observations_observations='[{"timestamp":"2026-10-15T12:00","value":"Staged","note":"Bewaren"}]',
+        )
+        result = self.client.post(url, payload)
+        self.assertEqual(result.status_code, 302)
+        record.refresh_from_db()
+        stored = getattr(record, attribute)
+        self.assertEqual(stored["observations"], [
+            {"timestamp": "2026-10-15T12:00", "value": "Staged", "note": "Bewaren"}
+        ])
+
+    def test_save_preserves_existing_and_staged_observations_with_text_and_matrix(self):
+        for role in ("student", "teacher"):
+            with self.subTest(role=role):
+                url, record, attribute = self.target(role)
+                existing = [{"timestamp": "2026-10-14T10:30", "value": "Bestaand", "note": "Niet wijzigen"}]
+                setattr(record, attribute, {
+                    "text": "Origineel",
+                    "matrix": self.complete_data()["matrix"],
+                    "observations": existing,
+                })
+                record.save()
+                payload = self.form_data(
+                    field_text="Nieuw",
+                    pending_observations_observations='[{"timestamp":"2026-10-15T12:00","value":"Nieuw staged","note":"Bewaren"}]',
+                    field_matrix_0_0="36.75",
+                )
+                result = self.client.post(url, payload)
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Nieuw")
+                self.assertEqual(stored["matrix"]["0_0"], "36.75")
+                self.assertEqual(stored["observations"], existing + [{
+                    "timestamp": "2026-10-15T12:00",
+                    "value": "Nieuw staged",
+                    "note": "Bewaren",
+                }])
 
     def test_save_and_observation_buttons_have_separate_scope(self):
         for role in ("student", "teacher"):

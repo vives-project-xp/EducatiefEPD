@@ -72,6 +72,26 @@ class FunctionTypeRenderingTests(SimpleTestCase):
         self.assertIn("observation_value_1_2_0", html)
         self.assertIn("Observatie toevoegen", html)
 
+    def test_existing_observation_payload_keeps_iso_timestamp(self):
+        snapshot = self.snapshot(["observatie"])
+        data = {
+            "_functions": {
+                "1_2_0": [{
+                    "timestamp": "2026-11-19T09:25",
+                    "value": "xx",
+                    "note": "yy",
+                }],
+            },
+        }
+        forms = prepare_function_forms([snapshot], data)
+        html = render_to_string(
+            "dossier/_function_snapshots.html",
+            {"function_forms": forms, "locked": False, "student_dossier": False, "function_save": True},
+        )
+        self.assertIn("2026", html)
+        self.assertIn("T09:25", html)
+        self.assertIn("19/11/2026 09:25", html)
+
     def test_save_is_hidden_for_display_only_forms_and_rendered_once_for_answerable_forms(self):
         display_only = self.render(["image", "link", "info"])
         self.assertNotIn('class="primary button function-save"', display_only)

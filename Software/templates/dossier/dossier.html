@@ -31,7 +31,10 @@
       <h1>{{ page_title }}</h1>
       <p>{{ student_case.patient_context }}</p>
     </div>
-    <a class="back" href="{% url 'dossier:home' %}">← Casussen</a>
+    <div class="header-actions">
+      <a class="back" href="{% url 'dossier:case_detail' case_id=case.id %}">← Deze casus</a>
+      <a class="back" href="{% url 'dossier:home' %}">← Casussen</a>
+    </div>
   </header>
     <section class="work">
       {% if selected %}
@@ -46,15 +49,12 @@
       {% endif %}
       {% if function_forms or fields %}
       <div class="dossier-content-grid single-form-layout">
-        <form method="post" class="module-form" enctype="multipart/form-data">{% csrf_token %}
+        <form method="post" class="module-form" enctype="multipart/form-data" data-save-error="{% if missing or form_result.errors %}true{% else %}false{% endif %}">{% csrf_token %}
           <input type="hidden" name="module" value="{{ selected.id }}">
           <input type="hidden" name="function" value="{{ selected_function_id }}">
           <input type="hidden" name="form" value="{{ active_form_key|default:'' }}">
           {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
           {% include 'dossier/_function_snapshots.html' with locked=student_case.locked function_save=True %}
-          {% if not student_case.locked and selected.kind != 'information' and fields %}
-            <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
-          {% endif %}
         </form>
       </div>
       {% else %}

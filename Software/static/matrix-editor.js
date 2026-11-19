@@ -43,8 +43,6 @@ class MatrixEditor {
         root.addEventListener('copy', event => this.copy(event));
         root.addEventListener('paste', event => this.paste(event));
         root.addEventListener('keydown', event => this.keydown(event));
-        window.addEventListener('beforeunload', event => { if (this.dirty && !this.form?.dataset.submitting) { event.preventDefault(); event.returnValue = ''; } });
-        this.form?.addEventListener('submit', () => { this.finishEdit(); this.sync(); this.form.dataset.submitting = 'true'; });
         // Other fields and pending observations share the same save transaction.
         this.form?.addEventListener('input', event => { if (event.isTrusted) this.dirty = true; });
     }
@@ -62,7 +60,9 @@ class MatrixEditor {
         this.sheet = next.sheet; this.values = next.values;
         if (!this.preview) { this.history.push(this.state()); this.dirty = true; }
         this.serverErrors = [];
-        this.sync(); this.render(); this.announce(this.preview ? 'Voorbeeld gewijzigd; dit zijn geen opgeslagen antwoorden.' : message);
+        this.sync();
+        if (!this.preview) this.input?.dispatchEvent(new Event('epd:dirty', {bubbles: true}));
+        this.render(); this.announce(this.preview ? 'Voorbeeld gewijzigd; dit zijn geen opgeslagen antwoorden.' : message);
     }
     attempt(action) { try { action(); } catch (error) { this.announce(error.message); } }
     buildToolbar() {

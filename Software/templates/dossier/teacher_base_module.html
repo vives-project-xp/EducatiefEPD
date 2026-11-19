@@ -5,7 +5,7 @@
 <main class="teacher-shell narrow"><header class="page-bar"><div><p class="eyebrow">Basisdossier · {{ case.patient.name }}</p><h1>{{ module.title }}</h1></div><a class="back" href="{% url 'dossier:teacher_case' case.id %}">← Casus</a></header>
   {% if module.instructions %}<div class="module-instructions">{{ module.instructions|linebreaks }}</div>{% endif %}
   <p class="muted">Voorinvullen is optioneel. Je mag velden en volledige modules leeg laten, ook bij publicatie. Een * geeft een verplicht veld voor studenten aan.</p>
-  <form method="post" class="module-form base-dossier-form" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="function" value="{{ selected_function_id|default:'' }}"><input type="hidden" name="form" value="{{ active_form_key|default:'' }}">{% include 'dossier/_dynamic_fields.html' with locked=False %}{% if function_forms %}<div class="base-dossier-functions">
+  <form method="post" class="module-form base-dossier-form" enctype="multipart/form-data" data-save-error="{% if missing or form_result.errors %}true{% else %}false{% endif %}">{% csrf_token %}<input type="hidden" name="module" value="{{ module.id }}"><input type="hidden" name="function" value="{{ selected_function_id|default:'' }}"><input type="hidden" name="form" value="{{ active_form_key|default:'' }}">{% include 'dossier/_dynamic_fields.html' with locked=False %}{% if function_forms %}<div class="base-dossier-functions">
     {% if function_forms|length > 1 or function_forms.0.forms|length > 1 %}
     <nav class="selection-list function-selection" aria-label="Functies" data-selection-list>
       <p class="eyebrow">Functies</p>
@@ -28,6 +28,6 @@
     </nav>
     {% endif %}
     <div class="function-viewers">{% include 'dossier/_function_snapshots.html' with locked=False function_save=True hide_form_navigation=True %}</div>
-  </div>{% endif %}{% if not fields and not function_forms %}<p class="empty-state">Er zijn nog geen functies toegevoegd.</p>{% endif %}{% if module.kind != 'information' and fields %}<button class="primary button" type="submit" name="action" value="save">Basisdossier bewaren</button>{% endif %}</form>
+  </div>{% endif %}{% if not fields and not function_forms %}<p class="empty-state">Er zijn nog geen functies toegevoegd.</p>{% endif %}</form>
 </main>
 {% endblock %}

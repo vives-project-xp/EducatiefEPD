@@ -14,7 +14,7 @@
       {% endif %}
       <div class="function-viewer-content">
         {% for form in function.forms %}
-          <section class="function-form" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-viewer-panel="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
+          <section class="function-form" data-save-form data-form-key="{{ form.key }}" data-function-id="{{ function.id }}" {% if form.show_title %}aria-labelledby="form-heading-{{ form.key }}"{% elif not student_dossier %}aria-labelledby="function-heading-{{ function.id }}"{% else %}aria-label="{{ form.title|default:'Naamloos formulier' }}"{% endif %} data-viewer-panel="{{ form.key }}" {% if not form.active %}hidden{% endif %}>
             {% if form.show_title %}<h2 id="form-heading-{{ form.key }}">{{ form.title|default:"Naamloos formulier" }}</h2>{% endif %}
             {% for field in form.fields %}
               {% if field.type == 'long_text' %}
@@ -65,7 +65,8 @@
               <p class="empty-state">Dit formulier bevat geen vragen.</p>
             {% endfor %}
             {% if function_save and not locked and form.answerable %}
-              <button class="primary button function-save" type="submit" name="action" value="save">Bewaren</button>
+              <button class="primary button function-save" type="button" data-form-save disabled>Bewaren</button>
+              <p class="epd-save-status" role="status" aria-live="polite"></p>
             {% endif %}
           </section>
         {% empty %}

@@ -430,6 +430,15 @@ class EpdWorkflowTests(TestCase):
         self.assertIn("saveButton.disabled = locked || !dirty", script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
+    def test_answer_editor_save_guard_and_error_retry_are_present(self):
+        script = (Path(__file__).resolve().parents[1] / "static" / "epd-save.js").read_text(encoding="utf-8")
+        self.assertIn("const states = new WeakMap()", script)
+        self.assertIn("button.disabled = !dirty || state.saving", script)
+        self.assertIn("event.target.closest('[data-form-save]')", script)
+        self.assertIn("const payload = {", script)
+        self.assertIn("fetch('/dossier/save-form/'", script)
+        self.assertIn("window.tinymce?.triggerSave", script)
+
     def test_opening_empty_library_does_not_seed_default_templates(self):
         LibraryTemplate.objects.all().delete()
         self.client.force_login(self.teacher)
