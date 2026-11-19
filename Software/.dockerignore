@@ -14,4 +14,6 @@ backups/
 plan.md
 AGENTS.md
 MEMORY.md
-tests/
+tests/deploy/
+tests/browser/
+tests/js/

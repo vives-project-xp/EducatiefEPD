@@ -1,0 +1,139 @@
+name: Release
+
+# Op main: eerst de drie testworkflows (als herbruikbare workflows), daarna
+# de image bouwen/testen/publiceren en het main-kanaal voor de VM promoveren.
+# Pull requests draaien de testworkflows zelfstandig, zonder release.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  django-tests:
+    name: Django tests
+    uses: ./.github/workflows/django-tests.yml
+
+  frontend-tests:
+    name: Frontend tests
+    uses: ./.github/workflows/frontend-tests.yml
+
+  deploy-checks:
+    name: Deploy checks
+    uses: ./.github/workflows/deploy-checks.yml
+
+  image:
+    name: Build, test and publish web image
+    needs: [django-tests, frontend-tests, deploy-checks]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: epd_image_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image for the tested commit
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}:sha-${GITHUB_SHA}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}"
+          echo "RELEASE_TAG=$image" >> "$GITHUB_ENV"
+          docker build --pull \
+            --label "org.opencontainers.image.source=https://github.com/$REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "io.educatiefepd.ref=refs/heads/main" \
+            --label "io.educatiefepd.run-number=$GITHUB_RUN_NUMBER" \
+            --tag "$image" Software
+      - name: Test the actual image with MySQL and production static collection
+        run: |
+          docker run --rm --network host --entrypoint sh \
+            -e SECRET_KEY=ci-only-not-secret -e DJANGO_DEBUG=1 \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1 \
+            -e MYSQL_DATABASE=epd_image_ci -e MYSQL_USER=root -e MYSQL_PASSWORD=root \
+            -e MYSQL_HOST=127.0.0.1 -e MYSQL_PORT=3306 \
+            "$RELEASE_TAG" -ec 'python manage.py check &&
+              python manage.py makemigrations --check --dry-run &&
+              python manage.py test tests.dossier --verbosity 1 &&
+              DJANGO_DEBUG=0 python manage.py collectstatic --noinput'
+      - name: Smoke test real image startup and HTTP/database health
+        run: |
+          trap 'docker rm -f epd-image-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name epd-image-smoke --network host \
+            -e SECRET_KEY=ci-only-not-secret -e DJANGO_DEBUG=0 \
+            -e ALLOWED_HOSTS=localhost,127.0.0.1 -e DEPLOY_HEALTH_HOST=127.0.0.1 \
+            -e MYSQL_DATABASE=epd_image_ci -e MYSQL_USER=root -e MYSQL_PASSWORD=root \
+            -e MYSQL_HOST=127.0.0.1 -e MYSQL_PORT=3306 "$RELEASE_TAG"
+          for _ in $(seq 1 60); do
+            if docker exec epd-image-smoke python /app/healthcheck.py >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs epd-image-smoke
+          exit 1
+      - name: Publish the tested image
+        id: publish
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: |
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          docker push "$RELEASE_TAG"
+          digest_ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$RELEASE_TAG")
+          [[ "$digest_ref" =~ ^ghcr\.io/.+@sha256:[0-9a-f]{64}$ ]]
+          echo "image=$digest_ref" >> "$GITHUB_OUTPUT"
+          echo "Image: \`$digest_ref\`" >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Publish main release channel for VM
+    needs: image
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: epd-main-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip a superseded main commit
+        id: current
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          head=$(gh api "repos/$REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'A newer main commit exists; skipping release promotion.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Promote tested digest to main channel
+        if: steps.current.outputs.publish == 'true'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+          RELEASE_IMAGE: ${{ needs.image.outputs.image }}
+        run: |
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+          python3 Software/deploy/promote.py "$RELEASE_IMAGE" "$GITHUB_SHA" "$GITHUB_RUN_NUMBER"
