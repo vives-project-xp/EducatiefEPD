@@ -2618,6 +2618,29 @@ summary {
   padding: 10px;
 }
 
+.response-value .plain-response {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7f8fa;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.response-value .rich-response {
+  word-break: break-word;
+  background: #f7f8fa;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.response-value .rich-response > :first-child {
+  margin-top: 0;
+}
+
+.response-value .rich-response > :last-child {
+  margin-bottom: 0;
+}
+
 .login-separator {
   display: flex;
   align-items: center;
