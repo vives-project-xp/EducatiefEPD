@@ -1,6 +1,10 @@
 import base64
 import binascii
-from datetime import timedelta
+import logging
+from copy import deepcopy
+from uuid import uuid4
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 import io
 import json
 import re
@@ -15,7 +19,9 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.conf import settings
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.files.storage import default_storage
+from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, JsonResponse
@@ -41,6 +47,8 @@ from .forms import (
     TeachingGroupForm,
 )
 from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
+from .function_types import FUNCTION_TYPES, get_function_type, is_display_only
+from .matrix import convert_base_values, empty_values, legacy_definition, normalize_definition, validate_values
 from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
@@ -51,9 +59,11 @@ from .models import (
     LibraryDossier,
     LibraryDossierModule,
     FunctionDefinition,
+    LibraryTemplateFunction,
     LibraryField,
     LibraryTemplate,
     Module,
+    ModuleResponse,
     ManagedForm,
     ManagedQuestion,
     Profile,
@@ -61,9 +71,13 @@ from .models import (
     TeachingGroup,
 )
 from .services import (
-    audit, copy_library_dossier_to_case, copy_template_to_case,
-    module_schema, start_student_case, clean_html,
+    audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
+    build_library_structure, build_sidebar_structure,
+    ensure_default_templates, module_schema, sync_student_module_response,
+    start_student_case, clean_html,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def user_role(user):
@@ -83,6 +97,10 @@ def is_admin(user):
 def require_teacher(user):
     if not is_teacher(user):
         raise PermissionDenied
+
+
+def can_manage_library_template(user, template):
+    return is_teacher(user) and template.status == LibraryTemplate.Status.ACTIVE
 
 
 def teacher_cases(user):
@@ -310,55 +328,612 @@ def prepare_schema_fields(schema, data, *, errors=None, pending_observations=Non
     return prepared
 
 
+def parsed_module_data(request, schema, current_data):
+    data = dict(current_data)
+    missing = []
+    action = request.POST.get("action", "save")
+    observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+    for field in schema:
+        key = field["key"]
+        field_type = field["type"]
+        if field_type == FieldDefinition.FieldType.OBSERVATION:
+            current = data.get(key, [])
+            value = list(current) if isinstance(current, list) else []
+            try:
+                staged = json.loads(request.POST.get(f"pending_observations_{key}", "[]"))
+            except (TypeError, ValueError, RecursionError):
+                staged = []
+            if isinstance(staged, list):
+                value = [
+                    *value,
+                    *[row for row in staged if isinstance(row, dict)],
+                ]
+            if observation_key != key:
+                data[key] = value
+                continue
+            entry = {
+                name: request.POST.get(f"observation_{name}_{key}", "").strip()
+                for name in ("timestamp", "value", "note")
+            }
+            if any(entry.values()):
+                try:
+                    datetime.fromisoformat(entry["timestamp"])
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldig tijdstip)")
+                if not entry["value"]:
+                    missing.append(f"{field['label']} (waarde ontbreekt)")
+                elif not any(message.startswith(f"{field['label']} (ongeldig") for message in missing):
+                    value.append(entry)
+            data[key] = value
+            continue
+        if field_type == FieldDefinition.FieldType.MATRIX:
+            if field.get("matrix_definition"):
+                current = data.get(key, empty_values())
+                if not isinstance(current, dict) or current.get("version") != 2:
+                    current = empty_values()
+                raw = request.POST.get(f"matrix_{key}")
+                try:
+                    value = json.loads(raw) if raw is not None else current
+                except (TypeError, ValueError, RecursionError):
+                    missing.append(f"{field['label']} (ongeldige matrix)")
+                    continue
+                normalized, matrix_errors, _ = validate_values(
+                    field["matrix_definition"], value, current=None
+                )
+                if matrix_errors:
+                    missing.extend(matrix_errors)
+                data[key] = normalized
+                continue
+            value = {
+                f"{row_index}_{column_index}": request.POST.get(
+                    f"field_{key}_{row_index}_{column_index}", ""
+                ).strip()
+                for row_index, _ in enumerate(field.get("rows", []))
+                for column_index, _ in enumerate(field.get("columns", []))
+            }
+            has_value = any(value.values())
+        else:
+            value = request.POST.get(f"field_{key}", "").strip()
+            has_value = bool(value)
+            if has_value and field_type == FieldDefinition.FieldType.NUMBER:
+                try:
+                    if not Decimal(value).is_finite():
+                        raise InvalidOperation
+                except InvalidOperation:
+                    missing.append(f"{field['label']} (ongeldig getal)")
+            elif has_value and field_type == FieldDefinition.FieldType.DATE:
+                try:
+                    date.fromisoformat(value)
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldige datum)")
+            elif has_value and field_type == FieldDefinition.FieldType.DATETIME:
+                try:
+                    datetime.fromisoformat(value)
+                except ValueError:
+                    missing.append(f"{field['label']} (ongeldig tijdstip)")
+            elif has_value and field_type == FieldDefinition.FieldType.SELECT:
+                if value not in field.get("options", []):
+                    missing.append(f"{field['label']} (ongeldige keuze)")
+        data[key] = value
+    if missing:
+        return None, missing
+    return data, []
+
+
+def prepare_function_forms(snapshots, data, selected_function_id=None, active_form_key=None):
+    prepared = []
+    function_data = data.get("_functions", {}) if isinstance(data, dict) else {}
+    for snapshot in snapshots:
+        definition = snapshot.definition or {}
+        forms = []
+        for form in definition.get("forms", []):
+            fields = []
+            for question in form.get("questions", []):
+                field_type = question.get("fieldType")
+                key = f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+                mapped_type = {
+                    "image": "image",
+                    "link": "link",
+                    "info": "info",
+                    "text": "long_text",
+                    "number": "number",
+                    "date": "date",
+                    "dateTime": "datetime-local",
+                    "time": "time",
+                    "multipleChoice": "select",
+                    "matrix": "matrix",
+                    "observation": "observation",
+                    "observatie": "observation",
+                    "imageUpload": "file",
+                    "fileUpload": "file",
+                }.get(field_type)
+                if mapped_type is None:
+                    logger.error("Unknown function question type %r (question %s)", field_type, question.get("id"))
+                    fields.append({"key": key, "type": "unknown", "label": question.get("question", "")})
+                    continue
+                value = function_data.get(key, {} if mapped_type == "matrix" else "")
+                if mapped_type == "observation" and isinstance(value, list):
+                    original_observations = deepcopy(value)
+                    value = [
+                        {
+                            **observation,
+                            "timestamp": format_observation_timestamp(
+                                observation.get("timestamp")
+                            ),
+                        }
+                        for observation in value
+                        if isinstance(observation, dict)
+                    ]
+                else:
+                    original_observations = None
+                item = {
+                    "key": key,
+                    "label": question.get("question", ""),
+                    "type": mapped_type,
+                    "required": question.get("required", False),
+                    "original_observations": original_observations,
+                    "unit": question.get("unit", ""),
+                    "options": question.get("options", []),
+                    "columns": question.get("columns", []),
+                    "rows": question.get("rows", []),
+                    "value": value,
+                    "url": question.get("url", ""),
+                    "button_text": question.get("buttonText", ""),
+                    "image": question.get("image", ""),
+                    "caption": question.get("caption", ""),
+                    "explanation": question.get("explanation", ""),
+                    "pending_observation": {},
+                }
+                if mapped_type == "file" and value:
+                    filename = str(value).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                    item["filename"] = re.sub(r"^[0-9a-f]{32}_", "", filename)
+                if mapped_type == "matrix":
+                    try:
+                        definition = question.get("matrixDefinition") or legacy_definition(
+                            item["rows"], item["columns"]
+                        )
+                        if isinstance(value, dict) and value.get("version") != 2:
+                            value = convert_base_values(
+                                {"rows": item["rows"], "columns": item["columns"]},
+                                definition,
+                                value,
+                            )
+                        item["matrix_payload"] = {
+                            "definition": definition,
+                            "values": value if isinstance(value, dict) else empty_values(),
+                            "label": item["label"],
+                            "errors": [],
+                        }
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        logger.exception("Could not render matrix question %s", question.get("id"))
+                        item["type"] = "unknown"
+                fields.append(item)
+            forms.append({
+                "id": form.get("id", form.get("position", 0)),
+                "title": form.get("title", ""),
+                "key": f"{snapshot.id}-{form.get('id', form.get('position', 0))}",
+                "fields": fields,
+                "answerable": any(
+                    field["type"] not in {"image", "link", "info", "unknown"}
+                    for field in fields
+                ),
+            })
+        prepared.append({
+            "id": snapshot.id,
+            "title": snapshot.title,
+            "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
+            "kind_code": snapshot.kind,
+            "forms": forms,
+            "answerable": any(form["answerable"] for form in forms),
+        })
+    if selected_function_id is not None:
+        prepared = [item for item in prepared if item["id"] == selected_function_id]
+    for function in prepared:
+        for form in function["forms"]:
+            form["active"] = form["key"] == active_form_key
+        if function["forms"] and not any(form["active"] for form in function["forms"]):
+            function["forms"][0]["active"] = True
+        multiple_forms = len(function["forms"]) > 1
+        for form in function["forms"]:
+            form["show_title"] = multiple_forms or form["title"] != function["title"]
+    return prepared
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def save_form(request):
+    try:
+        payload = json.loads(request.POST.get("payload", "{}"))
+    except (TypeError, ValueError, RecursionError):
+        return JsonResponse({"error": "De formuliergegevens zijn ongeldig. Geen waarden zijn bewaard."}, status=400)
+    if not isinstance(payload, dict) or not isinstance(payload.get("answers"), dict):
+        return JsonResponse({"error": "De formuliergegevens zijn ongeldig. Geen waarden zijn bewaard."}, status=400)
+
+    module_id = payload.get("module_id")
+    if not isinstance(module_id, int):
+        return JsonResponse({"error": "Het dossieronderdeel kon niet worden gevonden."}, status=404)
+    answers = payload["answers"]
+    form_key = payload.get("form_key")
+    function_id = payload.get("function_id")
+
+    if function_id is not None:
+        if not isinstance(function_id, int):
+            return JsonResponse({"error": "Het formulier kon niet worden gevonden."}, status=404)
+
+    for key, value in list(answers.items()):
+        if isinstance(value, dict) and value.get("type") == "file":
+            upload = request.FILES.get(value.get("name", ""))
+            if upload:
+                max_size = 300000 if "image" in str(value.get("name", "")) else 5000000
+                filename = get_valid_filename(upload.name) or "upload"
+                path = f"function_answers/{uuid4().hex}_{filename}"
+                answers[key] = default_storage.url(default_storage.save(path, upload))
+            else:
+                answers[key] = ""
+        elif isinstance(value, list) and key and (
+            payload.get("form_key") != "module"
+            or key
+        ):
+            if any(isinstance(row, dict) and (
+                "timestamp" in row or "value" in row or "note" in row
+            ) for row in value):
+                normalized_observations = []
+                for row in value:
+                    if not isinstance(row, dict):
+                        return JsonResponse({"error": "Een observatie bevat ongeldige gegevens. Geen waarden zijn bewaard."}, status=400)
+                    timestamp = row.get("timestamp")
+                    observation_value = row.get("value")
+                    note = row.get("note", "")
+                    if not isinstance(timestamp, str) or not isinstance(observation_value, str):
+                        return JsonResponse({"error": "Geef voor elke observatie een tijdstip en een waarde op."}, status=400)
+                    if not observation_value.strip():
+                        return JsonResponse({"error": "Geef voor elke observatie een waarde op."}, status=400)
+                    try:
+                        datetime.fromisoformat(timestamp)
+                    except ValueError:
+                        return JsonResponse({"error": "Geef voor elke observatie een geldig tijdstip op."}, status=400)
+                    if not isinstance(note, str):
+                        return JsonResponse({"error": "De observatietoelichting is ongeldig."}, status=400)
+                    normalized_observations.append({
+                        "timestamp": timestamp,
+                        "value": observation_value.strip(),
+                        "note": note.strip(),
+                    })
+                answers[key] = normalized_observations
+
+    if is_teacher(request.user):
+        module = get_object_or_404(Module.objects.prefetch_related("function_snapshots"), pk=module_id)
+        editable_case(request.user, module.case_id)
+        if function_id is not None and not module.function_snapshots.filter(pk=function_id).exists():
+            return JsonResponse({"error": "Het formulier behoort niet tot dit dossieronderdeel."}, status=403)
+        data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
+        if form_key == "module":
+            for key, value in answers.items():
+                if isinstance(value, dict) and "legacyCells" in value:
+                    value = value["legacyCells"]
+                data[key] = value
+        else:
+            function_data = deepcopy(data.get("_functions", {}) if isinstance(data.get("_functions"), dict) else {})
+            for key, value in answers.items():
+                function_data[key] = value
+            if function_data:
+                data["_functions"] = function_data
+            elif "_functions" in data and not function_data:
+                data.pop("_functions")
+        module.base_data = data
+        module.save(update_fields=["base_data"])
+        audit(request, "base_dossier.updated", module)
+        return JsonResponse({"message": "Bewaard."})
+
+    response = get_object_or_404(
+        ModuleResponse.objects.select_related("student_case", "module"),
+        pk=module_id,
+        student_case__student=request.user,
+    )
+    student_case = response.student_case
+    if student_case.locked:
+        return JsonResponse({"error": "Dit dossier is ingediend en kan niet meer worden gewijzigd."}, status=403)
+    data = deepcopy(response.data if isinstance(response.data, dict) else {})
+    if form_key == "module":
+        for key, value in answers.items():
+            if isinstance(value, dict) and "legacyCells" in value:
+                value = value["legacyCells"]
+            data[key] = value
+    else:
+        function_data = deepcopy(data.get("_functions", {}) if isinstance(data.get("_functions"), dict) else {})
+        for key, value in answers.items():
+            function_data[key] = value
+        if function_data:
+            data["_functions"] = function_data
+        elif "_functions" in data:
+            data.pop("_functions")
+    response.data = data
+    response.save(update_fields=["data", "updated_at"])
+    audit(request, "module_response.updated", response)
+    return JsonResponse({"message": "Bewaard."})
+
+def format_observation_timestamp(value):
+    if not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    return parsed.strftime("%d/%m/%Y %H:%M")
+
+
+def parsed_function_data(
+    request, snapshots, current_data, *, function_id=None, form_key=None,
+    require_complete=False,
+):
+    data = dict(current_data)
+    function_data = dict(data.get("_functions", {}))
+    missing = []
+    action = request.POST.get("action", "save")
+    observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+    for snapshot in snapshots:
+        for form in (snapshot.definition or {}).get("forms", []):
+            form_id = form.get("id", form.get("position", 0))
+            current_form_key = f"{snapshot.id}-{form_id}"
+            if function_id is not None and snapshot.id != function_id:
+                continue
+            if form_key is not None and current_form_key != form_key:
+                continue
+            for question in form.get("questions", []):
+                field_type = question.get("fieldType")
+                question_id = question.get("id", question.get("position", 0))
+                key = f"{snapshot.id}_{form_id}_{question_id}"
+                prefix = f"function_{key}"
+                if observation_key is not None and key != observation_key:
+                    continue
+                if field_type == "matrix":
+                    definition = question.get("matrixDefinition") or legacy_definition(
+                        question.get("rows", []), question.get("columns", [])
+                    )
+                    current_value = function_data.get(key, empty_values())
+                    if isinstance(current_value, dict) and current_value.get("version") != 2:
+                        current_value = convert_base_values(
+                            {"rows": question.get("rows", []), "columns": question.get("columns", [])},
+                            definition,
+                            current_value,
+                        )
+                    raw = request.POST.get(f"matrix_{key}")
+                    try:
+                        values = json.loads(raw) if raw is not None else current_value
+                    except (TypeError, ValueError, RecursionError):
+                        missing.append(question.get("question", "Matrix") + " (ongeldige matrix)")
+                        continue
+                    normalized, errors, _ = validate_values(
+                        definition, values, current=current_value
+                    )
+                    if errors:
+                        missing.extend(errors)
+                    value = normalized
+                    has_value = any(
+                        bool(cell)
+                        for row in value.get("cells", {}).values()
+                        for cell in row.values()
+                    )
+                elif is_display_only(field_type):
+                    continue
+                elif field_type in {"observation", "observatie"}:
+                    entry = {
+                        name: request.POST.get(f"observation_{name}_{key}", "").strip()
+                        for name in ("timestamp", "value", "note")
+                    }
+                    current_value = function_data.get(key, [])
+                    value = current_value if isinstance(current_value, list) else []
+                    try:
+                        staged = json.loads(request.POST.get(f"pending_observations_{key}", "[]"))
+                    except (TypeError, ValueError, RecursionError):
+                        staged = []
+                    if isinstance(staged, list):
+                        staged_rows = [row for row in staged if isinstance(row, dict)]
+                        if staged_rows:
+                            value = [*value, *staged_rows]
+                    if any(entry.values()):
+                        try:
+                            datetime.fromisoformat(entry["timestamp"])
+                        except ValueError:
+                            missing.append(question.get("question", "Observaties") + " (ongeldig tijdstip)")
+                        if not entry["value"]:
+                            missing.append(question.get("question", "Observaties") + " (waarde ontbreekt)")
+                        else:
+                            value = [*value, entry]
+                    has_value = bool(value)
+                elif field_type in {"imageUpload", "fileUpload"}:
+                    upload = request.FILES.get(prefix)
+                    value = function_data.get(key, "")
+                    if upload:
+                        max_size = 300_000 if field_type == "imageUpload" else 5_000_000
+                        valid_image = (
+                            upload.content_type in {"image/png", "image/jpeg", "image/gif", "image/webp"}
+                            and upload.size <= max_size
+                        )
+                        if field_type == "imageUpload" and not valid_image:
+                            missing.append(question.get("question", "Afbeelding") + " (ongeldige afbeelding)")
+                        elif upload.size > max_size:
+                            missing.append(question.get("question", "Bestand") + " (bestand is te groot)")
+                        else:
+                            filename = get_valid_filename(upload.name) or "upload"
+                            path = f"function_answers/{uuid4().hex}_{filename}"
+                            value = default_storage.url(default_storage.save(path, upload))
+                    has_value = bool(value)
+                else:
+                    value = request.POST.get(prefix, "").strip()
+                    has_value = bool(value)
+                    if field_type == "number" and has_value:
+                        try:
+                            if not Decimal(value).is_finite():
+                                raise InvalidOperation
+                        except InvalidOperation:
+                            missing.append(question.get("question", "Getal") + " (ongeldig getal)")
+                    elif field_type == "date" and has_value:
+                        try:
+                            date.fromisoformat(value)
+                        except ValueError:
+                            missing.append(question.get("question", "Datum") + " (ongeldige datum)")
+                    elif field_type == "dateTime" and has_value:
+                        try:
+                            datetime.fromisoformat(value)
+                        except ValueError:
+                            missing.append(question.get("question", "Datum en tijd") + " (ongeldig tijdstip)")
+                    elif field_type == "time" and has_value:
+                        try:
+                            datetime.strptime(value, "%H:%M").time()
+                        except ValueError:
+                            missing.append(question.get("question", "Tijd") + " (ongeldige tijd)")
+                    elif field_type == "multipleChoice" and has_value:
+                        if value not in question.get("options", []):
+                            missing.append(question.get("question", "Meerkeuze") + " (ongeldige keuze)")
+                    if field_type == "text":
+                        value = clean_html(value)
+                        has_value = bool(value.strip())
+                if require_complete and question.get("required") and not has_value:
+                    missing.append(question.get("question", "Dit veld"))
+                function_data[key] = value
+    if function_data:
+        data["_functions"] = function_data
+    elif "_functions" in data:
+        data.pop("_functions")
+    return (None, missing) if missing else (data, [])
+
+
 @login_required
 @transaction.atomic
 def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
+    if request.method == "GET":
+        for response in student_case.module_responses.select_related("module").prefetch_related("module__fields"):
+            sync_student_module_response(response)
     if request.method == "POST":
         student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
-    modules = list(student_case.module_responses.all())
-    visible_modules = [item for item in modules if query.lower() in item.title.lower()] if query else modules
+    modules = list(
+        student_case.module_responses.select_related("module").prefetch_related(
+            "module__function_snapshots"
+        ).all()
+    )
+    sidebar = build_sidebar_structure(modules, query)
+    visible_ids = {item["id"] for item in sidebar}
     selected_id = request.POST.get("module") or request.GET.get("module")
-    selected = next((item for item in modules if str(item.id) == selected_id), None)
+    selected = next((item for item in modules if str(item.id) == selected_id and item.id in visible_ids), None)
     if request.method == "POST" and selected is None:
         raise Http404
     if selected is None and modules:
-        selected = modules[0]
+        selected = next((item for item in modules if item.id in visible_ids), modules[0])
+    selected_snapshots = (
+        selected.module.function_snapshots.all()
+        if selected and selected.module else []
+    )
+    function_id = request.POST.get("function") or request.GET.get("function")
+    try:
+        selected_function_id = int(function_id) if function_id else None
+    except (TypeError, ValueError):
+        selected_function_id = None
+    available_function_ids = [snapshot.id for snapshot in selected_snapshots]
+    if selected_function_id not in available_function_ids:
+        selected_function_id = available_function_ids[0] if available_function_ids else None
+    active_form_key = request.POST.get("form") or request.GET.get("form")
+    function_forms = prepare_function_forms(
+        selected_snapshots, selected.data, selected_function_id, active_form_key
+    ) if selected else []
+    selected_function = function_forms[0] if function_forms else None
+    active_form = next(
+        (form for form in selected_function["forms"] if form["active"]),
+        None,
+    ) if selected_function else None
+    active_form_key = active_form["key"] if active_form else None
+    show_form_navigation = any(
+        len(function["forms"]) > 1 for function in function_forms
+    )
 
     form_result = None
     errors = {}
+    missing = []
     if request.method == "POST" and selected:
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            form_result = parse_module_form(request.POST, selected.schema, selected.data)
-            errors = form_result.errors
-            if errors:
-                messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+            action = request.POST.get("action", "save")
+            observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+            function_observation_keys = {
+                f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+                for snapshot in selected_snapshots
+                for form in (snapshot.definition or {}).get("forms", [])
+                for question in form.get("questions", [])
+                if question.get("fieldType") in {"observation", "observatie"}
+            }
+            function_observation_action = observation_key in function_observation_keys
+            if function_observation_action:
+                data = selected.data
             else:
-                selected.data = form_result.data
+                form_result = parse_module_form(request.POST, selected.schema, selected.data)
+                missing = [
+                    message
+                    for field_errors in form_result.errors.values()
+                    for message in field_errors
+                ]
+                data = form_result.data if not form_result.errors else None
+            function_data, function_missing = parsed_function_data(
+                request, selected_snapshots,
+                data if data is not None else selected.data,
+                function_id=selected_function_id,
+                form_key=active_form_key,
+                require_complete=action == "save",
+            )
+            if function_missing:
+                missing.extend(function_missing)
+            elif data is not None and function_data is not None:
+                data = function_data
+            if missing:
+                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
+            else:
+                selected.data = data
                 selected.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Dossieronderdeel en observaties bewaard." if form_result.added_observations else "Dossieronderdeel bewaard.")
-                audit(request, "module_response.updated", selected, observations_added=len(form_result.added_observations))
-        if not errors:
-            params = {"module": selected.id}
+                added_observations = bool(form_result and form_result.added_observations)
+                message = "Dossieronderdeel en observaties bewaard." if added_observations else "Dossieronderdeel bewaard."
+                messages.success(request, message)
+                audit(request, "module_response.updated", selected, observations_added=(
+                    len(form_result.added_observations) if form_result else 0
+                ))
+        redirect_params = {"module": selected.id}
+        if selected_function_id is not None:
+            redirect_params["function"] = selected_function_id
+        if active_form_key:
+            redirect_params["form"] = active_form_key
+        if not missing:
             if query:
-                params["q"] = query
-            return redirect(f"{request.path}?{urlencode(params)}")
+                redirect_params["q"] = query
+            return redirect(f"{request.path}?{urlencode(redirect_params)}")
     elif selected and request.GET.get("validate") == "1":
         errors = validate_module_data(selected.schema, selected.data, require_complete=True)
 
     return render(request, "dossier/dossier.html", {
-        "case": case, "student_case": student_case, "modules": visible_modules,
+        "case": case, "student_case": student_case, "modules": sidebar,
+        "sidebar": sidebar,
         "selected": selected, "query": query,
         "fields": prepare_schema_fields(
-            selected.schema, form_result.display_data if form_result else selected.data,
-            errors=errors,
+            selected.schema,
+            form_result.display_data if form_result else selected.data,
+            errors=form_result.errors if form_result else errors,
             pending_observations=form_result.pending_observations if form_result else None,
         ) if selected else [],
+        "function_forms": function_forms,
+        "selected_function": selected_function,
+        "page_title": selected_function["title"] if selected_function else (selected.title if selected else ""),
+        "active_form_key": active_form_key,
+        "student_dossier": True,
+        "selected_function_id": selected_function_id,
+        "show_form_navigation": show_form_navigation,
+        "errors": errors,
+        "answerable_fields": any(
+            item["type"] not in {"image", "link", "info", "unknown"}
+            for item in (selected.schema if selected else [])
+        ),
     })
 
 
@@ -810,26 +1385,90 @@ def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
+    function_snapshots = list(module.function_snapshots.all())
+    function_id = request.POST.get("function") or request.GET.get("function")
+    try:
+        selected_function_id = int(function_id) if function_id else None
+    except (TypeError, ValueError):
+        selected_function_id = None
+    available_function_ids = [snapshot.id for snapshot in function_snapshots]
+    if selected_function_id not in available_function_ids:
+        selected_function_id = available_function_ids[0] if available_function_ids else None
+    active_form_key = request.POST.get("form") or request.GET.get("form")
     if request.method == "POST":
         module = Module.objects.select_for_update().get(pk=module.pk)
     schema = module_schema(module)
     form_result = None
     if request.method == "POST":
-        form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
-        if form_result.errors:
-            messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+        action = request.POST.get("action", "save")
+        observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+        function_observation_keys = {
+            f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+            for snapshot in function_snapshots
+            for form in (snapshot.definition or {}).get("forms", [])
+            for question in form.get("questions", [])
+            if question.get("fieldType") in {"observation", "observatie"}
+        }
+        function_observation_action = observation_key in function_observation_keys
+        module_observation_keys = {
+            field["key"] for field in schema if field["type"] == FieldDefinition.FieldType.OBSERVATION
+        }
+        module_observation_action = observation_key in module_observation_keys
+        if function_observation_action:
+            data, missing = module.base_data, []
         else:
-            module.base_data = form_result.data
+            form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
+            if form_result.errors:
+                messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+            data = form_result.data if not form_result.errors else None
+            if module_observation_action:
+                missing = []
+            else:
+                data, missing = (
+                    parsed_module_data(request, schema, module.base_data)
+                    if data is not None else (None, [])
+                )
+        function_data, function_missing = parsed_function_data(
+            request, function_snapshots,
+            data if data is not None else module.base_data,
+            function_id=selected_function_id,
+            form_key=active_form_key,
+            require_complete=False,
+        )
+        missing.extend(function_missing)
+        if function_observation_action:
+            data = module.base_data
+        if not missing and data is not None and function_data is not None:
+            module.base_data = function_data
             module.save(update_fields=["base_data"])
-            audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
+            audit(request, "base_dossier.updated", module, observations_added=(
+                form_result.added_observations if form_result else []
+            ))
             messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
+        elif missing:
+            messages.error(request, f"Controleer de gemarkeerde velden: {', '.join(missing)}.")
+        if not missing and (form_result is None or not form_result.errors):
             return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
+    function_forms = prepare_function_forms(function_snapshots, module.base_data, active_form_key=active_form_key)
+    for function in function_forms:
+        function["active"] = function["id"] == selected_function_id
+    active_form_key = next(
+        (form["key"] for function in function_forms if function["active"] for form in function["forms"] if form["active"]),
+        "",
+    )
     return render(request, "dossier/teacher_base_module.html", {
         "case": case, "module": module,
         "fields": prepare_schema_fields(
             schema, form_result.display_data if form_result else module.base_data, edit_readonly=True,
             errors=form_result.errors if form_result else None,
             pending_observations=form_result.pending_observations if form_result else None,
+        ),
+        "function_forms": function_forms,
+        "selected_function_id": selected_function_id,
+        "active_form_key": active_form_key,
+        "answerable_fields": any(
+            item["type"] not in {"image", "link", "info", "unknown"}
+            for item in schema
         ),
     })
 
@@ -947,7 +1586,9 @@ def library_list(request):
             "module_entries",
             queryset=LibraryDossierModule.objects.filter(
                 template__status=LibraryTemplate.Status.ACTIVE
-            ).select_related("template"),
+            ).select_related("template").prefetch_related(
+                "template__function_links__function__forms"
+            ),
         )
     ).order_by("-created_at", "-id")
     dossier_educations = dossiers.exclude(education__isnull=True).order_by().values_list(
@@ -958,6 +1599,8 @@ def library_list(request):
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)
+    for dossier in ordered_dossiers:
+        dossier.structure = build_library_structure(dossier.module_entries.all())
     available_templates = LibraryTemplate.objects.filter(
         status=LibraryTemplate.Status.ACTIVE
     ).select_related("education")
@@ -1007,8 +1650,22 @@ def function_management(request):
     else:
         sort = "az"
         functions = functions.order_by("title", "id")
+    page_size = request.GET.get("per_page", "10")
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        page_size = 10
+    if page_size not in {10, 25, 50, 100}:
+        page_size = 10
+    paginator = Paginator(functions, page_size)
+    page_number = request.GET.get("page")
+    page = paginator.get_page(page_number)
     return render(request, "dossier/function_management.html", {
-        "functions": functions,
+        "functions": page,
+        "page": page,
+        "paginator": paginator,
+        "page_size": page_size,
+        "page_size_options": (10, 25, 50, 100),
         "query": query,
         "sort": sort,
         "deleted_count": FunctionDefinition.objects.filter(
@@ -1055,12 +1712,27 @@ def function_general(request):
 
 
 def managed_function_payload(function):
+    valid_types = set(ManagedQuestion.FieldType.values)
+    def image_payload(image):
+        if not image:
+            return None
+        value = str(image)
+        if value.startswith(("data:", "http://", "https://", "/")):
+            return value
+        try:
+            return default_storage.url(value)
+        except (AttributeError, ValueError):
+            return value
     return {
         "id": function.id,
         "title": function.title,
         "kind": function.kind,
         "locked": function.locked,
         "std": function.std,
+        "typeRegistry": [
+            {"key": item.key, "label": item.label, "group": item.group}
+            for item in FUNCTION_TYPES
+        ],
         "forms": [{
             "id": form.id,
             "title": form.title,
@@ -1074,12 +1746,16 @@ def managed_function_payload(function):
                 "options": question.options,
                 "columns": question.columns,
                 "rows": question.rows,
+                "matrixDefinition": deepcopy(question.matrix_definition) or (
+                    legacy_definition(question.rows, question.columns)
+                    if question.field_type == ManagedQuestion.FieldType.MATRIX else {}
+                ),
                 "url": question.url,
                 "buttonText": question.button_text,
-                "image": question.image.url if question.image else None,
+                "image": image_payload(question.image),
                 "caption": question.caption,
                 "explanation": question.explanation,
-            } for question in form.questions.all()],
+            } for question in form.questions.all() if question.field_type in valid_types],
         } for form in function.forms.all()],
     }
 
@@ -1166,6 +1842,7 @@ def function_action(request, function_id):
     if action == "delete":
         function.deleted_at = timezone.now()
         function.save(update_fields=["deleted_at"])
+        LibraryTemplateFunction.objects.filter(function=function).delete()
         audit(request, "function.deleted", function)
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})
     if action == "rename":
@@ -1231,8 +1908,6 @@ def function_action(request, function_id):
         incoming = payload.get("questions")
         if not isinstance(incoming, list):
             return function_api_error("Ongeldige vragenlijst.")
-        if sum(1 for item in incoming if isinstance(item, dict) and item.get("fieldType") == ManagedQuestion.FieldType.MATRIX) > 2:
-            return function_api_error("Een formulier mag maximaal 2 matrices bevatten.", warning=True)
         valid_types = set(ManagedQuestion.FieldType.values)
         prepared = []
         try:
@@ -1250,6 +1925,12 @@ def function_action(request, function_id):
                         raise ValueError("Gebruik een geldige http(s)-link.")
                 field_type = item["fieldType"]
                 image = validate_function_image(item.get("image", "")) if field_type == ManagedQuestion.FieldType.IMAGE else ""
+                matrix_definition = item.get("matrixDefinition", {})
+                if field_type == ManagedQuestion.FieldType.MATRIX:
+                    try:
+                        matrix_definition = normalize_definition(matrix_definition)
+                    except ValidationError as error:
+                        raise ValueError(error.messages[0])
                 prepared.append(ManagedQuestion(
                     form=form,
                     position=position,
@@ -1260,6 +1941,7 @@ def function_action(request, function_id):
                     options=clean_string_list(item.get("options", [])),
                     columns=clean_string_list(item.get("columns", [])),
                     rows=clean_string_list(item.get("rows", [])),
+                    matrix_definition=matrix_definition if field_type == ManagedQuestion.FieldType.MATRIX else {},
                     url=url[:1000],
                     button_text=str(item.get("buttonText", ""))[:180],
                     image=image,
@@ -1270,7 +1952,7 @@ def function_action(request, function_id):
             return function_api_error(str(error), warning=True)
         form.title = title
         form.save(update_fields=["title"])
-        form.questions.all().delete()
+        form.questions.filter(field_type__in=valid_types).delete()
         ManagedQuestion.objects.bulk_create(prepared)
         audit(request, "function.form_saved", function, form_id=form.id)
         return JsonResponse({"ok": True, "message": "Wijzigingen opgeslagen"})
@@ -1410,6 +2092,11 @@ def library_dossier(request, dossier_id=None):
         "dossier": dossier,
         "field_types": FieldDefinition.FieldType.choices,
         "module_categories": LibraryTemplate.Category.choices,
+        "dossier_structure": build_library_structure(
+            dossier.module_entries.select_related("template").prefetch_related(
+                "template__function_links__function__forms"
+            ).all()
+        ) if dossier else [],
     })
 
 
@@ -1469,35 +2156,72 @@ def library_template(request, template_id=None):
     action = request.POST.get("action")
 
     if template and action in {"add_function", "remove_function"}:
-        if not is_admin(request.user):
+        if not can_manage_library_template(request.user, template):
             raise PermissionDenied
-        functions = list(template.functions or [])
         if action == "add_function":
-            new_name = request.POST.get("new_function", "").strip()
-            if not new_name:
-                messages.error(request, "Geef de nieuwe functie een naam.")
-            elif len(new_name) > 180:
-                messages.error(request, "De naam mag maximaal 180 tekens bevatten.")
-            elif any(item.casefold() == new_name.casefold() for item in functions):
-                messages.error(request, "Deze functie bestaat al.")
+            function_ids = request.POST.getlist("function_ids")
+            try:
+                function_ids = [int(function_id) for function_id in function_ids]
+            except (TypeError, ValueError):
+                function_ids = []
+            unique_function_ids = set(function_ids)
+            selected = list(FunctionDefinition.objects.filter(
+                id__in=unique_function_ids, deleted_at__isnull=True
+            ))
+            attached_ids = set(
+                template.function_links.values_list("function_id", flat=True)
+            )
+            if (
+                function_ids
+                and len(unique_function_ids) == len(function_ids)
+                and len(selected) == len(unique_function_ids)
+                and not attached_ids.intersection(unique_function_ids)
+            ):
+                position = template.function_links.count()
+                LibraryTemplateFunction.objects.bulk_create([
+                    LibraryTemplateFunction(template=template, function=function, position=position + index)
+                    for index, function in enumerate(selected)
+                ])
+                template.version += 1
+                template.save(update_fields=["functions", "version", "updated_at"])
+                audit(request, "library.functions_added", template, count=len(selected))
+                messages.success(request, "Functies toegevoegd.")
+            elif is_admin(request.user):
+                # Keep the old endpoint usable for existing integrations while new UI uses links.
+                new_name = request.POST.get("new_function", "").strip()
+                if new_name and len(new_name) <= 180 and new_name.casefold() not in {
+                    item.casefold() for item in (template.functions or [])
+                }:
+                    template.functions = [*(template.functions or []), new_name]
+                    template.version += 1
+                    template.save(update_fields=["functions", "version", "updated_at"])
+                    messages.success(request, "Functie toegevoegd.")
+                else:
+                    messages.error(request, "Selecteer minstens één nieuwe functie.")
             else:
-                functions.append(new_name)
-                template.functions = functions
-                template.version += 1
-                template.save(update_fields=["functions", "version", "updated_at"])
-                audit(request, "library.function_added", template, title=new_name)
-                messages.success(request, "Functie toegevoegd.")
+                messages.error(request, "Een of meer functies kunnen niet aan dit onderdeel worden toegevoegd.")
         elif action == "remove_function":
-            remove_name = request.POST.get("remove_function", "").strip()
-            filtered = [item for item in functions if item.casefold() != remove_name.casefold()]
-            if filtered != functions:
-                template.functions = filtered
+            function_id = request.POST.get("function_id")
+            if function_id:
+                link = get_object_or_404(
+                    LibraryTemplateFunction, template=template, function_id=function_id
+                )
+                link.delete()
                 template.version += 1
-                template.save(update_fields=["functions", "version", "updated_at"])
-                audit(request, "library.function_removed", template, title=remove_name)
+                template.save(update_fields=["version", "updated_at"])
+                audit(request, "library.function_removed", template, function_id=function_id)
                 messages.success(request, "Functie verwijderd.")
             else:
-                messages.error(request, "Functie niet gevonden.")
+                remove_name = request.POST.get("remove_function", "").strip()
+                functions = [item for item in (template.functions or [])
+                             if item.casefold() != remove_name.casefold()]
+                if functions != (template.functions or []):
+                    template.functions = functions
+                    template.version += 1
+                    template.save(update_fields=["functions", "version", "updated_at"])
+                    messages.success(request, "Functie verwijderd.")
+                else:
+                    messages.error(request, "Functie niet gevonden.")
         return redirect("dossier:library_detail", template_id=template.id)
 
     form = LibraryTemplateForm(request.POST or None, instance=template)
@@ -1514,7 +2238,10 @@ def library_template(request, template_id=None):
     if template:
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
-            "can_manage_functions": is_admin(request.user),
+            "can_manage_functions": can_manage_library_template(request.user, template),
+            "available_functions": FunctionDefinition.objects.filter(
+                deleted_at__isnull=True
+            ).exclude(template_links__template=template).order_by("title"),
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,

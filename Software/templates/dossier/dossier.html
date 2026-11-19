@@ -1,58 +1,67 @@
 {% extends 'base.html' %}
-{% block title %}{{ student_case.patient_name }} | Dossier{% endblock %}
+{% block title %}{{ page_title }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
   <aside class="sidebar">
     <div class="person">
-      <strong>{{ student_case.patient_name }}</strong>
-      {% if student_case.patient_image %}
-        <img src="{{ student_case.patient_image }}" alt="">
-      {% endif %}
-    </div>
-    <form class="search" method="get">
-      <span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies">
-    </form>
-    <nav>
-      {% for module in modules %}
-        <a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}">
-          <span>{{ module.title }}</span><b>›</b>
-        </a>
-      {% empty %}
-        <p class="empty">Geen functies gevonden.</p>
-      {% endfor %}
+      <strong>{{ student_case.patient_name }}</strong>{% if student_case.patient_image %}<img src="{{ student_case.patient_image }}" alt="">{% endif %}</div>
+      <form class="search" method="get"><span>⌕</span><input name="q" value="{{ query }}" placeholder="Filter functies..." aria-label="Filter functies"></form>
+      <nav aria-label="Dossieronderdelen">
+        {% for module in sidebar %}
+          <div class="nav-group">
+            {% if module.functions %}
+              <button type="button" class="nav-item nav-toggle {% if selected.id == module.id %}selected{% endif %}" data-nav-toggle aria-expanded="{% if selected.id == module.id %}true{% else %}false{% endif %}" aria-controls="nav-functions-{{ module.id }}"><span>{{ module.title }}</span><b aria-hidden="true">⌄</b></button>
+              <div class="nav-subitems" id="nav-functions-{{ module.id }}" {% if selected.id != module.id %}hidden{% endif %}>
+                {% for function in module.functions %}
+                  <a class="nav-subitem {% if selected_function_id == function.id %}selected{% endif %}" href="{{ function.url }}" {% if selected_function_id == function.id %}aria-current="page"{% endif %}><span>{{ function.title }}</span></a>
+                {% endfor %}
+              </div>
+            {% else %}
+              <button type="button" class="nav-item nav-toggle {% if selected.id == module.id %}selected{% endif %}" data-nav-toggle data-nav-url="?module={{ module.id }}" aria-expanded="false" aria-controls="nav-functions-{{ module.id }}"><span>{{ module.title }}</span><b aria-hidden="true">⌄</b></button>
+              <div id="nav-functions-{{ module.id }}" hidden></div>
+            {% endif %}
+          </div>
+        {% empty %}<p class="empty-state sidebar-empty">{% if query %}Geen resultaten gevonden.{% else %}Er zijn nog geen onderdelen in dit dossier.{% endif %}</p>{% endfor %}
       </nav>
     </aside>
   <main class="main">
     <header class="top">
     <div>
-      <p class="eyebrow">{{ student_case.course }}</p>
-      <h1>{{ student_case.patient_name }}</h1>
+      <p class="eyebrow">{{ selected.title|default:student_case.course }}</p>
+      <h1>{{ page_title }}</h1>
       <p>{{ student_case.patient_context }}</p>
     </div>
-    <a class="back" href="{% url 'dossier:home' %}">← Casussen</a>
+    <div class="header-actions">
+      <a class="back" href="{% url 'dossier:case_detail' case_id=case.id %}">← Deze casus</a>
+      <a class="back" href="{% url 'dossier:home' %}">← Casussen</a>
+    </div>
   </header>
     <section class="work">
       {% if selected %}
         <div class="work-title">
           <div>
-            <p class="eyebrow">{{ selected.get_kind_display }}</p>
-            <h2>{{ selected.title }}</h2>
+            <p class="eyebrow">{{ selected_function.kind|default:selected.get_kind_display }}</p>
           </div>
           <span>{{ student_case.get_status_display }}</span>
         </div>
       {% if selected.instructions %}
         <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
       {% endif %}
-      <form method="post" class="module-form">{% csrf_token %}
-        <input type="hidden" name="module" value="{{ selected.id }}">
-        {% if not student_case.locked and selected.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
-        {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
-        {% if not student_case.locked and selected.kind != 'information' %}
-          <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
-        {% endif %}
-      </form>
+      {% if function_forms or fields %}
+      <div class="dossier-content-grid single-form-layout">
+        <form method="post" class="module-form" enctype="multipart/form-data" data-save-error="{% if missing or form_result.errors %}true{% else %}false{% endif %}">{% csrf_token %}
+          <input type="hidden" name="module" value="{{ selected.id }}">
+          <input type="hidden" name="function" value="{{ selected_function_id }}">
+          <input type="hidden" name="form" value="{{ active_form_key|default:'' }}">
+          {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
+          {% include 'dossier/_function_snapshots.html' with locked=student_case.locked function_save=True %}
+        </form>
+      </div>
       {% else %}
-        <p class="empty-state">Dit dossier bevat geen onderdelen.</p>
+        <p class="empty-state">Dit onderdeel bevat nog geen functies.</p>
+      {% endif %}
+      {% else %}
+        <p class="empty-state">Er zijn nog geen onderdelen in dit dossier.</p>
       {% endif %}
     </section>
   </main>

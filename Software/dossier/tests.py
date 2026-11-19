@@ -1,8 +1,9 @@
 import json
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
 from django.core.exceptions import SuspiciousOperation
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
@@ -13,12 +14,14 @@ from .models import (
     Assignment,
     AssignmentSubmission,
     Case,
+    CaseFunctionSnapshot,
     Education,
     ExternalIdentity,
     LibraryDossier,
     FunctionDefinition,
     LibraryField,
     LibraryTemplate,
+    LibraryTemplateFunction,
     ManagedForm,
     ManagedQuestion,
     Patient,
@@ -27,7 +30,11 @@ from .models import (
     TeachingGroup,
 )
 from .auth import EpdOIDCAuthenticationBackend
-from .services import copy_template_to_case, start_student_case
+from .services import (
+    build_sidebar_structure, copy_template_to_case, create_case_structure,
+    ensure_default_templates, start_student_case,
+)
+from .matrix import legacy_definition
 from .test_fixtures import create_library_fixtures
 
 
@@ -140,22 +147,192 @@ class EpdWorkflowTests(TestCase):
         template.refresh_from_db()
         self.assertIn("Medicatiecheck", template.functions)
 
-    def test_teacher_cannot_manage_functions_in_section(self):
-        self.client.login(username="teacher", password="testpass")
+    def test_teacher_can_attach_and_detach_existing_functions(self):
+        self.client.force_login(self.teacher)
         template = LibraryTemplate.objects.create(
-            title="Onderdeel zonder functiemanagement",
+            title="Onderdeel voor docentfuncties",
+            category=LibraryTemplate.Category.MODULE,
+            education=self.education,
+            created_by=self.admin,
+        )
+        function = FunctionDefinition.objects.create(
+            title="Docentfunctie", kind=FunctionDefinition.Kind.FORM
+        )
+        deleted_function = FunctionDefinition.objects.create(
+            title="Verwijderde functie", kind=FunctionDefinition.Kind.FORM,
+            deleted_at=timezone.now(),
+        )
+        detail_url = reverse("dossier:library_detail", args=[template.id])
+
+        page = self.client.get(detail_url)
+        self.assertContains(page, "Functies")
+        self.assertContains(page, "Functie toevoegen")
+        self.assertContains(page, 'data-function-option data-title="Docentfunctie"')
+        self.assertNotContains(page, "Verwijderde functie")
+
+        response = self.client.post(detail_url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        })
+        self.assertRedirects(response, detail_url)
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+        self.assertNotContains(
+            self.client.get(detail_url), 'data-function-option data-title="Docentfunctie"'
+        )
+
+        response = self.client.post(detail_url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        }, follow=True)
+        self.assertRedirects(response, detail_url)
+        self.assertContains(response, "kunnen niet aan dit onderdeel worden toegevoegd")
+
+        response = self.client.post(detail_url, {
+            "action": "remove_function", "function_id": str(function.id),
+        })
+        self.assertRedirects(response, detail_url)
+        self.assertFalse(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+
+    def test_managed_function_link_is_snapshotted_into_case_copy(self):
+        self.client.force_login(self.admin)
+        function = FunctionDefinition.objects.create(
+            title="Intakefunctie", kind=FunctionDefinition.Kind.FORM
+        )
+        form = ManagedForm.objects.create(function=function, title=function.title)
+        ManagedQuestion.objects.create(
+            form=form, field_type=ManagedQuestion.FieldType.TEXT, question="Vraag"
+        )
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel met beheerde functie",
             category=LibraryTemplate.Category.MODULE,
             created_by=self.teacher,
         )
-        response = self.client.get(reverse("dossier:library_detail", args=[template.id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Functies")
-
         response = self.client.post(
             reverse("dossier:library_detail", args=[template.id]),
-            {"action": "add_function", "new_function": "Medicatiecheck"},
+            {"action": "add_function", "function_ids": [function.id]},
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertRedirects(response, reverse("dossier:library_detail", args=[template.id]))
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
+
+        module = copy_template_to_case(template, self.case)
+        snapshot = CaseFunctionSnapshot.objects.get(module=module)
+        self.assertEqual(snapshot.title, "Intakefunctie")
+        self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
+        question = form.questions.get()
+        question.question = "Gewijzigd"
+        question.save(update_fields=["question"])
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
+
+        self.case.status = Case.Status.PUBLISHED
+        self.case.save(update_fields=["status"])
+        student_case, _ = start_student_case(self.case, self.student)
+        response = student_case.module_responses.get(module=module)
+        function_key = f"{snapshot.id}_{form.id}_{question.id}"
+        self.client.force_login(self.student)
+        page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id},
+        )
+        self.assertContains(page, "Intakefunctie")
+        self.assertContains(page, "<title>Intakefunctie | Dossier</title>", html=True)
+        self.assertContains(page, "<h1>Intakefunctie</h1>", html=True)
+        self.assertNotContains(page, "<h2>Intakefunctie</h2>", html=True)
+        self.assertContains(page, 'aria-current="page"')
+        self.assertContains(page, "dossier-content-grid single-form-layout")
+        fallback_page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id, "function": "999999"},
+        )
+        self.assertEqual(fallback_page.status_code, 200)
+        self.assertContains(fallback_page, "<h1>Intakefunctie</h1>", html=True)
+        second_snapshot = CaseFunctionSnapshot.objects.create(
+            module=module,
+            title="Tweede functie",
+            kind=FunctionDefinition.Kind.FORM,
+            position=2,
+            definition={"forms": [{"id": "second", "title": "Tweede formulier", "questions": []}]},
+        )
+        second_page = self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": response.id, "function": second_snapshot.id},
+        )
+        self.assertEqual(second_page.status_code, 200)
+        self.assertContains(second_page, "<h1>Tweede functie</h1>", html=True)
+        self.assertNotContains(second_page, "<h1>Intakefunctie</h1>", html=True)
+        self.client.post(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {
+                "module": response.id,
+                "action": "save",
+                f"function_{function_key}": "<p>Opmaak</p>",
+            },
+        )
+        response.refresh_from_db()
+        self.assertEqual(response.data["_functions"][function_key], "<p>Opmaak</p>")
+
+        with CaptureQueriesContext(connection) as baseline:
+            self.client.get(reverse("dossier:dossier", args=[self.case.id]))
+        for index in range(8):
+            CaseFunctionSnapshot.objects.create(
+                module=module,
+                title=f"Extra functie {index}",
+                kind=FunctionDefinition.Kind.FORM,
+                position=index + 1,
+                definition={"forms": []},
+            )
+        with CaptureQueriesContext(connection) as expanded:
+            self.client.get(reverse("dossier:dossier", args=[self.case.id]))
+        self.assertEqual(len(baseline), len(expanded))
+        sidebar = build_sidebar_structure(
+            list(
+                student_case.module_responses.select_related("module").prefetch_related(
+                    "module__function_snapshots"
+                )
+            )
+        )
+        function_titles = [
+            function["title"]
+            for item in sidebar
+            for function in item["functions"]
+        ]
+        self.assertIn("Extra functie 7", function_titles)
+
+    def test_teacher_can_manage_functions_in_section(self):
+        self.client.login(username="teacher", password="testpass")
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel met functiemanagement",
+            category=LibraryTemplate.Category.MODULE,
+            created_by=self.teacher,
+        )
+        function = FunctionDefinition.objects.create(
+            title="Medicatiecheck", kind=FunctionDefinition.Kind.FORM
+        )
+        url = reverse("dossier:library_detail", args=[template.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Functies")
+        self.assertContains(response, "Functie toevoegen")
+
+        response = self.client.post(url, {
+            "action": "add_function", "function_ids": [str(function.id)],
+        })
+        self.assertRedirects(response, url)
+        self.assertTrue(
+            LibraryTemplateFunction.objects.filter(
+                template=template, function=function
+            ).exists()
+        )
 
     def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
         self.client.login(username="teacher", password="testpass")
@@ -251,19 +428,22 @@ class EpdWorkflowTests(TestCase):
         self.client.get(reverse("dossier:function_management"))
         self.assertFalse(FunctionDefinition.objects.filter(id=function.id).exists())
 
-    def test_function_form_rejects_a_third_matrix(self):
+    def test_function_form_accepts_a_third_matrix(self):
         self.client.login(username="teacher", password="testpass")
         function = FunctionDefinition.objects.create(title="Matrices", kind=FunctionDefinition.Kind.GROUP)
         form = ManagedForm.objects.create(function=function, title="Invoer")
-        questions = [{"fieldType": ManagedQuestion.FieldType.MATRIX} for _ in range(3)]
+        definition = legacy_definition(["Rij"], ["Kolom"])
+        questions = [
+            {"fieldType": ManagedQuestion.FieldType.MATRIX, "matrixDefinition": definition}
+            for _ in range(3)
+        ]
         response = self.client.post(
             reverse("dossier:function_action", args=[function.id]),
             json.dumps({"action": "save_form", "formId": form.id, "title": form.title, "questions": questions}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertTrue(response.json()["warning"])
-        self.assertEqual(form.questions.count(), 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(form.questions.count(), 3)
 
     def test_editor_includes_unsaved_change_guard_and_initially_disabled_save(self):
         self.client.login(username="teacher", password="testpass")
@@ -276,6 +456,15 @@ class EpdWorkflowTests(TestCase):
         self.assertIn("saveButton.disabled = true", script)
         self.assertIn("saveButton.disabled = locked || !dirty", script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
+
+    def test_answer_editor_save_guard_and_error_retry_are_present(self):
+        script = (Path(__file__).resolve().parents[1] / "static" / "epd-save.js").read_text(encoding="utf-8")
+        self.assertIn("const states = new WeakMap()", script)
+        self.assertIn("button.disabled = !dirty || state.saving", script)
+        self.assertIn("event.target.closest('[data-form-save]')", script)
+        self.assertIn("const payload = {", script)
+        self.assertIn("fetch('/dossier/save-form/'", script)
+        self.assertIn("window.tinymce?.triggerSave", script)
 
     def test_opening_empty_library_does_not_seed_default_templates(self):
         LibraryTemplate.objects.all().delete()

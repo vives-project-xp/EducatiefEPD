@@ -1,0 +1,99 @@
+from types import SimpleNamespace
+
+from django.template.loader import render_to_string
+from django.test import SimpleTestCase
+
+from .function_types import FUNCTION_TYPES, get_function_type
+from .views import prepare_function_forms
+
+
+class FunctionTypeRenderingTests(SimpleTestCase):
+    def snapshot(self, field_types):
+        return SimpleNamespace(
+            id=1,
+            title="Voorbeeldfunctie",
+            kind="formulier",
+            definition={
+                "forms": [{
+                    "id": 2,
+                    "title": "Voorbeeldformulier",
+                    "questions": [
+                        {
+                            "id": index,
+                            "fieldType": field_type,
+                            "question": f"Vraag {field_type}",
+                            "required": False,
+                            "options": ["Een", "Twee"],
+                            "rows": ["Rij"],
+                            "columns": ["Kolom"],
+                            "matrixDefinition": {},
+                            "url": "https://example.com",
+                            "buttonText": "Open",
+                            "image": "",
+                            "caption": "",
+                            "explanation": "Uitleg",
+                        }
+                        for index, field_type in enumerate(field_types)
+                    ],
+                }]
+            },
+        )
+
+    def render(self, field_types):
+        forms = prepare_function_forms([self.snapshot(field_types)], {})
+        return render_to_string(
+            "dossier/_function_snapshots.html",
+            {"function_forms": forms, "locked": False, "student_dossier": False, "function_save": True},
+        )
+
+    def test_registry_contains_a_renderer_input_for_every_type(self):
+        html = self.render([item.key for item in FUNCTION_TYPES])
+        self.assertNotIn("Deze vraag kan niet worden weergegeven.", html)
+        self.assertIn("type=\"file\"", html)
+        self.assertIn("type=\"datetime-local\"", html)
+        self.assertIn("observation-entry", html)
+        self.assertIn("data-matrix", html)
+        self.assertIn("function-information", html)
+
+    def test_unknown_and_legacy_time_questions_do_not_crash(self):
+        html = self.render(["time", "removed-type"])
+        self.assertIn("type=\"time\"", html)
+        self.assertIn("Deze vraag kan niet worden weergegeven.", html)
+
+    def test_registry_does_not_offer_time(self):
+        self.assertNotIn("time", [item.key for item in FUNCTION_TYPES])
+        self.assertIn("observation", [item.key for item in FUNCTION_TYPES])
+
+    def test_observation_alias_and_existing_component_markup_are_preserved(self):
+        self.assertEqual(get_function_type("observatie").key, "observation")
+        html = self.render(["observatie"])
+        self.assertIn("Nog geen observaties.", html)
+        self.assertIn("observation_timestamp_1_2_0", html)
+        self.assertIn("observation_value_1_2_0", html)
+        self.assertIn("Observatie toevoegen", html)
+
+    def test_existing_observation_payload_keeps_iso_timestamp(self):
+        snapshot = self.snapshot(["observatie"])
+        data = {
+            "_functions": {
+                "1_2_0": [{
+                    "timestamp": "2026-11-19T09:25",
+                    "value": "xx",
+                    "note": "yy",
+                }],
+            },
+        }
+        forms = prepare_function_forms([snapshot], data)
+        html = render_to_string(
+            "dossier/_function_snapshots.html",
+            {"function_forms": forms, "locked": False, "student_dossier": False, "function_save": True},
+        )
+        self.assertIn("2026", html)
+        self.assertIn("T09:25", html)
+        self.assertIn("19/11/2026 09:25", html)
+
+    def test_save_is_hidden_for_display_only_forms_and_rendered_once_for_answerable_forms(self):
+        display_only = self.render(["image", "link", "info"])
+        self.assertNotIn('class="primary button function-save"', display_only)
+        answerable = self.render(["image", "text", "info"])
+        self.assertEqual(answerable.count('class="primary button function-save"'), 1)

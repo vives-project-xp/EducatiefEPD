@@ -45,12 +45,22 @@
             <span class="library-card-meta"><span>{{ dossier.education|default:'Alle opleidingen' }}</span><span>Dossiersjabloon</span></span>
           </summary>
           <div class="dossier-module-list">
-            {% for entry in dossier.module_entries.all %}
-            <a class="content-row linked" href="{% url 'dossier:library_detail' entry.template.id %}">
+            {% for module in dossier.structure %}
+            <div class="content-row library-module-hierarchy">
               <span>{{ forloop.counter }}</span>
-              <div><small>{{ entry.template.get_category_display }}</small><strong>{{ entry.template.title }}</strong></div>
-              <b>›</b>
-            </a>
+              <div>
+                <small>{{ module.kind }}</small>
+                <strong>{{ module.title }}</strong>
+                {% for function in module.functions %}
+                <div class="library-structure-function">
+                  <span class="library-card-meta">{{ function.kind }}</span>
+                  <strong>{{ function.title }}</strong>
+                  {% for form in function.forms %}<span class="library-structure-form">{{ form.title }}</span>{% endfor %}
+                </div>
+                {% endfor %}
+              </div>
+              <a href="{% url 'dossier:library_detail' module.template_id %}" aria-label="{{ module.title }} bewerken">›</a>
+            </div>
             {% empty %}
             <p class="empty-state">Nog geen modules in dit dossier.</p>
             {% endfor %}

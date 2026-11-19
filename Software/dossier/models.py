@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from .function_types import FUNCTION_TYPE_CHOICES
 
 class Education(models.Model):
     name = models.CharField(max_length=120, unique=True)
@@ -89,7 +90,7 @@ class Patient(models.Model):
     gender = models.CharField(
         max_length=20, choices=Gender.choices, default=Gender.UNKNOWN, blank=True
     )
-    image = models.ImageField(upload_to=patient_image_path, blank=True)
+    image = models.ImageField(upload_to=patient_image_path, max_length=240, blank=True)
     context = models.CharField(max_length=280, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -206,6 +207,25 @@ class LibraryTemplate(models.Model):
         return f"{self.title} (v{self.version})"
 
 
+class LibraryTemplateFunction(models.Model):
+    template = models.ForeignKey(
+        LibraryTemplate, on_delete=models.CASCADE, related_name="function_links"
+    )
+    function = models.ForeignKey(
+        "FunctionDefinition", on_delete=models.CASCADE, related_name="template_links"
+    )
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["template", "function"], name="unique_library_template_function"
+            )
+        ]
+
+
 class LibraryDossier(models.Model):
     class Status(models.TextChoices):
         ACTIVE = "active", "Actief"
@@ -291,19 +311,21 @@ class ManagedForm(models.Model):
 
 
 class ManagedQuestion(models.Model):
-    class FieldType(models.TextChoices):
-        IMAGE = "image", "Afbeelding weergeven"
-        LINK = "link", "Hyperlink"
-        INFO = "info", "Toelichting"
-        IMAGE_UPLOAD = "imageUpload", "Afbeelding uploaden"
-        FILE_UPLOAD = "fileUpload", "Bestand uploaden"
-        DATE = "date", "Datum"
-        DATETIME = "dateTime", "Datum en tijd"
-        NUMBER = "number", "Getal"
-        MATRIX = "matrix", "Matrix (maximaal 2)"
-        MULTIPLE_CHOICE = "multipleChoice", "Meerkeuze"
-        TEXT = "text", "Tekst"
-        TIME = "time", "Tijd"
+    class FieldType:
+        IMAGE = "image"
+        LINK = "link"
+        INFO = "info"
+        IMAGE_UPLOAD = "imageUpload"
+        FILE_UPLOAD = "fileUpload"
+        DATE = "date"
+        DATETIME = "dateTime"
+        NUMBER = "number"
+        MATRIX = "matrix"
+        MULTIPLE_CHOICE = "multipleChoice"
+        TEXT = "text"
+        OBSERVATION = "observation"
+        values = tuple(key for key, _ in FUNCTION_TYPE_CHOICES)
+        choices = FUNCTION_TYPE_CHOICES
 
     form = models.ForeignKey(ManagedForm, on_delete=models.CASCADE, related_name="questions")
     position = models.PositiveIntegerField(default=0)
@@ -314,9 +336,10 @@ class ManagedQuestion(models.Model):
     options = models.JSONField(default=list, blank=True)
     columns = models.JSONField(default=list, blank=True)
     rows = models.JSONField(default=list, blank=True)
+    matrix_definition = models.JSONField(default=dict, blank=True)
     url = models.URLField(max_length=1000, blank=True)
     button_text = models.CharField(max_length=180, blank=True)
-    image = models.ImageField(blank=True)
+    image = models.TextField(blank=True)
     caption = models.CharField(max_length=280, blank=True)
     explanation = models.TextField(blank=True)
 
@@ -353,6 +376,20 @@ class Module(models.Model):
 
     def __str__(self):
         return f"{self.case}: {self.title}"
+
+
+class CaseFunctionSnapshot(models.Model):
+    module = models.ForeignKey(
+        Module, on_delete=models.CASCADE, related_name="function_snapshots"
+    )
+    title = models.CharField(max_length=180)
+    kind = models.CharField(max_length=16)
+    position = models.PositiveIntegerField(default=0)
+    definition = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["position", "id"]
 
 
 class FieldDefinition(models.Model):
@@ -560,6 +597,7 @@ class ModuleResponse(models.Model):
     schema = models.JSONField(default=list, blank=True)
     position = models.PositiveIntegerField(default=0)
     data = models.JSONField(default=dict, blank=True)
+    source_data = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

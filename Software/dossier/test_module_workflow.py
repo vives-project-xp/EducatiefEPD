@@ -1,9 +1,11 @@
 from copy import deepcopy
+import json
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import escape
+from django.utils import timezone
 
 from .models import (
     Assignment, AssignmentSubmission, AuditEvent, Case, Education, Module,
@@ -78,6 +80,73 @@ class ModuleWorkflowTests(TestCase):
     def save_response(self, data):
         self.response.data = data
         self.response.save()
+
+    def test_shared_save_form_endpoint_preserves_observations_and_saves_text_matrix(self):
+        existing = [{"timestamp": "2026-10-14T10:30", "value": "Bestaand", "note": "Bewaren"}]
+        for role in ("teacher", "student"):
+            with self.subTest(role=role):
+                url, record, attribute = self.target(role)
+                base = {
+                    "text": "Oud",
+                    "observations": existing,
+                    "matrix": {"0_0": "Oud", "0_1": "", "1_0": "", "1_1": ""},
+                }
+                setattr(record, attribute, base)
+                record.save()
+                self.client.force_login(self.teacher if role == "teacher" else self.student)
+                payload = {
+                    "module_id": record.pk,
+                    "function_id": None,
+                    "form_key": "module",
+                    "answers": {
+                        "text": "Nieuw",
+                        "matrix": {"legacyCells": {"0_0": "Nieuw"}},
+                        "observations": existing + [{
+                            "timestamp": "2026-10-15T12:00",
+                            "value": "Tweede",
+                            "note": "Nieuw",
+                        }],
+                    },
+                }
+                result = self.client.post("/dossier/save-form/", {
+                    "payload": json.dumps(payload),
+                })
+                self.assertEqual(result.status_code, 200)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Nieuw")
+                self.assertEqual(stored["observations"], existing + [{
+                    "timestamp": "2026-10-15T12:00",
+                    "value": "Tweede",
+                    "note": "Nieuw",
+                }])
+                self.assertEqual(stored["matrix"]["0_0"], "Nieuw")
+
+    def test_shared_save_form_endpoint_rejects_locked_and_invalid_observation(self):
+        self.client.force_login(self.student)
+        invalid = {
+            "module_id": self.response.pk,
+            "function_id": None,
+            "form_key": "module",
+            "answers": {"observations": [{
+                "timestamp": "ongeldig",
+                "value": "Niet opslaan",
+                "note": "",
+            }]},
+        }
+        result = self.client.post("/dossier/save-form/", {"payload": json.dumps(invalid)})
+        self.assertEqual(result.status_code, 400)
+        self.student_case.status = StudentCase.Status.SUBMITTED
+        self.student_case.submitted_at = timezone.now()
+        self.student_case.save(update_fields=["status", "submitted_at"])
+        valid = {
+            "module_id": self.response.pk,
+            "function_id": None,
+            "form_key": "module",
+            "answers": {"text": "Mag niet"},
+        }
+        result = self.client.post("/dossier/save-form/", {"payload": json.dumps(valid)})
+        self.assertEqual(result.status_code, 403)
 
     def test_incomplete_drafts_can_be_saved_by_student_and_teacher(self):
         for role in ("student", "teacher"):
@@ -216,25 +285,82 @@ class ModuleWorkflowTests(TestCase):
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute), original)
 
-    def test_both_save_buttons_store_other_edits_and_pending_observations(self):
-        for role in ("student", "teacher"):
-            for action in ("save", "add_observation:observations"):
-                with self.subTest(role=role, action=action):
-                    url, record, attribute = self.target(role)
-                    setattr(record, attribute, {})
-                    record.save()
-                    result = self.client.post(url, self.form_data(
-                        action=action, field_text="Ook bewaren", observation_timestamp_observations="2026-10-15T12:00",
-                        observation_value_observations="Observatie", observation_note_observations="Toelichting",
-                    ))
-                    self.assertEqual(result.status_code, 302)
-                    record.refresh_from_db()
-                    stored = getattr(record, attribute)
-                    self.assertEqual(stored["text"], "Ook bewaren")
-                    self.assertEqual(stored["matrix"]["0_0"], "0")
-                    self.assertEqual(stored["observations"], [{"timestamp": "2026-10-15T12:00", "value": "Observatie", "note": "Toelichting"}])
+    def test_explicit_save_persists_client_staged_observation(self):
+        url, record, attribute = self.target("teacher")
+        setattr(record, attribute, {})
+        record.save()
+        payload = self.form_data(
+            action="save",
+            pending_observations_observations='[{"timestamp":"2026-10-15T12:00","value":"Staged","note":"Bewaren"}]',
+        )
+        result = self.client.post(url, payload)
+        self.assertEqual(result.status_code, 302)
+        record.refresh_from_db()
+        stored = getattr(record, attribute)
+        self.assertEqual(stored["observations"], [
+            {"timestamp": "2026-10-15T12:00", "value": "Staged", "note": "Bewaren"}
+        ])
 
-    def test_pending_observation_is_only_appended_after_other_errors_are_corrected(self):
+    def test_save_preserves_existing_and_staged_observations_with_text_and_matrix(self):
+        for role in ("student", "teacher"):
+            with self.subTest(role=role):
+                url, record, attribute = self.target(role)
+                existing = [{"timestamp": "2026-10-14T10:30", "value": "Bestaand", "note": "Niet wijzigen"}]
+                setattr(record, attribute, {
+                    "text": "Origineel",
+                    "matrix": self.complete_data()["matrix"],
+                    "observations": existing,
+                })
+                record.save()
+                payload = self.form_data(
+                    field_text="Nieuw",
+                    pending_observations_observations='[{"timestamp":"2026-10-15T12:00","value":"Nieuw staged","note":"Bewaren"}]',
+                    field_matrix_0_0="36.75",
+                )
+                result = self.client.post(url, payload)
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Nieuw")
+                self.assertEqual(stored["matrix"]["0_0"], "36.75")
+                self.assertEqual(stored["observations"], existing + [{
+                    "timestamp": "2026-10-15T12:00",
+                    "value": "Nieuw staged",
+                    "note": "Bewaren",
+                }])
+
+    def test_save_and_observation_buttons_have_separate_scope(self):
+        for role in ("student", "teacher"):
+            with self.subTest(role=role, action="save"):
+                url, record, attribute = self.target(role)
+                setattr(record, attribute, {})
+                record.save()
+                result = self.client.post(url, self.form_data(
+                    action="save", field_text="Ook bewaren", observation_timestamp_observations="2026-10-15T12:00",
+                    observation_value_observations="Observatie", observation_note_observations="Toelichting",
+                ))
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertEqual(stored["text"], "Ook bewaren")
+                self.assertEqual(stored["matrix"]["0_0"], "0")
+                self.assertFalse(stored.get("observations"))
+            with self.subTest(role=role, action="add_observation"):
+                url, record, attribute = self.target(role)
+                setattr(record, attribute, {})
+                record.save()
+                result = self.client.post(url, self.form_data(
+                    action="add_observation:observations", field_text="Niet bewaren",
+                    observation_timestamp_observations="2026-10-15T12:00",
+                    observation_value_observations="Observatie", observation_note_observations="Toelichting",
+                ))
+                self.assertEqual(result.status_code, 302)
+                record.refresh_from_db()
+                stored = getattr(record, attribute)
+                self.assertFalse(stored.get("text"))
+                self.assertEqual(stored["observations"], [{"timestamp": "2026-10-15T12:00", "value": "Observatie", "note": "Toelichting"}])
+
+    def test_observation_addition_does_not_save_other_errors(self):
         for role in ("student", "teacher"):
             with self.subTest(role=role):
                 url, record, attribute = self.target(role)
@@ -243,14 +369,10 @@ class ModuleWorkflowTests(TestCase):
                     observation_timestamp_observations="2026-10-15T12:00", observation_value_observations="Nieuwe meting",
                 )
                 result = self.client.post(url, payload)
-                self.assertEqual(result.status_code, 200)
-                self.assertContains(result, 'value="Nieuwe meting"')
-                record.refresh_from_db()
-                self.assertFalse(getattr(record, attribute).get("observations"))
-                payload["field_number"] = "12"
-                self.assertEqual(self.client.post(url, payload).status_code, 302)
+                self.assertEqual(result.status_code, 302)
                 record.refresh_from_db()
                 self.assertEqual(len(getattr(record, attribute)["observations"]), 1)
+                self.assertFalse(getattr(record, attribute).get("number"))
 
     def test_invalid_observation_prevents_partial_save(self):
         for role in ("student", "teacher"):
@@ -261,7 +383,6 @@ class ModuleWorkflowTests(TestCase):
                     observation_timestamp_observations="ongeldig", observation_value_observations="Wel ingevuld",
                 ))
                 self.assertEqual(result.status_code, 200)
-                self.assertContains(result, 'value="Onbewaard"')
                 self.assertContains(result, 'value="ongeldig"')
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute), {})
@@ -282,7 +403,7 @@ class ModuleWorkflowTests(TestCase):
         self.response.refresh_from_db()
         self.assertIn("second", {field["key"] for field in self.response.schema})
         self.assertEqual(self.response.data["observations"][0]["value"], "Eerste")
-        self.assertEqual(self.response.data["second"][0]["value"], "Tweede")
+        self.assertFalse(self.response.data.get("second"))
 
     def test_locked_student_dossier_rejects_both_save_buttons(self):
         self.client.force_login(self.student)
@@ -333,3 +454,18 @@ class ModuleWorkflowTests(TestCase):
         self.client.post(url, self.form_data(field_text="Nieuwe voorinvulling"))
         self.response.refresh_from_db()
         self.assertEqual(self.response.data, {})
+
+    def test_case_edits_reach_started_student_without_overwriting_student_answers(self):
+        url, _, _ = self.target("teacher")
+        self.client.post(url, self.form_data(field_text="Nieuwe voorinvulling"))
+        self.response.data = {"text": "Studentantwoord"}
+        self.response.save(update_fields=["data", "updated_at"])
+
+        self.client.force_login(self.student)
+        result = self.client.get(self.dossier_url, {"module": self.response.pk})
+
+        self.assertEqual(result.status_code, 200)
+        self.response.refresh_from_db()
+        self.assertEqual(self.response.data["text"], "Studentantwoord")
+        self.assertEqual(self.response.data["number"], "0")
+        self.assertEqual(self.response.source_data["text"], "Nieuwe voorinvulling")

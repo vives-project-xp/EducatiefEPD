@@ -11,9 +11,10 @@ from django.urls import reverse
 
 from .forms import LibraryDossierForm, PatientForm
 from .models import (
-    Case, Education, FunctionDefinition, LibraryDossier, LibraryTemplate,
-    ManagedForm, ManagedQuestion, Patient, Profile,
+    Case, CaseFunctionSnapshot, Education, FunctionDefinition, LibraryDossier, LibraryTemplate,
+    LibraryTemplateFunction, ManagedForm, ManagedQuestion, Patient, Profile,
 )
+from .services import copy_template_to_case
 from .test_fixtures import create_library_fixtures
 
 
@@ -86,6 +87,44 @@ class MergeRecoveryTests(TestCase):
                     content_type="application/json", HTTP_X_CSRFTOKEN=token,
                 )
                 self.assertEqual(response.status_code, 200)
+
+    def test_function_detail_supports_data_url_images_and_uploaded_value_types(self):
+        image = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+        self.question.field_type = ManagedQuestion.FieldType.IMAGE
+        self.question.image = image
+        self.question.save(update_fields=["field_type", "image"])
+
+        response = self.client.get(reverse("dossier:function_detail", args=[self.function.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data:image/png;base64")
+
+    def test_deleting_function_removes_library_links_but_keeps_existing_case_snapshots(self):
+        template = LibraryTemplate.objects.create(
+            title="Onderdeel",
+            category=LibraryTemplate.Category.MODULE,
+            education=self.education,
+            created_by=self.teacher,
+        )
+        LibraryTemplateFunction.objects.create(template=template, function=self.function)
+        patient = Patient.objects.create(name="Snapshotpatient", reference="SNAPSHOT-FUNCTION")
+        case = Case.objects.create(
+            title="Bestaande casus",
+            patient=patient,
+            education=self.education,
+            created_by=self.teacher,
+        )
+        module = copy_template_to_case(template, case)
+        snapshot = CaseFunctionSnapshot.objects.get(module=module)
+
+        response = self.post_json("function_action", {"action": "delete"}, [self.function.pk])
+        self.assertEqual(response.status_code, 200)
+        self.function.refresh_from_db()
+        self.assertIsNotNone(self.function.deleted_at)
+        self.assertFalse(LibraryTemplateFunction.objects.filter(
+            template=template, function=self.function
+        ).exists())
+        snapshot.refresh_from_db()
+        self.assertTrue(snapshot.definition["forms"])
 
     def test_cleaned_choice_and_matrix_lists_must_remain_nonempty(self):
         for field in (

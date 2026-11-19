@@ -43,22 +43,26 @@ class MatrixEditor {
         root.addEventListener('copy', event => this.copy(event));
         root.addEventListener('paste', event => this.paste(event));
         root.addEventListener('keydown', event => this.keydown(event));
-        window.addEventListener('beforeunload', event => { if (this.dirty && !this.form?.dataset.submitting) { event.preventDefault(); event.returnValue = ''; } });
-        this.form?.addEventListener('submit', () => { this.finishEdit(); this.sync(); this.form.dataset.submitting = 'true'; });
         // Other fields and pending observations share the same save transaction.
-        this.form?.addEventListener('input', () => { this.dirty = true; });
+        this.form?.addEventListener('input', event => { if (event.isTrusted) this.dirty = true; });
     }
     state() { return {sheet: this.sheet, values: this.values}; }
     designing() { return this.designer && !this.preview; }
     protected(spec) { return spec.type === 'label' || (spec.read_only && !this.editReadonly); }
     range() { return rangeBetween(this.anchor, this.focus); }
     announce(message) { this.status.textContent = message; }
-    sync() { if (this.input) this.input.value = JSON.stringify(this.designer ? this.sheet : this.values); }
+    sync() {
+        if (!this.input) return;
+        this.input.value = JSON.stringify(this.designer ? this.sheet : this.values);
+        this.input.dispatchEvent(new Event('input', {bubbles: true}));
+    }
     changed(next = this.state(), message = 'Wijzigingen nog niet bewaard.') {
         this.sheet = next.sheet; this.values = next.values;
         if (!this.preview) { this.history.push(this.state()); this.dirty = true; }
         this.serverErrors = [];
-        this.sync(); this.render(); this.announce(this.preview ? 'Voorbeeld gewijzigd; dit zijn geen opgeslagen antwoorden.' : message);
+        this.sync();
+        if (!this.preview) this.input?.dispatchEvent(new Event('epd:dirty', {bubbles: true}));
+        this.render(); this.announce(this.preview ? 'Voorbeeld gewijzigd; dit zijn geen opgeslagen antwoorden.' : message);
     }
     attempt(action) { try { action(); } catch (error) { this.announce(error.message); } }
     buildToolbar() {
@@ -385,13 +389,22 @@ class MatrixEditor {
     }
 }
 
+function initializeMatrix(root, payload, options) {
+    try {
+        new MatrixEditor(root, payload, options);
+        root.querySelector('.sheet-fallback')?.remove();
+    } catch (error) {
+        root.append(el('p', 'De matrixeditor kon niet worden geladen. Uw opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'}));
+    }
+}
+
 for (const root of document.querySelectorAll('[data-matrix]')) {
     try {
         const payload = JSON.parse(root.querySelector('script[type="application/json"]').textContent);
         const readonly = root.dataset.readonly === 'true';
         let input = null;
         if (!readonly) { input = el('input', null, {type: 'hidden', name: root.dataset.name}); root.append(input); }
-        new MatrixEditor(root, payload, {input, readonly}); root.querySelector('.sheet-fallback')?.remove();
+        initializeMatrix(root, payload, {input, readonly});
     } catch (error) { root.append(el('p', 'De matrixeditor kon niet worden geladen. Uw opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'})); }
 }
 for (const root of document.querySelectorAll('[data-matrix-designer]')) {
@@ -409,3 +422,25 @@ for (const root of document.querySelectorAll('[data-matrix-designer]')) {
     };
     type.addEventListener('change', update); update();
 }
+
+document.addEventListener('function-matrix-designer', event => {
+    const {root, input} = event.detail;
+    let definition = {};
+    try { definition = JSON.parse(input.value || '{}'); } catch (error) { definition = {}; }
+    initializeMatrix(root, {definition: definition.version === 2 ? definition : newSheet()}, {
+        designer: true,
+        input,
+    });
+});
+
+document.addEventListener('function-matrix-preview', event => {
+    const root = event.detail;
+    if (!root || root.dataset.matrixInitialized === 'true') return;
+    try {
+        const payload = JSON.parse(root.querySelector('script[type="application/json"]').textContent);
+        initializeMatrix(root, payload, {readonly: true});
+        root.dataset.matrixInitialized = 'true';
+    } catch (error) {
+        root.append(el('p', 'De matrixeditor kon niet worden geladen. De opgeslagen gegevens zijn niet gewijzigd.', {role: 'alert'}));
+    }
+});
