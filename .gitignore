@@ -5,7 +5,6 @@ __pycache__/
 plan.md
 AGENTS.md
 MEMORY.md
-*.jpg
 Software/deploy/app.env
 Software/deploy/app.env.example
 Software/deploy/deploy.json
