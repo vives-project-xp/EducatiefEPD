@@ -25,6 +25,7 @@
   function addObservation(section, button) {
     const entry = button.closest('[data-observation-entry]');
     if (!entry) return;
+    if (button.disabled) return;
     const key = entry.dataset.observationEntry;
     const rows = entry.querySelector('[data-new-observation-rows]');
     if (!rows) return;
@@ -46,6 +47,23 @@
       rows.append(row);
     }
     setDirty(section, true);
+    button.disabled = true;
+  }
+
+  function updateObservationAddButtons() {
+    document.querySelectorAll('[data-observation-entry]').forEach((entry) => {
+      const button = entry.querySelector('[data-add-observation]');
+      if (!button) return;
+      const rows = [...entry.querySelectorAll('.observation-edit-row')];
+      const lastRow = rows[rows.length - 1];
+      if (!lastRow) {
+        button.disabled = true;
+        return;
+      }
+      const timestamp = lastRow.querySelector('[name^="observation_timestamp_"]');
+      const value = lastRow.querySelector('[name^="observation_value_"]');
+      button.disabled = !(timestamp?.value.trim() && value?.value.trim());
+    });
   }
 
   function collectAnswer(section, field) {
@@ -109,10 +127,14 @@
         if (Array.isArray(parsed)) observations.push(...parsed);
       } catch (_) {}
       entry.querySelectorAll('.observation-edit-row').forEach((row) => {
+        const timestamp = row.querySelector('[name^="observation_timestamp_"]')?.value || '';
+        const value = row.querySelector('[name^="observation_value_"]')?.value.trim() || '';
+        const note = row.querySelector('[name^="observation_note_"]')?.value.trim() || '';
+        if (!timestamp && !value && !note) return;
         observations.push({
-          timestamp: row.querySelector('[name^="observation_timestamp_"]')?.value || '',
-          value: row.querySelector('[name^="observation_value_"]')?.value.trim() || '',
-          note: row.querySelector('[name^="observation_note_"]')?.value.trim() || '',
+          timestamp,
+          value,
+          note,
         });
       });
       answers[key] = observations;
@@ -157,15 +179,18 @@
       states.set(section, {dirty: false, saving: false});
       setDirty(section, false);
     });
+    updateObservationAddButtons();
   });
 
   document.addEventListener('input', (event) => {
     const section = event.target.closest('[data-save-form]');
     if (section && event.isTrusted) setDirty(section, true);
+    if (event.target.closest('[data-observation-entry]')) updateObservationAddButtons();
   });
   document.addEventListener('change', (event) => {
     const section = event.target.closest('[data-save-form]');
     if (section && event.isTrusted) setDirty(section, true);
+    if (event.target.closest('[data-observation-entry]')) updateObservationAddButtons();
   });
   document.addEventListener('epd:dirty', (event) => {
     const section = event.target.closest('[data-save-form]');

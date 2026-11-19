@@ -700,8 +700,16 @@ body {
   }
 
   .function-viewer .observation-entry {
-    grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 1fr) minmax(12rem, 1.5fr) max-content;
-    align-items: start;
+    display: block;
+  }
+
+  .function-viewer .observation-new-rows,
+  .function-viewer .observation-edit-row {
+    grid-template-columns: repeat(3, minmax(12rem, 1fr));
+  }
+
+  .function-viewer .observation-new-rows {
+    grid-template-columns: 1fr;
   }
 
   .function-viewer .observation-entry .button {
@@ -749,6 +757,11 @@ body {
     }
 
     .function-viewer .observation-entry {
+      display: block;
+    }
+
+    .function-viewer .observation-new-rows,
+    .function-viewer .observation-edit-row {
       grid-template-columns: 1fr;
     }
 
@@ -2975,8 +2988,19 @@ summary {
 }
 
 .observation-entry {
+  display: block;
+}
+
+.observation-new-rows {
   display: grid;
-  grid-template-columns: 180px 1fr 1.5fr auto;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.observation-edit-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 1.5fr;
   gap: 8px;
 }
 
@@ -3221,11 +3245,11 @@ summary {
   }
 
   .observation-entry {
-    grid-template-columns: 1fr 1fr;
+    display: block;
   }
 
-  .observation-entry .button {
-    grid-column: 1 / -1;
+  .observation-edit-row {
+    grid-template-columns: 1fr;
   }
 
   .progress-table > a {
@@ -3270,7 +3294,6 @@ summary {
   }
 
   .observation-row,
-  .observation-entry,
   .review-form {
     grid-template-columns: 1fr;
   }
@@ -4069,8 +4092,16 @@ summary {
 }
 
 .function-viewer .observation-entry {
-  grid-template-columns: repeat(3, minmax(12rem, 1fr));
+  display: block;
+}
+
+.function-viewer .observation-new-rows {
+  grid-template-columns: 1fr;
   align-items: start;
+}
+
+.function-viewer .observation-edit-row {
+  grid-template-columns: repeat(3, minmax(12rem, 1fr));
 }
 
 .function-viewer .observation-entry .button {
@@ -4201,6 +4232,11 @@ summary {
   }
 
   .function-viewer .observation-entry {
+    display: block;
+  }
+
+  .function-viewer .observation-new-rows,
+  .function-viewer .observation-edit-row {
     grid-template-columns: 1fr;
   }
 }

@@ -71,6 +71,9 @@ class FunctionTypeRenderingTests(SimpleTestCase):
         self.assertIn("observation_timestamp_1_2_0", html)
         self.assertIn("observation_value_1_2_0", html)
         self.assertIn("Observatie toevoegen", html)
+        self.assertIn('class="observation-new-rows"', html)
+        self.assertIn('class="observation-edit-row"', html)
+        self.assertIn('data-add-observation="1_2_0" disabled', html)
 
     def test_existing_observation_payload_keeps_iso_timestamp(self):
         snapshot = self.snapshot(["observatie"])
