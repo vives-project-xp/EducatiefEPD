@@ -1,0 +1,16 @@
+<div class="patient-image-widget" data-patient-image{% if widget.is_initial %} data-initial-url="{{ widget.value.url }}"{% endif %}>
+  <div class="patient-image-preview" data-image-preview{% if not widget.is_initial or widget.remove_requested %} hidden{% endif %}>
+    <img data-image-thumbnail{% if widget.is_initial %} src="{{ widget.value.url }}"{% endif %} alt="Voorbeeld patiëntafbeelding">
+  </div>
+  <input type="{{ widget.type }}" name="{{ widget.name }}" data-image-input{% include "django/forms/widgets/attrs.html" %}>
+  <input type="hidden" name="{{ widget.checkbox_name }}" id="{{ widget.checkbox_id }}" value="on" data-image-clear{% if not widget.remove_requested or widget.attrs.disabled %} disabled{% endif %}>
+  <div class="patient-image-actions" data-image-actions hidden>
+    <button type="button" class="outline button" data-image-choose{% if widget.attrs.disabled %} disabled{% endif %}>
+      {% if widget.is_initial %}Afbeelding wijzigen{% else %}Afbeelding toevoegen{% endif %}
+    </button>
+    <button type="button" class="outline button danger-outline" data-image-remove{% if not widget.is_initial or widget.remove_requested %} hidden{% endif %}{% if widget.attrs.disabled %} disabled{% endif %}>Afbeelding verwijderen</button>
+  </div>
+  <p class="patient-image-status muted" data-image-status role="status">
+    {% if widget.remove_requested %}De afbeelding wordt verwijderd wanneer je de wijzigingen bewaart.{% elif widget.is_initial %}Wijzigingen worden pas bewaard met het formulier.{% else %}Nog geen afbeelding gekozen.{% endif %}
+  </p>
+</div>

@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}{% if mode == 'edit' %}Casus aanpassen{% else %}Nieuwe patiënt{% endif %} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="teacher-shell narrow">
@@ -24,4 +25,5 @@
       </button>
     </form>
 </main>
+<script defer src="{% static 'patient-image.js' %}"></script>
 {% endblock %}
