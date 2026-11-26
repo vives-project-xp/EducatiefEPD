@@ -828,7 +828,7 @@ class EpdWorkflowTests(TestCase):
         substring_page = self.client.get(
             reverse("dossier:library_list"), {"dossier_q": "ossier een"}
         )
-        self.assertEqual(list(substring_page.context["dossiers"]), [])
+        self.assertEqual([item.title for item in substring_page.context["dossiers"]], ["Dossier een"])
         education_filtered_page = self.client.get(
             reverse("dossier:library_list"),
             {"dossier_education": str(self.education.id)},

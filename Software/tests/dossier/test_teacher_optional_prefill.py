@@ -140,8 +140,9 @@ class TeacherOptionalPrefillTests(TestCase):
         module_response = student_case.module_responses.get(module=self.module)
         self.client.force_login(self.student)
         response = self.client.post(reverse("dossier:dossier", args=[self.case.pk]), {
-            "action": "save", "module": module_response.pk,
+            "action": "save", "module": self.module.pk, "registratie": module_response.pk,
         }, follow=True)
+        self.assertContains(response, "Registratie bewaard.")
         self.assertContains(response, "Dossieronderdeel bewaard.")
         module_response.refresh_from_db()
         self.assertEqual(module_response.data["short_text"], "")
