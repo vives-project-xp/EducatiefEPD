@@ -47,18 +47,18 @@
               <a class="button {% if view_mode == 'lijst' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=lijst{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Lijst</a>
               <a class="button {% if view_mode == 'invoer' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=invoer{% if selected_registration %}&amp;registratie={{ selected_registration.id }}{% endif %}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Invoer</a>
             </div>
-            <form method="post" class="registration-actions">
+            <form method="post" class="registration-actions" id="registration-actions-form">
               {% csrf_token %}
               <input type="hidden" name="module" value="{{ selected.meta_key }}">
-              {% if selected_registration and selected_registration.status != "published" and previous_registration_data %}
-                <input type="hidden" name="registratie" value="{{ selected_registration.id }}">
+              {% if view_mode == 'invoer' and registrations %}
                 <button
                   class="secundary button"
                   type="submit"
                   name="action"
-                  value="copy_previous"
+                  value="copy_to_new"
+                  form="registration-actions-form"
                 >
-                  Kopieer vorige registratie
+                  Nieuw concept uit registratie
                 </button>
               {% endif %}
               <button class="primary button" type="submit" name="action" value="new">＋ Nieuwe registratie</button>
@@ -77,7 +77,7 @@
               <input type="hidden" name="module" value="{{ selected.meta_key }}">
               <input type="hidden" name="weergave" value="invoer">
               <label for="id_registratie_select">Registraties: </label>
-              <select id="id_registratie_select" name="registratie" onchange="this.form.submit()">
+              <select id="id_registratie_select" name="registratie" form="registration-actions-form" onchange="this.form.submit()">
                 {% for registration in registrations %}
                   <option value="{{ registration.id }}" {% if registration.id == selected_registration.id %}selected{% endif %}>{{ registration.display_name }}</option>
                 {% endfor %}

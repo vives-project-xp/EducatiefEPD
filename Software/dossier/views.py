@@ -449,22 +449,28 @@ def dossier(request, case_id):
         if is_published:
             messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
             return entry_redirect(selected, target)
-        if action == "copy_previous":
-            if is_published:
-                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt.")
-                return entry_redirect(selected, target)
-            # selected.responses is ordered by id ascending; find the item right before target
-            idx = next((i for i, item in enumerate(selected.responses) if item.pk == target.pk), 0)
-            previous = selected.responses[idx - 1] if idx > 0 else None
-            if previous is None:
-                messages.error(request, "Geen vorige registratie beschikbaar om te kopiëren.")
-                return entry_redirect(selected, target)
+        if action == "copy_to_new":
+            if selected.module is None:
+                messages.error(request, "Voor dit onderdeel kan geen nieuwe registratie aangemaakt worden.")
+                return entry_redirect(selected, None, "lijst")
 
-            target.data = deepcopy(previous.data)
-            target.save(update_fields=["data", "updated_at"])
-            audit(request, "module_response.copied_previous", target, source_id=previous.id)
-            messages.success(request, f"Gegevens gekopieerd uit {previous.display_name}.")
-            return entry_redirect(selected, target)
+            # Match this name to whatever `name="..."` attribute your existing registration <select> uses
+            source_id_raw = request.POST.get("source_registration") or request.POST.get("registratie")
+            source_reg = next(
+                (item for item in selected.responses if str(item.pk) == str(source_id_raw)),
+                None,
+            )
+            if source_reg is None:
+                messages.error(request, "Kies een geldige registratie om uit te kopiëren.")
+                return entry_redirect(selected, None, "lijst")
+
+            registration = new_registration(student_case, selected.module, author=request.user)
+            registration.status = ModuleResponse.Status.CONCEPT
+            registration.data = deepcopy(source_reg.data)
+            registration.save(update_fields=["status", "data", "updated_at"])
+            audit(request, "module_response.copied_to_new", registration, source_id=source_reg.id)
+            messages.success(request, f"Nieuw concept aangemaakt op basis van {source_reg.display_name}.")
+            return entry_redirect(selected, registration)
 
         form_result = parse_module_form(request.POST, target.schema, target.data)
         if not form_result.errors:
