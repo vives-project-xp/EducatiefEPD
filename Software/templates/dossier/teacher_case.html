@@ -54,74 +54,55 @@
       <button class="outline button">Toewijzing bewaren</button>
     </form>
   </section>
-  {% if draft_module_change %}
-    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="draft-change-title">
+  {% if module_changes %}
+    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="library-changes-title">
       <div class="library-removal-popup-content">
         <p class="eyebrow">Bibliotheek gewijzigd</p>
-        <h2 id="draft-change-title">
-          {% if draft_change_is_removal %}
-            Dossiermodule verwijderd uit de bibliotheek
-          {% else %}
-            Dossiermodule aangepast in de bibliotheek
-          {% endif %}
-        </h2>
+        <h2 id="library-changes-title">Wijzigingen in dossieronderdelen</h2>
         <p>
-          De module <strong>{{ draft_module_change.title }}</strong> is gewijzigd.
-          Kies welke versie je wilt behouden voor deze casus.
+          Kies per onderdeel welke versie je wilt behouden
+          {% if case.status == 'published' %}voor de gepubliceerde casus en studentversies{% else %}voor deze casus{% endif %}.
         </p>
-        {% if draft_added_functions %}
-          <p>Functie(s) toegevoegd: {% for title in draft_added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
-        {% endif %}
-        {% if draft_removed_functions %}
-          <p>Functie(s) verwijderd: {% for title in draft_removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
-        {% endif %}
-        <div class="library-removal-actions">
-          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id draft_module_change.id %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="keep">
-            <button class="outline button" type="submit">Vorige versie behouden</button>
-          </form>
-          <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id draft_module_change.id %}">
-            {% csrf_token %}
-            <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  {% endif %}
-  {% if case.status == 'published' and published_module_change %}
-    <div class="library-removal-popup" role="dialog" aria-modal="true" aria-labelledby="published-change-title">
-      <div class="library-removal-popup-content">
-        <p class="eyebrow">Bibliotheek gewijzigd</p>
-        <h2 id="published-change-title">
-          {% if published_change_is_removal %}
-            Dossiermodule verwijderd uit de bibliotheek
-          {% else %}
-            Dossiermodule aangepast in de bibliotheek
-          {% endif %}
-        </h2>
-        <p>
-          De module <strong>{{ published_module_change.title }}</strong> is gewijzigd.
-          Kies welke versie je wilt behouden voor de gepubliceerde casus en studentversies.
-        </p>
-        {% if published_added_functions %}
-          <p>Functie(s) toegevoegd: {% for title in published_added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
-        {% endif %}
-        {% if published_removed_functions %}
-          <p>Functie(s) verwijderd: {% for title in published_removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
-        {% endif %}
-        <div class="library-removal-actions">
-          <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id published_module_change.id %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="keep">
-            <button class="outline button" type="submit">Vorige versie behouden</button>
-          </form>
-          <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id published_module_change.id %}">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="sync_students">
-            <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
-          </form>
-        </div>
+        <ul class="library-change-list">
+          {% for change in module_changes %}
+            <li class="library-change-item">
+              <div>
+                <strong>{{ change.module.title }}</strong>
+                <span>{% if change.is_removal %}Verwijderd uit de bibliotheek{% elif change.is_base_data %}Voorinvulling aangepast{% else %}Aangepast in de bibliotheek{% endif %}</span>
+                {% if change.added_functions %}
+                  <p>Functie(s) toegevoegd: {% for title in change.added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                {% endif %}
+                {% if change.removed_functions %}
+                  <p>Functie(s) verwijderd: {% for title in change.removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                {% endif %}
+              </div>
+              <div class="library-removal-actions">
+                {% if case.status == 'published' %}
+                  <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id change.module.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="keep">
+                    <button class="outline button" type="submit">Vorige versie behouden</button>
+                  </form>
+                  <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id change.module.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="sync_students">
+                    <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id change.module.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="keep">
+                    <button class="outline button" type="submit">Vorige versie behouden</button>
+                  </form>
+                  <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id change.module.id %}">
+                    {% csrf_token %}
+                    <button class="primary button" type="submit">Nieuwe versie gebruiken</button>
+                  </form>
+                {% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
       </div>
     </div>
   {% endif %}

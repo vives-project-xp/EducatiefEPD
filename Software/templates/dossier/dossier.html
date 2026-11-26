@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load epd_filters %}
+{% load rich_text %}
 {% block title %}{{ page_title }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
@@ -19,7 +20,9 @@
             <button type="button" class="nav-item nav-toggle {% if selected.meta_key == module.id %}selected{% endif %}"
               data-nav-toggle aria-expanded="{% if selected.meta_key == module.id %}true{% else %}false{% endif %}"
               aria-controls="nav-functions-{{ module.id }}">
-              <span>{{ module.title }}</span><b aria-hidden="true">⌄</b>
+              <span>{{ module.title }}</span>
+              {% if module.revision_requested %}<i class="nav-flag nav-flag-revision" title="Aanpassing gevraagd" aria-hidden="true">!</i>{% elif module.feedback %}<i class="nav-flag" title="Feedback van je docent" aria-hidden="true">✎</i>{% endif %}
+              <b aria-hidden="true">⌄</b>
             </button>
             <div class="nav-subitems" id="nav-functions-{{ module.id }}" {% if selected.meta_key != module.id %}hidden{% endif %}>
               {% for function in module.functions %}
@@ -33,7 +36,9 @@
             <button type="button" class="nav-item nav-toggle {% if selected.meta_key == module.id %}selected{% endif %}"
               data-nav-toggle data-nav-url="?module={{ module.id }}&amp;weergave=invoer&amp;registratie={{ module.registration_id }}"
               aria-expanded="false" aria-controls="nav-functions-{{ module.id }}">
-              <span>{{ module.title }}</span><b aria-hidden="true">⌄</b>
+              <span>{{ module.title }}</span>
+              {% if module.revision_requested %}<i class="nav-flag nav-flag-revision" title="Aanpassing gevraagd" aria-hidden="true">!</i>{% elif module.feedback %}<i class="nav-flag" title="Feedback van je docent" aria-hidden="true">✎</i>{% endif %}
+              <b aria-hidden="true">⌄</b>
             </button>
             <div id="nav-functions-{{ module.id }}" hidden></div>
           {% endif %}
@@ -63,7 +68,13 @@
           <div><p class="eyebrow">{{ selected_function.kind|default:selected.get_kind_display }}</p></div>
           <span>{{ student_case.get_status_display }}</span>
         </div>
-
+        {% if selected_registration.feedback or selected_registration.revision_requested %}
+          <div class="feedback module-feedback">
+            <strong>{% if selected_registration.revision_requested %}Je docent vraagt dit onderdeel aan te passen{% else %}Feedback docent{% endif %}</strong>
+            {% if selected_registration.feedback %}{{ selected_registration.feedback|rich_html }}{% endif %}
+            {% if selected_registration.feedback_at %}<small class="muted">{{ selected_registration.feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
+          </div>
+        {% endif %}
         {% if not student_case.locked %}
           <div class="registration-bar">
             <div class="view-toggle">

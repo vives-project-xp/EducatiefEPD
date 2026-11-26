@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load epd_filters %}
+{% load epd_filters rich_text %}
 {% block title %}{{ student_case.case_title }} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="case-viewer">
@@ -31,6 +31,24 @@
               {{ selected.feedback|safe_clean }}
             </div>
           {% endif %}
+          {% if selected.earlier_reviews %}
+            <details class="review-history">
+              <summary>Eerdere feedback ({{ selected.earlier_reviews|length }})</summary>
+              {% for review in selected.earlier_reviews %}
+                <div class="review-history-item">
+                  <strong>Beoordeling {{ review.round }}: {{ review.get_status_display }}</strong>
+                  <small>{{ review.created_at|date:"d-m-Y H:i" }}</small>
+                  {% if review.feedback %}
+                    <div class="previous-review-feedback">{{ review.feedback|rich_html }}</div>
+                  {% endif %}
+                  <details class="review-history-answer">
+                    <summary>Jouw antwoord toen</summary>
+                    <div class="student-answer">{{ review.answer|default:'Nog niet ingevuld'|rich_html }}</div>
+                  </details>
+                </div>
+              {% endfor %}
+            </details>
+          {% endif %}
           {% if not student_case.locked and selected.status != 'submitted' and selected.status != 'approved' %}
             <div class="form-actions">
               <button class="outline button" name="action" value="save">Bewaren</button>
@@ -39,6 +57,13 @@
           {% endif %}
         </form>
       {% else %}
+        {% if student_case.final_feedback %}
+          <div class="feedback final-feedback-student">
+            <strong>Algemene feedback docent</strong>
+            {{ student_case.final_feedback|rich_html }}
+            {% if student_case.final_feedback_at %}<small class="muted">{{ student_case.final_feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
+          </div>
+        {% endif %}
         <h2>Inleiding</h2>
         <div class="intro-copy">
           {{ student_case.introduction|default:"Lees de patiëntgegevens en opdrachten aandachtig."|linebreaks }}
@@ -80,6 +105,17 @@
           </a>
         {% endfor %}
       </section>
+      {% if revision_modules %}
+        <div class="revision-notice">
+          <strong>Aanpassing gevraagd in het patiëntendossier</strong>
+          <ul>
+            {% for module in revision_modules %}
+              <li><a href="{% url 'dossier:dossier' case.id %}?module={{ module.id }}">{{ module.title }}</a></li>
+            {% endfor %}
+          </ul>
+          <small>Pas deze onderdelen aan en dien daarna het volledige dossier opnieuw in.</small>
+        </div>
+      {% endif %}
       <a class="primary dossier-link" href="{% url 'dossier:dossier' case.id %}">Open patiëntendossier</a>
       {% if not student_case.locked %}
         <form method="post" action="{% url 'dossier:submit_student_case' case.id %}" class="submit-case">

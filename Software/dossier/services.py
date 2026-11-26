@@ -1,7 +1,11 @@
+import re
 from copy import deepcopy
 from urllib.parse import urlencode, urlparse
 
 from django.db import transaction
+from django.db.models import Q
+from django.utils.html import linebreaks
+from django.utils.safestring import mark_safe
 
 import nh3
 
@@ -19,6 +23,11 @@ from .models import (
     StudentCase,
 )
 from .matrix import legacy_definition
+
+STUDENT_BASE_DATA_VERSION = "student_base_data_version"
+STUDENT_BASE_DATA_HANDLED_VERSION = "student_base_data_handled_version"
+STUDENT_BASE_DATA_APPROVED_VERSION = "student_base_data_approved_version"
+STUDENT_BASE_DATA_APPLIED_VERSION = "student_base_data_applied_version"
 
 
 def client_ip(request):
@@ -168,12 +177,17 @@ def build_sidebar_structure(module_responses, query=""):
             [response.title, *(item["title"] for item in functions)]
         ).casefold()
         if not query or query in searchable:
+            registrations = entry.responses if entry else [response]
             structure.append({
                 "id": module_key,
                 "title": response.title,
                 "kind": response.kind,
                 "registration_id": registration_id,
                 "functions": functions,
+                "revision_requested": any(
+                    registration.revision_requested for registration in registrations
+                ),
+                "feedback": any(registration.feedback for registration in registrations),
             })
     return structure
 
@@ -309,6 +323,27 @@ def create_case_structure(case):
             snapshot_template_functions(existing, template)
         else:
             copy_template_to_case(template, case)
+def pending_student_base_data_version(configuration):
+    version = configuration.get(STUDENT_BASE_DATA_VERSION)
+    if type(version) is int and version > 0 and configuration.get(
+        STUDENT_BASE_DATA_HANDLED_VERSION
+    ) != version:
+        return version
+    return None
+
+
+def merge_empty_values(data, defaults):
+    if isinstance(data, dict) and isinstance(defaults, dict):
+        merged = deepcopy(data)
+        for key, default in defaults.items():
+            if key in merged:
+                merged[key] = merge_empty_values(merged[key], default)
+            else:
+                merged[key] = deepcopy(default)
+        return merged
+    if data is None or data == "" or data == []:
+        return deepcopy(defaults)
+    return data
 
 
 def new_registration(student_case, module, *, author):
@@ -316,7 +351,13 @@ def new_registration(student_case, module, *, author):
     if student_case.locked:
         raise ValueError("Een ingeleverd dossier kan niet bewerkt worden.")
     with transaction.atomic():
-        response = student_case.module_responses.create(module=module, created_by=author)
+
+        response = student_case.module_responses.create(
+            module=module,
+            created_by=author,
+            source_template_id_snapshot=module.source_template_id,
+        )
+
         response.hydrate_from_source()
         response.schema = module_schema(module)
         response.data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
@@ -344,10 +385,11 @@ def registration_is_empty(response):
 
 
 @transaction.atomic
-def synchronize_student_case(student_case):
+def synchronize_student_case(student_case, *, base_data_module_ids=None):
     if student_case.locked:
         return False
 
+    base_data_module_ids = set(base_data_module_ids or ())
     changed = False
     assignments = list(student_case.case.assignments.all())
     submissions = {
@@ -371,29 +413,96 @@ def synchronize_student_case(student_case):
             changed = True
 
     modules = list(student_case.case.modules.prefetch_related("fields").all())
+    all_responses = list(student_case.module_responses.all())
     responses_by_module = {}
-    for response in student_case.module_responses.all():
+    detached_by_template = {}
+    detached_by_title = {}
+    for response in all_responses:
         if response.module_id is not None:
             responses_by_module.setdefault(response.module_id, []).append(response)
+            continue
+        if response.source_template_id_snapshot is None:
+            detached_by_title.setdefault(response.title, []).append(response)
+        else:
+            detached_by_template.setdefault(
+                response.source_template_id_snapshot, []
+            ).append(response)
+    title_counts = {}
     for module in modules:
-        schema = module_schema(module)
+        title_counts[module.title] = title_counts.get(module.title, 0) + 1
+
+    for module in modules:
         module_responses = responses_by_module.get(module.id, [])
+        detached_responses = (
+            detached_by_template.pop(module.source_template_id, [])
+            if module.source_template_id
+            else []
+        )
+        legacy_responses = []
+        if (
+            module.source_template_id
+            and title_counts[module.title] == 1
+        ):
+            legacy_responses = detached_by_title.pop(module.title, [])
+        schema = module_schema(module)
+        module_responses.extend(detached_responses)
+        if not module_responses and legacy_responses:
+            module_responses.append(
+                max(legacy_responses, key=lambda item: item.updated_at)
+            )
+            legacy_responses.remove(module_responses[0])
         if not module_responses:
             new_registration(student_case, module, author=student_case.student)
             changed = True
             continue
-        source_values = (module.title, module.kind, module.instructions, module.position, schema)
-        for response in module_responses:
-            if response.status == ModuleResponse.Status.PUBLISHED:
-                continue
-            current_values = (
-                response.title, response.kind, response.instructions, response.position, response.schema
+        if legacy_responses:
+            response = max(module_responses, key=lambda item: item.updated_at)
+            data_sources = sorted(
+                [response, *legacy_responses],
+                key=lambda item: item.updated_at,
             )
-            if source_values != current_values:
+            merged_data = {}
+            for item in data_sources:
+                merged_data.update(item.data or {})
+            if merged_data != response.data:
+                response.data = merged_data
+                changed = True
+            for item in legacy_responses:
+                item.delete()
+                changed = True
+
+        for response in module_responses:
+            detached = response.module_id is None
+            response.module = module
+            if module.pk in base_data_module_ids:
+                merged_data = merge_empty_values(
+                    response.data or {}, module.base_data or {}
+                )
+            else:
+                merged_data = response.data
+            data_changed = merged_data != response.data
+            if data_changed:
+                response.data = merged_data
+
+            source_values = (
+                module.title, module.kind, module.instructions, module.position, schema
+            )
+            current_values = (
+                response.title, response.kind, response.instructions,
+                response.position, response.schema
+            )
+            if (
+                detached
+                or data_changed
+                or response.source_template_id_snapshot != module.source_template_id
+                or source_values != current_values
+            ):
                 response.hydrate_from_source()
                 response.schema = schema
+                response.source_template_id_snapshot = module.source_template_id
                 response.save(update_fields=[
-                    "title", "kind", "instructions", "position", "schema", "updated_at"
+                    "module", "source_template_id_snapshot", "title", "kind",
+                    "instructions", "position", "schema", "data", "updated_at",
                 ])
                 changed = True
             if sync_student_module_response(response):
@@ -540,14 +649,21 @@ def _template_function_links(template):
 
 
 @transaction.atomic
-def synchronize_module_to_students(module):
+def synchronize_module_to_students(module, *, apply_base_data=False):
+    base_data_module_ids = {module.pk} if apply_base_data else set()
     for student_case in module.case.student_cases.select_for_update().all():
-        synchronize_student_case(student_case)
+        synchronize_student_case(
+            student_case,
+            base_data_module_ids=base_data_module_ids,
+        )
 
 
 @transaction.atomic
-def remove_module_from_students(module):
-    ModuleResponse.objects.filter(module=module).delete()
+def detach_module_responses(module):
+    ModuleResponse.objects.filter(module=module).update(
+        module=None,
+        source_template_id_snapshot=module.source_template_id,
+    )
 
 
 @transaction.atomic
@@ -708,9 +824,11 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
         entry for entry in entries if entry.template_id not in previous_template_ids
     ]
     current_template_ids = {entry.template_id for entry in entries}
+    membership_changed = previous_template_ids != current_template_ids
 
     case_ids = Module.objects.filter(
-        configuration__source_library_dossier_id=dossier.pk,
+        Q(configuration__source_library_dossier_id=dossier.pk)
+        | Q(configuration__source_library_dossier_id=str(dossier.pk))
     ).values_list("case_id", flat=True).distinct()
     cases = Case.objects.filter(id__in=case_ids)
     added_modules = 0
@@ -720,28 +838,109 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
             if str(configuration.get("source_library_dossier_id")) == str(dossier.pk):
                 if module.source_template_id not in current_template_ids:
                     configuration["library_dossier_module_removed"] = True
+                    if membership_changed:
+                        configuration.pop("library_removal_handled", None)
+                    configuration.pop("library_dossier_order_changed", None)
+                    configuration.pop("library_dossier_pending_position", None)
+                    configuration.pop("library_dossier_order_handled_position", None)
                 else:
                     configuration.pop("library_dossier_module_removed", None)
+                    configuration.pop("library_removal_handled", None)
                 module.configuration = configuration
                 module.save(update_fields=["configuration"])
         for entry in added_entries:
-            if case.modules.filter(source_template=entry.template).exists():
+            existing_module = case.modules.filter(source_template=entry.template).first()
+            if existing_module:
+                configuration = dict(existing_module.configuration or {})
+                if str(configuration.get("source_library_dossier_id")) == str(dossier.pk):
+                    configuration.pop("library_dossier_module_removed", None)
+                    configuration.pop("library_removal_handled", None)
+                    configuration.pop("library_change_handled_version", None)
+                    existing_module.configuration = configuration
+                    existing_module.source_template_version = max(entry.template.version - 1, 0)
+                    existing_module.save(update_fields=[
+                        "configuration", "source_template_version"
+                    ])
                 continue
             module = copy_template_to_case(entry.template, case, source_dossier=dossier)
             module.source_template_version = max(entry.template.version - 1, 0)
             module.save(update_fields=["source_template_version"])
             added_modules += 1
+
+        modules_by_template = {
+            module.source_template_id: module
+            for module in case.modules.all()
+            if (
+                str((module.configuration or {}).get("source_library_dossier_id"))
+                == str(dossier.pk)
+                and module.source_template_id in current_template_ids
+            )
+        }
+        ordered_modules = [
+            modules_by_template[entry.template_id]
+            for entry in entries
+            if entry.template_id in modules_by_template
+        ]
+        position_slots = sorted(module.position for module in ordered_modules)
+        for module, position in zip(ordered_modules, position_slots):
+            configuration = dict(module.configuration or {})
+            if module.position == position:
+                configuration.pop("library_dossier_order_changed", None)
+                configuration.pop("library_dossier_pending_position", None)
+                configuration.pop("library_dossier_order_handled_position", None)
+            elif configuration.get("library_dossier_order_handled_position") != position:
+                configuration["library_dossier_order_changed"] = True
+                configuration["library_dossier_pending_position"] = position
+                configuration.pop("library_dossier_order_handled_position", None)
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
     return added_modules
 
 
+@transaction.atomic
+def resolve_dossier_module_order(case, dossier_id, apply):
+    modules = case.modules.select_for_update().filter(
+        Q(configuration__source_library_dossier_id=dossier_id)
+        | Q(configuration__source_library_dossier_id=str(dossier_id))
+    )
+    updated_modules = []
+    for module in modules:
+        configuration = dict(module.configuration or {})
+        if not configuration.get("library_dossier_order_changed"):
+            continue
+        position = configuration.get("library_dossier_pending_position")
+        if not isinstance(position, int):
+            continue
+        if apply:
+            module.position = position
+            configuration.pop("library_dossier_order_handled_position", None)
+        else:
+            configuration["library_dossier_order_handled_position"] = position
+        configuration.pop("library_dossier_order_changed", None)
+        configuration.pop("library_dossier_pending_position", None)
+        module.configuration = configuration
+        update_fields = ["configuration"]
+        if apply:
+            update_fields.append("position")
+            updated_modules.append(module)
+        module.save(update_fields=update_fields)
+    return updated_modules
+
+
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
+                "h4", "h5", "h6", "pre", "span",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
-# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
+# Alleen tekst- en markeerkleur uit TinyMCE (forecolor/backcolor) blijven
+# behouden, zodat docenten correcties kunnen kleuren. Andere CSS (position,
+# url(...), ...) wordt verwijderd.
+ALLOWED_STYLE_PROPERTIES = {"color", "background-color"}
+ALLOWED_ATTRIBUTES = {"a": {"href"}, "img": {"src", "alt"}, "span": {"style"}}
+ALLOWED_URL_SCHEMES = {"http", "https", "mailto", "data"}
 _UNSAFE_LINK_SCHEMES = {"data", "javascript"}
+_HTML_TAG = re.compile(r"<[a-zA-Z/!]")
 
 
 def _reject_unsafe_link(tag, attr, value):
-    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
     if attr == "href" and value:
         if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
             return None
@@ -749,10 +948,53 @@ def _reject_unsafe_link(tag, attr, value):
 
 
 def clean_html(value):
+    """Saneer HTML van gebruikers (studentantwoorden, feedback, rich text)."""
     return nh3.clean(
-        value,
+        value or "",
         tags=ALLOWED_TAGS,
-        attributes={"a": {"href"}, "img": {"src", "alt"}},
-        url_schemes={"http", "https", "mailto", "data"},
+        attributes=ALLOWED_ATTRIBUTES,
+        url_schemes=ALLOWED_URL_SCHEMES,
+        filter_style_properties=ALLOWED_STYLE_PROPERTIES,
         attribute_filter=_reject_unsafe_link,
     )
+
+
+def render_rich_text(value):
+    """Gesaneerde, veilig te tonen HTML voor opgeslagen tekst.
+
+    Oude of gewone tekst zonder HTML-tags krijgt alinea's en regeleindes;
+    HTML uit de editor wordt alleen gesaneerd (geen extra <p>/<br>). nh3
+    escapet losse tekens zoals '<' en '&', dus linebreaks hoeft niet opnieuw
+    te escapen.
+    """
+    cleaned = clean_html(value)
+    if not _HTML_TAG.search(cleaned):
+        cleaned = linebreaks(cleaned, autoescape=False)
+    return mark_safe(cleaned)
+
+def update_student_case_review_state(student_case, *, require_submitted=False):
+    """Leid de status van een studentversie af uit de beoordelingen.
+
+    - Een opdracht op 'Opnieuw inleveren' of een module waarvoor de docent een
+      aanpassing vraagt, heropent de studentversie (Bezig).
+    - Zijn alle opdrachten goedgekeurd en staat er niets meer open, dan is de
+      studentversie Beoordeeld. Met require_submitted gebeurt dat alleen als de
+      student het dossier (opnieuw) heeft ingediend, zodat modulefeedback geen
+      onafgewerkt dossier afsluit.
+    """
+    from django.utils import timezone
+
+    pending = (
+        student_case.assignment_submissions.filter(status=AssignmentSubmission.Status.RESUBMIT).exists()
+        or student_case.module_responses.filter(revision_requested=True).exists()
+    )
+    if pending:
+        student_case.status = StudentCase.Status.ACTIVE
+    elif not student_case.assignment_submissions.exclude(
+        status=AssignmentSubmission.Status.APPROVED
+    ).exists() and (not require_submitted or student_case.status == StudentCase.Status.SUBMITTED):
+        student_case.status = StudentCase.Status.REVIEWED
+        student_case.reviewed_at = timezone.now()
+    else:
+        return
+    student_case.save(update_fields=["status", "reviewed_at", "updated_at"])

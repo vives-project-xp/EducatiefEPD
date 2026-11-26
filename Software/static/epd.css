@@ -2935,7 +2935,9 @@ summary {
 }
 
 .library-removal-popup-content {
-  width: min(680px, 100%);
+  width: min(920px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   padding: 28px;
   border-radius: 12px;
   background: var(--surface);
@@ -2969,9 +2971,48 @@ summary {
   border: 1px solid var(--line);
 }
 
+.library-change-list {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-change-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.library-change-item > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.library-change-item > div:first-child span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.library-change-item .library-removal-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
 @media (max-width: 640px) {
   .library-removal-popup-content {
     padding: 22px;
+  }
+
+  .library-change-item {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .library-removal-actions {
@@ -3131,7 +3172,7 @@ summary {
   background: #edf2f8;
 }
 
-.feedback strong {
+.feedback > strong {
   display: block;
   margin-bottom: 5px;
 }
@@ -3187,9 +3228,11 @@ summary {
   margin-top: 20px;
 }
 
-.review-grid {
+/* Beoordelingspagina: opdrachten, patiëntendossier en algemene feedback onder
+   elkaar over de volle breedte. */
+.review-stack {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -3451,9 +3494,6 @@ summary {
     grid-template-columns: 1fr 1fr;
   }
 
-  .review-grid {
-    grid-template-columns: 1fr;
-  }
 
   .observation-entry {
     display: block;
@@ -3612,19 +3652,6 @@ summary {
   width: 100%;
 }
 
-.library-structure-list {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding-left: 22px;
-}
-
-.library-structure-item {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-}
-
 .library-structure-function {
   display: grid;
   gap: 3px;
@@ -3637,28 +3664,10 @@ summary {
   padding-left: 16px;
 }
 
-.library-structure-item > details > summary,
-.library-structure-function > summary {
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 4px;
-}
-
-.library-structure-item > details > summary:hover,
-.library-structure-function > summary:hover {
-  background: var(--surface-hover);
-}
-
 .library-structure-function {
   margin: 6px 0 0 16px;
   padding-left: 12px;
   border-left: 1px solid var(--line);
-}
-
-.library-structure-forms {
-  display: grid;
-  gap: 3px;
-  margin: 4px 0 4px 16px;
 }
 
 .function-pagination-toolbar,
@@ -4529,5 +4538,154 @@ summary {
 
   .base-dossier-functions:has(> .selection-list) > .function-viewers .function-viewer[hidden] {
     display: none;
+  }
+}
+
+/* ==========================================================================
+   Docentfeedback: opdrachtcontext, beoordelingsgeschiedenis, modulefeedback
+   ========================================================================== */
+
+.assignment-brief,
+.review-history,
+.review-history-answer {
+  margin: 12px 0;
+}
+
+.assignment-brief summary,
+.review-history summary,
+.review-history-answer summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.assignment-brief-content {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--line);
+}
+
+.answer-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.answer-label {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.review-history-item {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.review-history-item small {
+  color: var(--muted);
+}
+
+.module-feedback-form {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.response-detail summary .state,
+.feedback-badge {
+  margin-left: 8px;
+  font-size: 0.75rem;
+}
+
+.feedback-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-selected);
+  color: var(--blue-dark);
+}
+
+/* Per module: ingevulde velden links, feedback van de docent rechts. */
+.response-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-top: 6px;
+}
+
+.response-body .module-feedback-form {
+  position: sticky;
+  top: 16px;
+  margin-top: 10px;
+  padding-top: 0;
+  padding-left: 24px;
+  border-top: 0;
+  border-left: 1px dashed var(--line);
+}
+
+.revision-notice {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-left: 4px solid var(--orange);
+  background: #fff4ec;
+}
+
+.revision-notice ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.nav-flag {
+  margin-left: auto;
+  margin-right: 10px;
+  font-style: normal;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+
+.nav-flag-revision {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--orange);
+}
+
+.module-feedback small,
+.final-feedback-student small {
+  display: block;
+  margin-top: 6px;
+}
+
+@media (max-width: 760px) {
+  .answer-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 920px) {
+  .response-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .response-body .module-feedback-form {
+    position: static;
+    padding-left: 0;
+    border-left: 0;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
   }
 }

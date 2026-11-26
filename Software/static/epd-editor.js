@@ -103,15 +103,21 @@ document.addEventListener("click", function (event) {
 
   const reviewField = button.closest(".review-field");
   const feedback = reviewField?.querySelector("textarea");
-  const answerElement = button.closest("article")?.querySelector(".student-answer");
+  const answerElement = button.closest("article")?.querySelector(".student-answer[data-current-answer]");
 
   if (!feedback || !answerElement) return;
 
-  // The student's answer is already rendered in the card; copy it as-is.
+  // The student's answer is already rendered (and sanitised) in the card; copy it as-is.
   const answer = answerElement.innerHTML;
 
   // Update TinyMCE if it manages this textarea, otherwise the raw field.
   const editor = typeof tinymce !== "undefined" ? tinymce.get(feedback.id) : null;
+  const current = editor ? editor.getContent({ format: "text" }) : feedback.value;
+  const hasMedia = editor ? /<img/i.test(editor.getContent()) : false;
+  if ((current.trim() || hasMedia) &&
+      !window.confirm("Het feedbackveld bevat al tekst. Wil je die vervangen door het antwoord van de student?")) {
+    return;
+  }
   if (editor) {
     editor.setContent(answer);
     editor.save();
@@ -206,3 +212,24 @@ function exportDocx(editor) {
     },
   });
 }
+// Beoordelingspagina: alle modules van het patiëntendossier in één keer open-/dichtklappen.
+document.addEventListener("click", function (event) {
+  const button = event.target.closest("[data-toggle-modules]");
+  if (!button) return;
+  const details = [...button.closest("section").querySelectorAll("details.response-detail")];
+  const open = !details.every(item => item.open);
+  details.forEach(item => { item.open = open; });
+  button.textContent = open ? "Alles dichtklappen" : "Alles openklappen";
+});
+// Na het bewaren van modulefeedback keert de pagina terug naar #module-<id>: die module openklappen.
+function openModuleFromHash() {
+  if (!location.hash.startsWith("#module-")) return;
+  const target = document.getElementById(location.hash.slice(1));
+  if (target && target.matches("details.response-detail")) {
+    target.open = true;
+    target.scrollIntoView();
+  }
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", openModuleFromHash);
+else openModuleFromHash();
+window.addEventListener("hashchange", openModuleFromHash);
