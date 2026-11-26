@@ -486,12 +486,12 @@ class ReviewForm(forms.Form):
 
 class ModuleFeedbackForm(forms.Form):
     feedback = forms.CharField(
-        label="Feedback bij dit onderdeel",
+        label="Feedback bij deze registratie",
         required=False,
         widget=forms.Textarea(attrs={"rows": 3, "class": "js-tinymce"}),
     )
     revision_requested = forms.BooleanField(
-        label="Student moet dit onderdeel aanpassen",
+        label="Student moet deze registratie aanpassen",
         required=False,
     )
 

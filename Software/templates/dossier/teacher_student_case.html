@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load epd_filters rich_text %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
@@ -53,7 +53,7 @@
               {% elif submission.reviewed_at %}
                 <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
               {% endif %}
-              {% if submission.latest_review.feedback %}
+              {% if submission.latest_review and submission.latest_review.feedback %}
                 <div class="previous-review-feedback">{{ submission.latest_review.feedback|rich_html }}</div>
               {% elif submission.feedback %}
                 <div class="previous-review-feedback">{{ submission.feedback|rich_html }}</div>
@@ -116,15 +116,16 @@
       </div>
       {% for group in module_groups %}
       <h3 class="module-group-title">{{ group.title }}</h3>
-      {% for module in group.registrations %}
-      <details class="response-detail" id="module-{{ module.id }}" {% if module.feedback_form.is_bound %}open{% endif %}>
+      {% for registration in group.registrations %}
+      <details class="response-detail" id="registratie-{{ registration.id }}" {% if registration.feedback_form.is_bound %}open{% endif %}>
         <summary>
-          Registratie van {{ module.display_name }}
-          {% if module.revision_requested %}<span class="state status-resubmit">Aanpassing gevraagd</span>{% elif module.feedback %}<span class="feedback-badge">Feedback</span>{% endif %}
+          Registratie van {{ registration.display_name }}
+          <span class="badge {% if registration.status == 'published' %}badge-published{% else %}badge-concept{% endif %}">{{ registration.get_status_display }}</span>
+          {% if registration.revision_requested %}<span class="state status-resubmit">Aanpassing gevraagd</span>{% elif registration.feedback %}<span class="feedback-badge">Feedback</span>{% endif %}
         </summary>
         <div class="response-body">
           <div class="response-values">
-            {% for field in module.display_values %}
+            {% for field in registration.display_values %}
               <div class="response-value"><strong>{{ field.label }}</strong>
                 {% if field.matrix_payload %}
                   {% include 'dossier/_matrix.html' with locked=True %}
@@ -135,22 +136,22 @@
                 {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
               </div>
             {% empty %}
-              <p>Deze registratie is nog leeg.</p>
+            <p>Deze registratie is nog leeg.</p>
             {% endfor %}
           </div>
-          <form method="post" class="review-form module-feedback-form" action="{% url 'dossier:teacher_module_feedback' student_case.id module.id %}">
+          <form method="post" class="review-form module-feedback-form" action="{% url 'dossier:teacher_module_feedback' student_case.id registration.id %}">
             {% csrf_token %}
             <div class="review-field">
-              {{ module.feedback_form.feedback.label_tag }}
-              {{ module.feedback_form.feedback }}
-              {{ module.feedback_form.feedback.errors }}
+              {{ registration.feedback_form.feedback.label_tag }}
+              {{ registration.feedback_form.feedback }}
+              {{ registration.feedback_form.feedback.errors }}
             </div>
-            <label class="checkbox-inline" for="{{ module.feedback_form.revision_requested.id_for_label }}">
-              {{ module.feedback_form.revision_requested }}
-              {{ module.feedback_form.revision_requested.label }}
+            <label class="checkbox-inline" for="{{ registration.feedback_form.revision_requested.id_for_label }}">
+              {{ registration.feedback_form.revision_requested }}
+              {{ registration.feedback_form.revision_requested.label }}
             </label>
-            {% if module.feedback_at %}
-              <small class="muted">Laatst bewaard {{ module.feedback_at|date:"d-m-Y H:i" }}{% if module.feedback_by %} · {{ module.feedback_by.get_full_name|default:module.feedback_by.username }}{% endif %}</small>
+            {% if registration.feedback_at %}
+              <small class="muted">Laatst bewaard {{ registration.feedback_at|date:"d-m-Y H:i" }}{% if registration.feedback_by %} · {{ registration.feedback_by.get_full_name|default:registration.feedback_by.username }}{% endif %}</small>
             {% endif %}
             <div class="review-actions">
               <button class="outline button">Feedback bewaren</button>
@@ -159,6 +160,8 @@
         </div>
       </details>
       {% endfor %}
+      {% empty %}
+      <p class="muted">Dit dossier bevat nog geen registraties.</p>
       {% endfor %}
     </section>
     <section class="editor-section final-feedback" id="algemene-feedback">

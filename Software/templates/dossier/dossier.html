@@ -1,6 +1,5 @@
 {% extends 'base.html' %}
 {% load epd_filters %}
-{% load rich_text %}
 {% block title %}{{ page_title }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
@@ -68,13 +67,6 @@
           <div><p class="eyebrow">{{ selected_function.kind|default:selected.get_kind_display }}</p></div>
           <span>{{ student_case.get_status_display }}</span>
         </div>
-        {% if selected_registration.feedback or selected_registration.revision_requested %}
-          <div class="feedback module-feedback">
-            <strong>{% if selected_registration.revision_requested %}Je docent vraagt dit onderdeel aan te passen{% else %}Feedback docent{% endif %}</strong>
-            {% if selected_registration.feedback %}{{ selected_registration.feedback|rich_html }}{% endif %}
-            {% if selected_registration.feedback_at %}<small class="muted">{{ selected_registration.feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
-          </div>
-        {% endif %}
         {% if not student_case.locked %}
           <div class="registration-bar">
             <div class="view-toggle">
@@ -116,6 +108,7 @@
               </select>
             </form>
           {% endif %}
+          {% include 'dossier/_registration_feedback.html' with registration=selected_registration %}
           {% if selected.instructions %}
             <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
           {% endif %}

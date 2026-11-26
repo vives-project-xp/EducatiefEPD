@@ -73,8 +73,6 @@ from .models import (
     TeachingGroup,
 )
 from .services import (
-    STUDENT_BASE_DATA_VERSION, STUDENT_BASE_DATA_HANDLED_VERSION,
-    STUDENT_BASE_DATA_APPROVED_VERSION, STUDENT_BASE_DATA_APPLIED_VERSION,
     audit,
     build_library_structure,
     build_sidebar_structure,
@@ -98,6 +96,10 @@ from .services import (
     synchronize_template_function_snapshots,
     synchronize_template_module,
     update_student_case_review_state,
+    STUDENT_BASE_DATA_VERSION,
+    STUDENT_BASE_DATA_HANDLED_VERSION,
+    STUDENT_BASE_DATA_APPROVED_VERSION,
+    STUDENT_BASE_DATA_APPLIED_VERSION,
 )
 
 logger = logging.getLogger(__name__)
@@ -295,7 +297,8 @@ def case_detail(request, case_id):
     if selected:
         attach_review_history(selected)
     revision_modules = list(
-        student_case.module_responses.filter(revision_requested=True).only("id", "title")
+        student_case.module_responses.filter(revision_requested=True)
+        .select_related("created_by").order_by("position", "created_at", "id")
     )
     selected_index = assignments.index(selected) if selected in assignments else None
     previous_assignment = (
@@ -925,6 +928,15 @@ class _ModuleEntry:
     @property
     def instructions(self):
         return self.representative.instructions
+
+    @property
+    def revision_requested(self):
+        """De docent vraagt in minstens één registratie een aanpassing."""
+        return any(response.revision_requested for response in self.responses)
+
+    @property
+    def has_feedback(self):
+        return any(response.feedback for response in self.responses)
 
 
 @login_required
@@ -2165,49 +2177,60 @@ def teacher_module_field_delete(request, case_id, module_id, field_id):
 def _student_case_for_teacher(request, student_case_id):
     require_teacher(request.user)
     student_case = get_object_or_404(
-        StudentCase.objects.select_related("case", "student").prefetch_related(
+        StudentCase.objects.select_related("case", "student", "final_feedback_by").prefetch_related(
             Prefetch(
                 "assignment_submissions",
                 queryset=AssignmentSubmission.objects.prefetch_related(
-                    Prefetch(
-                        "reviews",
-                        queryset=AssignmentReview.objects.select_related("reviewer"),
-                    )
+                    Prefetch("reviews", queryset=AssignmentReview.objects.select_related("reviewer"))
                 ),
             ),
             Prefetch(
                 "module_responses",
-                queryset=ModuleResponse.objects.select_related(
-                    "module", "created_by", "feedback_by"
-                ),
+                queryset=ModuleResponse.objects.select_related("module", "created_by", "feedback_by"),
             ),
         ), id=student_case_id
     )
     editable_case(request.user, student_case.case_id)
-
     return student_case
 
 
-def render_teacher_student_case(request, student_case, bound_forms=None):
-    bound_forms = bound_forms or {}
-    module_groups_by_key = {}
+def attach_review_history(submission):
+    """Zet beoordelingsgeschiedenis klaar voor docent- en studentweergave."""
+    history = list(submission.reviews.all())
+    submission.latest_review = history[-1] if history else None
+    submission.earlier_reviews = list(reversed(history[:-1]))
+    submission.answer_changed_since_review = bool(
+        submission.latest_review and submission.latest_review.answer != submission.answer
+    )
+    submission.has_review = bool(submission.reviewed_at or submission.latest_review)
+
+
+def group_registrations(responses):
+    """Groepeer registraties per dossiermodule, nieuwste registratie eerst.
+    Losgekoppelde registraties (module verwijderd) vormen elk een eigen groep."""
+    grouped = {}
     module_groups = []
+    for response in responses:
+        key = response.module_key
+        if key not in grouped:
+            grouped[key] = {"key": key, "title": response.title, "registrations": []}
+            module_groups.append(grouped[key])
+        grouped[key]["registrations"].append(response)
+    for group in module_groups:
+        group["registrations"] = list(reversed(group["registrations"]))
+    return module_groups
+
+
+def render_teacher_student_case(request, student_case, *, bound_forms=None):
+    """Beoordelingspagina; bound_forms houdt een ongeldig ingediend formulier
+    (met getypte feedback en foutmeldingen) vast in plaats van een stille redirect."""
+    bound_forms = bound_forms or {}
     for response in student_case.module_responses.all():
         response.display_values = prepare_schema_fields(response.schema, response.data)
         response.feedback_form = bound_forms.get(("module", response.id)) or ModuleFeedbackForm(
-            initial={
-                "feedback": response.feedback,
-                "revision_requested": response.revision_requested,
-            },
+            initial={"feedback": response.feedback, "revision_requested": response.revision_requested},
             auto_id=f"id_module_%s_{response.id}",
         )
-        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
-        if key not in module_groups_by_key:
-            module_groups_by_key[key] = {"title": response.title, "registrations": []}
-            module_groups.append(module_groups_by_key[key])
-        module_groups_by_key[key]["registrations"].append(response)
-    for group in module_groups:
-        group["registrations"] = list(reversed(group["registrations"]))
     for submission in student_case.assignment_submissions.all():
         attach_review_history(submission)
         # Bij een herbeoordeling staan de huidige status en eerdere feedback al
@@ -2226,7 +2249,7 @@ def render_teacher_student_case(request, student_case, bound_forms=None):
     status = 400 if bound_forms else 200
     return render(request, "dossier/teacher_student_case.html", {
         "student_case": student_case,
-        "module_groups": module_groups,
+        "module_groups": group_registrations(student_case.module_responses.all()),
         "final_feedback_form": final_form,
     }, status=status)
 
@@ -2289,29 +2312,43 @@ def teacher_module_feedback(request, student_case_id, response_id):
         StudentCase.objects.select_for_update().select_related("case"), id=student_case_id
     )
     editable_case(request.user, student_case.case_id)
-    module = get_object_or_404(student_case.module_responses, id=response_id)
-    form = ModuleFeedbackForm(request.POST, auto_id=f"id_module_%s_{module.id}")
+    # Feedback hoort bij één registratie (ingevulde versie) van een dossiermodule.
+    registration = get_object_or_404(student_case.module_responses, id=response_id)
+    form = ModuleFeedbackForm(request.POST, auto_id=f"id_module_%s_{registration.id}")
     if not form.is_valid():
-        messages.error(request, f"Feedback bij “{module.title}” is niet bewaard.")
+        messages.error(request, f"Feedback bij “{registration.title}” is niet bewaard.")
         student_case = _student_case_for_teacher(request, student_case_id)
-        return render_teacher_student_case(request, student_case, bound_forms={("module", module.id): form})
+        return render_teacher_student_case(
+            request, student_case, bound_forms={("module", registration.id): form}
+        )
     feedback = clean_html(form.cleaned_data["feedback"]).strip()
-    module.feedback = feedback
-    module.feedback_at = timezone.now() if feedback else None
-    module.feedback_by = request.user if feedback else None
-    module.revision_requested = form.cleaned_data["revision_requested"]
-    module.save(update_fields=["feedback", "feedback_at", "feedback_by", "revision_requested", "updated_at"])
+    registration.feedback = feedback
+    registration.feedback_at = timezone.now() if feedback else None
+    registration.feedback_by = request.user if feedback else None
+    registration.revision_requested = form.cleaned_data["revision_requested"]
+    update_fields = ["feedback", "feedback_at", "feedback_by", "revision_requested", "updated_at"]
+    unpublished = (
+        registration.revision_requested
+        and registration.status == ModuleResponse.Status.PUBLISHED
+    )
+    if unpublished:
+        # Een gepubliceerde registratie is vergrendeld; terug naar concept zodat
+        # de student de gevraagde aanpassing meteen kan doen.
+        registration.status = ModuleResponse.Status.CONCEPT
+        update_fields.append("status")
+    registration.save(update_fields=update_fields)
     update_student_case_review_state(student_case, require_submitted=True)
     audit(
-        request, "module_response.feedback", module,
-        revision_requested=module.revision_requested, has_feedback=bool(feedback),
+        request, "module_response.feedback", registration,
+        revision_requested=registration.revision_requested, has_feedback=bool(feedback),
+        unpublished=unpublished,
     )
-    if module.revision_requested:
-        messages.success(request, "Feedback bewaard. De student kan het dossier opnieuw aanpassen.")
+    if registration.revision_requested:
+        messages.success(request, "Feedback bewaard. De student kan deze registratie opnieuw aanpassen.")
     else:
         messages.success(request, "Feedback bewaard.")
     return redirect(
-        f"{reverse('dossier:teacher_student_case', args=[student_case.id])}#module-{module.id}"
+        f"{reverse('dossier:teacher_student_case', args=[student_case.id])}#registratie-{registration.id}"
     )
 
 
