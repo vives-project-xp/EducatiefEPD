@@ -171,9 +171,9 @@ document.addEventListener("click", function (event) {
   details.forEach(item => { item.open = open; });
   button.textContent = open ? "Alles dichtklappen" : "Alles openklappen";
 });
-// Na het bewaren van modulefeedback keert de pagina terug naar #module-<id>: die module openklappen.
+// Na het bewaren van feedback bij een registratie keert de pagina terug naar #registratie-<id>: die openklappen.
 function openModuleFromHash() {
-  if (!location.hash.startsWith("#module-")) return;
+  if (!location.hash.startsWith("#registratie-")) return;
   const target = document.getElementById(location.hash.slice(1));
   if (target && target.matches("details.response-detail")) {
     target.open = true;

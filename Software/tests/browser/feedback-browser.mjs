@@ -70,7 +70,7 @@ async function screenshot(name) {
 const reviewPath = `/docent/studentdossier/${fixture.studentCaseId}/`;
 const item = `#opdracht-${fixture.submissionId}`;
 const feedback = `id_feedback_${fixture.submissionId}`;
-const moduleFeedback = `id_module_feedback_${fixture.moduleId}`;
+const moduleFeedback = `id_module_feedback_${fixture.registrationId}`;
 try {
   let target;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -127,15 +127,18 @@ try {
   await submit(`${item} form.review-form`, `document.body.textContent.includes('Beoordeling opgeslagen.')`, 'review saved');
   assert.ok(await evaluate(`Boolean(document.querySelector('.previous-review-feedback span[style*="color"]'))`), 'Coloured feedback saved');
 
-  // Open/close-all toggle and module feedback with a revision request.
+  // Open/close-all toggle and feedback on a (published) registration with a revision request.
+  const registration = `#registratie-${fixture.registrationId}`;
+  assert.ok(await evaluate(`document.querySelector('${registration} summary').textContent.includes('Gepubliceerd')`), 'Seeded registration is published');
   await evaluate(`document.querySelector('[data-toggle-modules]').click()`);
-  assert.equal(await evaluate(`[...document.querySelectorAll('details.response-detail')].every(d => d.open)`), true, 'All modules open');
+  assert.equal(await evaluate(`[...document.querySelectorAll('details.response-detail')].every(d => d.open)`), true, 'All registrations open');
   await editorReady(moduleFeedback);
   await setEditor(moduleFeedback, '<p>Vermeld ook de <strong>pariteit</strong>.</p>');
-  await evaluate(`document.querySelector('#id_module_revision_requested_${fixture.moduleId}').checked = true`);
-  await submit(`#module-${fixture.moduleId} form`, `document.body.textContent.includes('opnieuw aanpassen')`, 'module feedback');
-  assert.ok(await evaluate(`document.querySelector('#module-${fixture.moduleId} summary').textContent.includes('Aanpassing gevraagd')`));
-  assert.ok(await evaluate(`location.hash === '#module-${fixture.moduleId}' && document.querySelector('#module-${fixture.moduleId}').open`), 'Saved module reopened');
+  await evaluate(`document.querySelector('#id_module_revision_requested_${fixture.registrationId}').checked = true`);
+  await submit(`#registratie-${fixture.registrationId} form`, `document.body.textContent.includes('opnieuw aanpassen')`, 'module feedback');
+  assert.ok(await evaluate(`document.querySelector('#registratie-${fixture.registrationId} summary').textContent.includes('Aanpassing gevraagd')`));
+  assert.ok(await evaluate(`location.hash === '#registratie-${fixture.registrationId}' && document.querySelector('#registratie-${fixture.registrationId}').open`), 'Saved registration reopened');
+  assert.ok(await evaluate(`document.querySelector('${registration} summary').textContent.includes('Concept')`), 'Revision request sets registration back to concept');
 
   await editorReady('id_final_final_feedback');
   await setEditor('id_final_final_feedback', '<p>Mooi klinisch redeneren.</p>');
@@ -166,8 +169,10 @@ try {
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), true, 'Student page fits mobile viewport');
   await screenshot('student-mobile.png');
   await viewport(1440, 1000, false);
-  await navigate(`/dossier/${fixture.caseId}/?module=${fixture.moduleId}`);
+  // The revision notice links straight to the registration, which the student can edit again.
+  await navigate(await evaluate(`document.querySelector('.revision-notice a').getAttribute('href')`));
   assert.ok(await evaluate(`Boolean(document.querySelector('.module-feedback')) && Boolean(document.querySelector('.nav-flag-revision'))`));
+  assert.ok(await evaluate(`Boolean(document.querySelector('.module-form button[name="action"][value="save"]'))`), 'Registration editable again');
   await screenshot('student-dossier.png');
 
   assert.deepEqual(errors, []);
