@@ -11,11 +11,11 @@
     </div>
     <a class="back" href="{% url 'dossier:teacher_case' student_case.case_id %}">← Casus</a>
   </header>
-  <div class="review-grid">
+  <div class="review-stack">
     <section class="editor-section">
       <h2>Opdrachten</h2>
       {% for submission in student_case.assignment_submissions.all %}
-        <article class="review-item">
+        <article class="review-item" id="opdracht-{{ submission.id }}">
           <header>
             <div>
               <small>{{ submission.phase }}</small>
@@ -23,19 +23,59 @@
             </div>
             <span class="state status-{{ submission.status }}">{{ submission.get_status_display }}</span>
           </header>
+          {% if submission.content %}
+            <details class="assignment-brief">
+              <summary>Opdracht bekijken</summary>
+              <div class="assignment-brief-content">{{ submission.content|rich_html }}</div>
+            </details>
+          {% endif %}
+          {% if submission.answer_changed_since_review %}
+            <div class="answer-compare">
+              <div>
+                <strong class="answer-label">Antwoord bij vorige beoordeling</strong>
+                <div class="student-answer">{{ submission.latest_review.answer|default:'Nog niet ingevuld'|rich_html }}</div>
+              </div>
+              <div>
+                <strong class="answer-label">Huidig antwoord</strong>
+                <div class="student-answer" data-current-answer>{{ submission.answer|default:'Nog niet ingevuld'|rich_html }}</div>
+              </div>
+            </div>
+          {% else %}
+            <div class="student-answer" data-current-answer>{{ submission.answer|default:'Nog niet ingevuld'|rich_html }}</div>
+          {% endif %}
+          {% if submission.has_review %}
           <div class="student-answer">
             {{ submission.answer|default:'Nog niet ingevuld'|safe_clean }}
           </div>
           {% if submission.status in 'approved,resubmit' %}
             <div class="previous-review">
-              <strong>Vorige beoordeling: {{ submission.get_status_display }}</strong>
+              <strong>
+                Vorige beoordeling{% if submission.latest_review %}: {{ submission.latest_review.get_status_display }}{% elif submission.status in 'approved,resubmit' %}: {{ submission.get_status_display }}{% endif %}
+              </strong>
               {% if submission.reviewed_at %}
-                <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
+                <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}{% if submission.latest_review.reviewer %} · {{ submission.latest_review.reviewer.get_full_name|default:submission.latest_review.reviewer.username }}{% endif %}</small>
               {% endif %}
               {% if submission.feedback %}
                 <div class="previous-review-feedback">{{ submission.feedback|safe_clean }}</div>
               {% endif %}
             </div>
+          {% endif %}
+          {% if submission.earlier_reviews %}
+            <details class="review-history">
+              <summary>Eerdere beoordelingen ({{ submission.earlier_reviews|length }})</summary>
+              {% for review in submission.earlier_reviews %}
+                <div class="review-history-item">
+                  <strong>Beoordeling {{ review.round }}: {{ review.get_status_display }}</strong>
+                  <small>{{ review.created_at|date:"d-m-Y H:i" }}{% if review.reviewer %} · {{ review.reviewer.get_full_name|default:review.reviewer.username }}{% endif %}</small>
+                  <span class="answer-label">Antwoord op dat moment</span>
+                  <div class="student-answer">{{ review.answer|default:'Nog niet ingevuld'|rich_html }}</div>
+                  {% if review.feedback %}
+                    <span class="answer-label">Feedback</span>
+                    <div class="previous-review-feedback">{{ review.feedback|rich_html }}</div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            </details>
           {% endif %}
           {% if submission.status in 'submitted,approved,resubmit' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">
@@ -44,6 +84,7 @@
                 <div class="review-field">
                   {{ submission.review_form.status.label_tag }}
                   {{ submission.review_form.status }}
+                  {{ submission.review_form.status.errors }}
                 </div>
               </div>
               <div class="review-field">
@@ -53,20 +94,66 @@
                     Importeer antwoord
                   </button>
                 </span>
-                {% if submission.review_form.feedback %}
-                  {{ submission.review_form.feedback }}
-                {% endif %}
+                {{ submission.review_form.feedback }}
                 {{ submission.review_form.feedback.errors }}
               </div>
               <div class="review-actions">
                 <button class="primary button">Beoordeling bewaren</button>
               </div>
             </form>
+          {% elif submission.status == 'todo' and submission.has_review %}
+            <p class="muted">De student werkt deze opdracht bij. Je kunt opnieuw beoordelen zodra ze weer is ingediend.</p>
           {% endif %}
           </article>
       {% endfor %}
     </section>
     <section class="editor-section">
+      <div class="section-heading">
+        <h2>Ingevuld patiëntendossier</h2>
+        {% if student_case.module_responses.all %}
+          <button type="button" class="outline button" data-toggle-modules>Alles openklappen</button>
+        {% endif %}
+      </div>
+      {% for module in student_case.module_responses.all %}
+      <details class="response-detail" id="module-{{ module.id }}" {% if module.feedback_form.is_bound %}open{% endif %}>
+        <summary>
+          {{ module.title }}
+          {% if module.revision_requested %}<span class="state status-resubmit">Aanpassing gevraagd</span>{% elif module.feedback %}<span class="feedback-badge">Feedback</span>{% endif %}
+        </summary>
+        <div class="response-body">
+          <div class="response-values">
+            {% for field in module.display_values %}
+              <div class="response-value"><strong>{{ field.label }}</strong>
+                {% if field.matrix_payload %}
+                  {% include 'dossier/_matrix.html' with locked=True %}
+                {% elif field.type == 'matrix' %}
+                  <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+                {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
+                {% else %}<pre>{{ field.value }}</pre>{% endif %}
+              </div>
+            {% empty %}
+            <p>Dit onderdeel bevat geen invulvelden.</p>
+            {% endfor %}
+          </div>
+          <form method="post" class="review-form module-feedback-form" action="{% url 'dossier:teacher_module_feedback' student_case.id module.id %}">
+            {% csrf_token %}
+            <div class="review-field">
+              {{ module.feedback_form.feedback.label_tag }}
+              {{ module.feedback_form.feedback }}
+              {{ module.feedback_form.feedback.errors }}
+            </div>
+            <label class="checkbox-inline" for="{{ module.feedback_form.revision_requested.id_for_label }}">
+              {{ module.feedback_form.revision_requested }}
+              {{ module.feedback_form.revision_requested.label }}
+            </label>
+            {% if module.feedback_at %}
+              <small class="muted">Laatst bewaard {{ module.feedback_at|date:"d-m-Y H:i" }}{% if module.feedback_by %} · {{ module.feedback_by.get_full_name|default:module.feedback_by.username }}{% endif %}</small>
+            {% endif %}
+            <div class="review-actions">
+              <button class="outline button">Feedback bewaren</button>
+            </div>
+          </form>
+        </div>
       <h2>Ingevuld patiëntendossier</h2>
       {% for group in module_groups %}
       <h3 class="module-group-title">{{ group.title }}</h3>
@@ -89,6 +176,24 @@
       </details>
       {% endfor %}
       {% endfor %}
+    </section>
+    <section class="editor-section final-feedback" id="algemene-feedback">
+      <h2>Algemene feedback</h2>
+      <p class="muted">Eindoordeel over de volledige studentenversie. De student ziet dit bij de inleiding van de casus.</p>
+      <form method="post" class="review-form" action="{% url 'dossier:teacher_final_feedback' student_case.id %}">
+        {% csrf_token %}
+        <div class="review-field">
+          {{ final_feedback_form.final_feedback.label_tag }}
+          {{ final_feedback_form.final_feedback }}
+          {{ final_feedback_form.final_feedback.errors }}
+        </div>
+        {% if student_case.final_feedback_at %}
+          <small class="muted">Laatst bewaard {{ student_case.final_feedback_at|date:"d-m-Y H:i" }}{% if student_case.final_feedback_by %} · {{ student_case.final_feedback_by.get_full_name|default:student_case.final_feedback_by.username }}{% endif %}</small>
+        {% endif %}
+        <div class="review-actions">
+          <button class="primary button">Algemene feedback bewaren</button>
+        </div>
+      </form>
     </section>
   </div>
 </main>

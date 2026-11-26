@@ -473,6 +473,15 @@ class StudentCase(models.Model):
     started_at = models.DateTimeField(auto_now_add=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
+    final_feedback = models.TextField(blank=True)
+    final_feedback_at = models.DateTimeField(null=True, blank=True)
+    final_feedback_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -543,6 +552,37 @@ class AssignmentSubmission(models.Model):
             self.position = self.assignment.position
 
 
+class AssignmentReview(models.Model):
+    """Eén beoordelingsronde van een opdracht, met het antwoord van dat moment."""
+
+    submission = models.ForeignKey(
+        AssignmentSubmission, on_delete=models.CASCADE, related_name="reviews"
+    )
+    round = models.PositiveIntegerField()
+    answer = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=AssignmentSubmission.Status.choices)
+    feedback = models.TextField(blank=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="epd_assignment_reviews",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["round", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["submission", "round"], name="unique_assignment_review_round"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.submission} - beoordeling {self.round}"
+
+
 class ModuleResponse(models.Model):
     class Status(models.TextChoices):
         CONCEPT = "concept", "Concept"
@@ -567,6 +607,18 @@ class ModuleResponse(models.Model):
     schema = models.JSONField(default=list, blank=True)
     position = models.PositiveIntegerField(default=0)
     data = models.JSONField(default=dict, blank=True)
+    feedback = models.TextField(blank=True)
+    feedback_at = models.DateTimeField(null=True, blank=True)
+    feedback_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
+    # Docent vraagt de student dit onderdeel aan te passen; heropent de
+    # studentversie en wordt gewist zodra de student het dossier opnieuw indient.
+    revision_requested = models.BooleanField(default=False)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONCEPT)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

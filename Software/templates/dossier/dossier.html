@@ -15,6 +15,10 @@
     </form>
     <nav>
       {% for module in modules %}
+        <a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}">
+          <span>{{ module.title }}</span>
+          {% if module.revision_requested %}<i class="nav-flag nav-flag-revision" title="Aanpassing gevraagd">!</i>{% elif module.feedback %}<i class="nav-flag" title="Feedback van je docent">✎</i>{% endif %}
+          <b>›</b>
         <a href="?module={{ module.meta_key }}" class="nav-item {% if selected.meta_key == module.meta_key %}selected{% endif %}">
           <span>{{ module.title }}</span><b>›</b>
         </a>
@@ -41,6 +45,22 @@
           </div>
           <span>{{ student_case.get_status_display }}</span>
         </div>
+      {% if selected.feedback or selected.revision_requested %}
+        <div class="feedback module-feedback">
+          <strong>{% if selected.revision_requested %}Je docent vraagt dit onderdeel aan te passen{% else %}Feedback docent{% endif %}</strong>
+          {% if selected.feedback %}{{ selected.feedback|rich_html }}{% endif %}
+          {% if selected.feedback_at %}<small class="muted">{{ selected.feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
+        </div>
+      {% endif %}
+      {% if selected.instructions %}
+        <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
+      {% endif %}
+      <form method="post" class="module-form">{% csrf_token %}
+        <input type="hidden" name="module" value="{{ selected.id }}">
+        {% if not student_case.locked and selected.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
+        {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
+        {% if not student_case.locked and selected.kind != 'information' %}
+          <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
         {% if not student_case.locked %}
           <div class="registration-bar">
             <div class="view-toggle">
