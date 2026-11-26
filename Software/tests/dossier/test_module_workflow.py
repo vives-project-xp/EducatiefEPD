@@ -8,7 +8,7 @@ from django.utils.html import escape
 from django.utils import timezone
 
 from dossier.models import (
-    Assignment, AssignmentSubmission, AuditEvent, Case, Education, Module,
+    Assignment, AssignmentSubmission, AuditEvent, Case, CaseFunctionSnapshot, Education, Module,
     ModuleField, Patient, Profile, StudentCase, TeachingGroup,
 )
 from dossier.services import start_student_case
@@ -67,7 +67,7 @@ class ModuleWorkflowTests(TestCase):
     def form_data(self, **changes):
         payload = {f"field_{key}": value for key, value in self.complete_data().items() if key not in {"matrix", "observations"}}
         payload.update({f"field_matrix_{key}": value for key, value in self.complete_data()["matrix"].items()})
-        payload.update({"module": self.response.pk, "action": "save"})
+        payload.update({"module": self.module.pk, "registratie": self.response.pk, "action": "save"})
         payload.update(changes)
         return payload
 
@@ -148,11 +148,58 @@ class ModuleWorkflowTests(TestCase):
         result = self.client.post("/dossier/save-form/", {"payload": json.dumps(valid)})
         self.assertEqual(result.status_code, 403)
 
+    def test_registration_lifecycle_preserves_source_data_and_published_lock(self):
+        self.module.base_data = {"text": "Voorinvulling"}
+        self.module.save(update_fields=["base_data"])
+        self.client.force_login(self.student)
+        result = self.client.post(self.dossier_url, {
+            "module": self.module.pk,
+            "action": "new",
+        })
+        registration = self.student_case.module_responses.exclude(pk=self.response.pk).get()
+        self.assertEqual(registration.created_by, self.student)
+        self.assertEqual(registration.source_data, {"text": "Voorinvulling"})
+        self.assertEqual(registration.data, {"text": "Voorinvulling"})
+        self.assertRedirects(
+            result,
+            f"{self.dossier_url}?module={self.module.pk}&weergave=invoer&registratie={registration.pk}",
+        )
+
+        self.client.post(self.dossier_url, {
+            "module": self.module.pk,
+            "registratie": registration.pk,
+            "action": "publish",
+        })
+        registration.refresh_from_db()
+        self.assertEqual(registration.status, registration.Status.PUBLISHED)
+        saved_data = registration.data.copy()
+
+        result = self.client.post(self.dossier_url, {
+            "module": self.module.pk,
+            "registratie": registration.pk,
+            "action": "save",
+            "field_text": "Mag niet bewaard worden",
+        })
+        self.assertEqual(result.status_code, 302)
+        payload = {
+            "module_id": registration.pk,
+            "function_id": None,
+            "form_key": "module",
+            "answers": {"text": "Mag niet bewaard worden"},
+        }
+        ajax_result = self.client.post(
+            "/dossier/save-form/",
+            {"payload": json.dumps(payload)},
+        )
+        self.assertEqual(ajax_result.status_code, 403)
+        registration.refresh_from_db()
+        self.assertEqual(registration.data, saved_data)
+
     def test_incomplete_drafts_can_be_saved_by_student_and_teacher(self):
         for role in ("student", "teacher"):
             with self.subTest(role=role):
                 url, record, attribute = self.target(role)
-                result = self.client.post(url, {"module": self.response.pk, "field_text": "Alvast bewaard", "action": "save"})
+                result = self.client.post(url, {"module": self.module.pk, "registratie": self.response.pk, "field_text": "Alvast bewaard", "action": "save"})
                 self.assertEqual(result.status_code, 302)
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute)["text"], "Alvast bewaard")
@@ -173,14 +220,46 @@ class ModuleWorkflowTests(TestCase):
                 self.assertTrue(next(field for field in result.context["fields"] if field["key"] == key)["errors"])
         self.assertFalse(AuditEvent.objects.filter(action="student_case.submitted").exists())
 
+    def test_required_function_snapshot_field_blocks_final_submission(self):
+        snapshot = CaseFunctionSnapshot.objects.create(
+            module=self.module,
+            title="Functieformulier",
+            kind="formulier",
+            definition={"forms": [{
+                "id": "formulier-1",
+                "title": "Invoer",
+                "questions": [{
+                    "id": "vraag-1",
+                    "fieldType": "text",
+                    "question": "Verplicht functieantwoord",
+                    "required": True,
+                }],
+            }]},
+        )
+        key = f"{snapshot.id}_formulier-1_vraag-1"
+        self.save_response({
+            **self.complete_data(),
+            "_functions": {key: ""},
+        })
+        self.client.force_login(self.student)
+        result = self.client.post(self.submit_url, follow=True)
+        self.student_case.refresh_from_db()
+        self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
+        self.assertContains(result, "Verplicht functieantwoord")
+
     def test_final_submission_checks_every_module(self):
         self.save_response(self.complete_data())
         second = self.student_case.module_responses.create(
-            title="Tweede module", schema=[{"key": "extra", "type": "short_text", "label": "Extra", "required": True}],
+            title="Tweede module",
+            schema=[
+                {"key": "extra", "type": "short_text", "label": "Extra", "required": True},
+                {"key": "andere", "type": "short_text", "label": "Andere", "required": False},
+            ],
+            data={"andere": "ingevuld"},
         )
         self.client.force_login(self.student)
         result = self.client.post(self.submit_url)
-        self.assertRedirects(result, f"{self.dossier_url}?module={second.pk}&validate=1")
+        self.assertRedirects(result, f"{self.dossier_url}?module=los-{second.pk}&registratie={second.pk}&validate=1")
         self.student_case.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
 
@@ -216,7 +295,7 @@ class ModuleWorkflowTests(TestCase):
         self.save_response(original)
         ModuleField.objects.create(module=self.module, key="later", label="Later toegevoegd", field_type="short_text", required=True)
         self.client.force_login(self.student)
-        self.assertRedirects(self.client.post(self.submit_url), f"{self.dossier_url}?module={self.response.pk}&validate=1")
+        self.assertRedirects(self.client.post(self.submit_url), f"{self.dossier_url}?module={self.module.pk}&registratie={self.response.pk}&validate=1")
         self.student_case.refresh_from_db()
         self.response.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)

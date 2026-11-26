@@ -1050,7 +1050,7 @@ class EpdWorkflowTests(TestCase):
         substring_page = self.client.get(
             reverse("dossier:library_list"), {"dossier_q": "ossier een"}
         )
-        self.assertEqual(list(substring_page.context["dossiers"]), [])
+        self.assertEqual([item.title for item in substring_page.context["dossiers"]], ["Dossier een"])
         education_filtered_page = self.client.get(
             reverse("dossier:library_list"),
             {"dossier_education": str(self.education.id)},
@@ -1258,7 +1258,8 @@ class EpdWorkflowTests(TestCase):
         field = next(item for item in response.schema if item["type"] == "number")
         self.client.login(username="student", password="testpass")
         self.client.post(reverse("dossier:dossier", args=[self.case.id]), {
-            "module": response.id, f"field_{field['key']}": "geen getal",
+            "module": response.module_id, "registratie": response.pk,
+            "action": "save", f"field_{field['key']}": "geen getal",
         })
         response.refresh_from_db()
         self.assertNotIn(field["key"], response.data)

@@ -24,7 +24,7 @@ from django.core.files.storage import default_storage
 from django.core.paginator import Paginator
 from django.db import connection, transaction
 from django.db.models import Prefetch, Q
-from django.http import Http404, HttpResponse, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import get_valid_filename, slugify
 from django.urls import reverse
@@ -74,7 +74,7 @@ from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case, create_case_structure,
     build_library_structure, build_sidebar_structure,
     ensure_default_templates, module_schema, sync_student_module_response,
-    start_student_case, clean_html,
+    start_student_case, clean_html, new_registration, registration_is_empty,
     remove_module_from_students, synchronize_module_to_students,
     synchronize_template_module, synchronize_template_function_snapshots,
     synchronize_dossier_additions_to_cases,
@@ -159,6 +159,8 @@ def require_post(request):
 
 def get_student_case(request, case_id):
     case = get_object_or_404(Case.objects.select_related("patient"), id=case_id)
+    if case.status != Case.Status.PUBLISHED:
+        raise PermissionDenied
     if not case.allowed_groups.filter(members=request.user).exists():
         raise PermissionDenied
     existing = StudentCase.objects.filter(case=case, student=request.user).first()
@@ -216,7 +218,7 @@ def home(request):
         return redirect("dossier:teacher_dashboard")
     cases = list(
         Case.objects.filter(
-            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user),
+            Q(status=Case.Status.PUBLISHED),
             allowed_groups__members=request.user,
         )
         .select_related("patient")
@@ -254,7 +256,7 @@ def case_detail(request, case_id):
         }:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            selected.answer = request.POST.get("answer", "").strip()
+            selected.answer = clean_html(request.POST.get("answer", "").strip())
             if request.POST.get("action") == "submit":
                 if not selected.answer:
                     messages.error(request, "Vul eerst een antwoord in.")
@@ -653,6 +655,13 @@ def save_form(request):
     student_case = response.student_case
     if student_case.locked:
         return JsonResponse({"error": "Dit dossier is ingediend en kan niet meer worden gewijzigd."}, status=403)
+    if response.status == ModuleResponse.Status.PUBLISHED:
+        return JsonResponse({"error": "Deze registratie is gepubliceerd en kan niet meer worden gewijzigd."}, status=403)
+    if function_id is not None and (
+        response.module is None
+        or not response.module.function_snapshots.filter(pk=function_id, active=True).exists()
+    ):
+        return JsonResponse({"error": "Het formulier behoort niet tot dit dossieronderdeel."}, status=403)
     data = deepcopy(response.data if isinstance(response.data, dict) else {})
     if form_key == "module":
         for key, value in answers.items():
@@ -819,37 +828,145 @@ def parsed_function_data(
     return (None, missing) if missing else (data, [])
 
 
+class _StoredFunctionRequest:
+    def __init__(self, post):
+        self.POST = post
+        self.FILES = {}
+
+
+def validate_saved_function_data(snapshots, data):
+    function_data = data.get("_functions", {}) if isinstance(data, dict) else {}
+    if not isinstance(function_data, dict):
+        function_data = {}
+    post = QueryDict("", mutable=True)
+    for snapshot in snapshots:
+        for form in (snapshot.definition or {}).get("forms", []):
+            form_id = form.get("id", form.get("position", 0))
+            for question in form.get("questions", []):
+                field_type = question.get("fieldType")
+                key = f"{snapshot.id}_{form_id}_{question.get('id', question.get('position', 0))}"
+                value = function_data.get(key, "")
+                if field_type == "matrix":
+                    post[f"matrix_{key}"] = json.dumps(value)
+                elif not is_display_only(field_type) and field_type not in {
+                    "observation", "observatie", "imageUpload", "fileUpload",
+                }:
+                    post[f"function_{key}"] = value if isinstance(value, str) else str(value)
+    _, missing = parsed_function_data(
+        _StoredFunctionRequest(post),
+        snapshots,
+        data,
+        require_complete=True,
+    )
+    return missing
+
+
+class _ModuleEntry:
+    """Een dossiermodule met al haar registraties (saved fill-ins)."""
+
+    def __init__(self, module, responses):
+        self.module = module
+        self.responses = responses
+
+    @property
+    def registrations(self):
+        return list(reversed(self.responses))
+
+    @property
+    def meta_key(self):
+        return str(self.module_id) if self.module_id is not None else f"los-{self.responses[0].id}"
+
+    @property
+    def module_id(self):
+        return self.module.id if self.module is not None else None
+
+    @property
+    def representative(self):
+        return self.responses[0]
+
+    @property
+    def title(self):
+        return self.representative.title
+
+    @property
+    def kind(self):
+        return self.representative.kind
+
+    @property
+    def get_kind_display(self):
+        return self.representative.get_kind_display()
+
+    @property
+    def instructions(self):
+        return self.representative.instructions
+
+
 @login_required
 @transaction.atomic
 def dossier(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
-    if request.method == "GET":
-        for response in student_case.module_responses.select_related("module").prefetch_related("module__fields"):
-            sync_student_module_response(response)
     if request.method == "POST":
         student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
+    else:
+        for response in student_case.module_responses.select_related("module").prefetch_related("module__fields"):
+            sync_student_module_response(response)
     query = request.GET.get("q", "").strip()
-    modules = list(
-        student_case.module_responses.select_related("module").prefetch_related(
-            "module__function_snapshots"
-        ).all()
+
+    responses = list(
+        student_case.module_responses.select_related("module", "created_by")
+        .prefetch_related("module__fields", "module__function_snapshots")
+        .order_by("module_id", "created_at", "id")
     )
-    sidebar = build_sidebar_structure(modules, query)
+    grouped = {}
+    entries = []
+    for response in responses:
+        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
+        if key not in grouped:
+            grouped[key] = _ModuleEntry(response.module, [])
+            entries.append(grouped[key])
+        grouped[key].responses.append(response)
+
+    sidebar = build_sidebar_structure(entries, query)
     visible_ids = {item["id"] for item in sidebar}
+    visible_entries = [entry for entry in entries if entry.meta_key in visible_ids]
     selected_id = request.POST.get("module") or request.GET.get("module")
-    selected = next((item for item in modules if str(item.id) == selected_id and item.id in visible_ids), None)
+    registration_id = request.POST.get("registratie") or request.GET.get("registratie")
+    action = request.POST.get("action") if request.method == "POST" else None
+    legacy_response_id = bool(selected_id and not registration_id and action != "new")
+    selected = None
+    if legacy_response_id:
+        selected = next(
+            (
+                entry for entry in visible_entries
+                if any(str(response.pk) == selected_id for response in entry.responses)
+            ),
+            None,
+        )
+    if selected is None:
+        selected = next(
+            (entry for entry in visible_entries if entry.meta_key == selected_id),
+            None,
+        )
     if request.method == "POST" and selected is None:
         raise Http404
-    if selected is None and modules:
-        selected = next((item for item in modules if item.id in visible_ids), modules[0])
+
+    if selected is None and visible_entries:
+        selected = visible_entries[0]
+    registrations = selected.registrations if selected else []
+    selected_registration = next(
+        (item for item in registrations if str(item.pk) == registration_id),
+        registrations[0] if registrations else None,
+    )
+
     selected_snapshots = (
         [
             snapshot for snapshot in selected.module.function_snapshots.all()
             if snapshot.active
         ]
-        if selected and selected.module else []
+        if selected and selected.module
+        else []
     )
     function_id = request.POST.get("function") or request.GET.get("function")
     try:
@@ -861,8 +978,11 @@ def dossier(request, case_id):
         selected_function_id = available_function_ids[0] if available_function_ids else None
     active_form_key = request.POST.get("form") or request.GET.get("form")
     function_forms = prepare_function_forms(
-        selected_snapshots, selected.data, selected_function_id, active_form_key
-    ) if selected else []
+        selected_snapshots,
+        selected_registration.data if selected_registration else {},
+        selected_function_id,
+        active_form_key,
+    ) if selected_registration else []
     selected_function = function_forms[0] if function_forms else None
     active_form = next(
         (form for form in selected_function["forms"] if form["active"]),
@@ -876,74 +996,174 @@ def dossier(request, case_id):
     form_result = None
     errors = {}
     missing = []
+
+    def entry_redirect(entry, registration=None, mode="invoer", function=None, form=None):
+        params = {"module": entry.meta_key, "weergave": mode}
+        if registration is not None:
+            params["registratie"] = registration.id
+        if function is not None:
+            params["function"] = function
+        if form:
+            params["form"] = form
+        if query:
+            params["q"] = query
+        return redirect(f"{request.path}?{urlencode(params)}")
+
     if request.method == "POST" and selected:
+        action = request.POST.get("action", "save")
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
+            return entry_redirect(selected, selected_registration, "invoer")
+        if action == "new":
+            if selected.module is None:
+                messages.error(request, "Voor dit onderdeel kan geen nieuwe registratie aangemaakt worden.")
+                return entry_redirect(selected, None, "lijst")
+            registration = new_registration(student_case, selected.module, author=request.user)
+            audit(request, "module_response.created", registration)
+            messages.success(request, "Nieuwe registratie aangemaakt.")
+            return entry_redirect(selected, registration)
+        target_pk = request.POST.get("registratie") or (
+            selected_registration.pk if selected_registration else None
+        )
+        target = next((item for item in selected.responses if str(item.pk) == str(target_pk)), None)
+        if target is None:
+            raise Http404
+        is_published = target.status == ModuleResponse.Status.PUBLISHED
+        if action == "delete":
+            if is_published:
+                messages.error(request, "Een gepubliceerde registratie kan niet worden verwijderd. Zet haar eerst terug naar concept.")
+                return entry_redirect(selected, target)
+            audit(request, "module_response.deleted", target)
+            target.delete()
+            messages.success(request, "Registratie verwijderd.")
+            remaining = [item for item in selected.registrations if item.pk != target.pk]
+            if remaining:
+                return entry_redirect(selected, remaining[0])
+            return entry_redirect(selected, None, "lijst")
+        if action == "edit":
+            if is_published:
+                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
+            return entry_redirect(selected, target)
+        if action == "unpublish":
+            if not is_published:
+                messages.error(request, "Deze registratie is nog niet gepubliceerd.")
+                return entry_redirect(selected, target)
+            target.status = ModuleResponse.Status.CONCEPT
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.unpublished", target)
+            messages.success(request, "Registratie teruggezet naar concept. Je kunt haar opnieuw bewerken.")
+            return entry_redirect(selected, target, "lijst")
+        submitted_answers = any(
+            key.startswith(("field_", "matrix_", "function_"))
+            for key in request.POST
+        )
+        if action == "publish" and not submitted_answers:
+            if is_published:
+                messages.error(request, "Deze registratie is al gepubliceerd.")
+                return entry_redirect(selected, target, "lijst")
+            target.status = ModuleResponse.Status.PUBLISHED
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.published", target)
+            messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+            return entry_redirect(selected, target, "lijst")
+        if is_published:
+            messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
+            return entry_redirect(selected, target)
+
+        observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
+        function_observation_keys = {
+            f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
+            for snapshot in selected_snapshots
+            for form in (snapshot.definition or {}).get("forms", [])
+            for question in form.get("questions", [])
+            if question.get("fieldType") in {"observation", "observatie"}
+        }
+        function_observation_action = observation_key in function_observation_keys
+        if function_observation_action:
+            data = deepcopy(target.data if isinstance(target.data, dict) else {})
         else:
-            action = request.POST.get("action", "save")
-            observation_key = action.split(":", 1)[1] if action.startswith("add_observation:") else None
-            function_observation_keys = {
-                f"{snapshot.id}_{form.get('id', form.get('position', 0))}_{question.get('id', question.get('position', 0))}"
-                for snapshot in selected_snapshots
-                for form in (snapshot.definition or {}).get("forms", [])
-                for question in form.get("questions", [])
-                if question.get("fieldType") in {"observation", "observatie"}
-            }
-            function_observation_action = observation_key in function_observation_keys
-            if function_observation_action:
-                data = selected.data
-            else:
-                form_result = parse_module_form(request.POST, selected.schema, selected.data)
-                missing = [
-                    message
-                    for field_errors in form_result.errors.values()
-                    for message in field_errors
-                ]
-                data = form_result.data if not form_result.errors else None
-            function_data, function_missing = parsed_function_data(
-                request, selected_snapshots,
-                data if data is not None else selected.data,
-                function_id=selected_function_id,
-                form_key=active_form_key,
-                require_complete=action == "save",
-            )
-            if function_missing:
-                missing.extend(function_missing)
-            elif data is not None and function_data is not None:
-                data = function_data
-            if missing:
-                messages.error(request, f"Controleer deze velden: {', '.join(missing)}.")
-            else:
-                selected.data = data
-                selected.save(update_fields=["data", "updated_at"])
-                added_observations = bool(form_result and form_result.added_observations)
-                message = "Dossieronderdeel en observaties bewaard." if added_observations else "Dossieronderdeel bewaard."
-                messages.success(request, message)
-                audit(request, "module_response.updated", selected, observations_added=(
+            form_result = parse_module_form(request.POST, target.schema, target.data)
+            missing = [
+                message
+                for field_errors in form_result.errors.values()
+                for message in field_errors
+            ]
+            data = form_result.data if not form_result.errors else None
+        function_data, function_missing = parsed_function_data(
+            request,
+            selected_snapshots,
+            data if data is not None else target.data,
+            function_id=selected_function_id,
+            form_key=active_form_key,
+            require_complete=False,
+        )
+        missing.extend(function_missing)
+        if not missing and data is not None and function_data is not None:
+            data = function_data
+            target.data = data
+            if action == "publish":
+                target.status = ModuleResponse.Status.PUBLISHED
+                target.save(update_fields=["data", "status", "updated_at"])
+                messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+                audit(request, "module_response.published", target, observations_added=(
                     len(form_result.added_observations) if form_result else 0
                 ))
-        redirect_params = {"module": selected.id}
-        if selected_function_id is not None:
-            redirect_params["function"] = selected_function_id
-        if active_form_key:
-            redirect_params["form"] = active_form_key
-        if not missing:
-            if query:
-                redirect_params["q"] = query
-            return redirect(f"{request.path}?{urlencode(redirect_params)}")
-    elif selected and request.GET.get("validate") == "1":
-        errors = validate_module_data(selected.schema, selected.data, require_complete=True)
+            else:
+                target.save(update_fields=["data", "updated_at"])
+                added_observations = bool(form_result and form_result.added_observations)
+                messages.success(
+                    request,
+                    "Registratie en observaties bewaard." if added_observations else "Registratie bewaard.",
+                )
+                audit(request, "module_response.updated", target, observations_added=(
+                    len(form_result.added_observations) if form_result else 0
+                ))
+            return entry_redirect(
+                selected, target, "invoer", selected_function_id, active_form_key
+            )
+        messages.error(
+            request,
+            f"Controleer deze velden: {', '.join(missing)}. Je wijzigingen zijn nog niet bewaard.",
+        )
+        view_mode = "invoer"
+        registrations = selected.registrations
+        failed_form = form_result
+        selected_registration = target
+    else:
+        default_view = "invoer" if selected_snapshots else "lijst"
+        view_mode = request.GET.get("weergave", default_view)
+        if view_mode not in ("lijst", "invoer"):
+            view_mode = default_view
+        if request.GET.get("validate") == "1":
+            view_mode = "invoer"
+
+        failed_form = None
+
+    for response in responses:
+        if not hasattr(response, "display_values"):
+            response.display_values = prepare_schema_fields(response.schema, response.data)
+
+    errors = {}
+    if failed_form is None and selected_registration and request.GET.get("validate") == "1":
+        errors = validate_module_data(selected_registration.schema, selected_registration.data, require_complete=True)
+
+    fields = []
+    if selected and view_mode == "invoer" and selected_registration:
+        fields = prepare_schema_fields(
+            selected_registration.schema,
+            failed_form.display_data if failed_form else selected_registration.data,
+            errors=failed_form.errors if failed_form else errors,
+            pending_observations=failed_form.pending_observations if failed_form else None,
+        )
 
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": sidebar,
         "sidebar": sidebar,
         "selected": selected, "query": query,
-        "fields": prepare_schema_fields(
-            selected.schema,
-            form_result.display_data if form_result else selected.data,
-            errors=form_result.errors if form_result else errors,
-            pending_observations=form_result.pending_observations if form_result else None,
-        ) if selected else [],
+        "registrations": registrations,
+        "selected_registration": selected_registration,
+        "view_mode": view_mode,
+        "fields": fields,
         "function_forms": function_forms,
         "selected_function": selected_function,
         "page_title": selected_function["title"] if selected_function else (selected.title if selected else ""),
@@ -952,9 +1172,15 @@ def dossier(request, case_id):
         "selected_function_id": selected_function_id,
         "show_form_navigation": show_form_navigation,
         "errors": errors,
+        "missing": missing,
+        "form_result": form_result,
+        "form_locked": bool(student_case.locked or (
+            selected_registration is not None
+            and selected_registration.status == ModuleResponse.Status.PUBLISHED
+        )),
         "answerable_fields": any(
             item["type"] not in {"image", "link", "info", "unknown"}
-            for item in (selected.schema if selected else [])
+            for item in (selected_registration.schema if selected_registration else [])
         ),
     })
 
@@ -976,14 +1202,32 @@ def submit_student_case(request, case_id):
         messages.error(request, "Dien eerst alle opdrachten in.")
     invalid_modules = []
     for module in student_case.module_responses.all():
+        if registration_is_empty(module):
+            continue
         errors = validate_module_data(module.schema, module.data, require_complete=True)
-        if errors:
+        function_missing = validate_saved_function_data(
+            list(module.module.function_snapshots.filter(active=True))
+            if module.module else [],
+            module.data,
+        )
+        if errors or function_missing:
             invalid_modules.append(module)
-            labels = ", ".join(field["label"] for field in module.schema if field["key"] in errors)
-            messages.error(request, f"Controleer {module.title}: {labels}.")
+            labels = [
+                field["label"]
+                for field in module.schema
+                if field["key"] in errors
+            ]
+            labels.extend(function_missing)
+            messages.error(
+                request,
+                f"Controleer {module.display_name} ({module.title}): {', '.join(labels)}.",
+            )
     if invalid_modules:
         url = redirect("dossier:dossier", case_id=case_id).url
-        return redirect(f"{url}?{urlencode({'module': invalid_modules[0].id, 'validate': '1'})}")
+        first = invalid_modules[0]
+        params = {"validate": "1", "registratie": first.id}
+        params["module"] = str(first.module_id) if first.module_id is not None else f"los-{first.id}"
+        return redirect(f"{url}?{urlencode(params)}")
     if incomplete:
         return redirect("dossier:case_detail", case_id=case_id)
     student_case.status = StudentCase.Status.SUBMITTED
@@ -1488,7 +1732,7 @@ def teacher_case_delete(request, case_id):
     if case.student_cases.exists():
         messages.error(
             request,
-            "Deze gearchiveerde casus kan niet worden verwijderd zolang er studentendossiers aan gekoppeld zijn.",
+            "Gearchiveerde casus verwijderen? Dit kan alleen als er geen studentendossiers aan gekoppeld zijn.",
         )
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "case.deleted", case, title=case.title)
@@ -1815,12 +2059,23 @@ def teacher_student_case(request, student_case_id):
     require_teacher(request.user)
     student_case = get_object_or_404(
         StudentCase.objects.select_related("case", "student").prefetch_related(
-            "assignment_submissions", "module_responses"
+            "assignment_submissions",
+            Prefetch("module_responses", queryset=ModuleResponse.objects.select_related("module", "created_by")),
         ), id=student_case_id
     )
     editable_case(request.user, student_case.case_id)
-    for module in student_case.module_responses.all():
-        module.display_values = prepare_schema_fields(module.schema, module.data)
+    for response in student_case.module_responses.all():
+        response.display_values = prepare_schema_fields(response.schema, response.data)
+    grouped = {}
+    module_groups = []
+    for response in student_case.module_responses.all():
+        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
+        if key not in grouped:
+            grouped[key] = {"title": response.title, "registrations": []}
+            module_groups.append(grouped[key])
+        grouped[key]["registrations"].append(response)
+    for group in module_groups:
+        group["registrations"] = list(reversed(group["registrations"]))
     for submission in student_case.assignment_submissions.all():
         submission.review_form = ReviewForm(
             # Vóór het eerst is de tekst leeg; bij een herbeoordeling bevat
@@ -1830,6 +2085,7 @@ def teacher_student_case(request, student_case_id):
         )
     return render(request, "dossier/teacher_student_case.html", {
         "student_case": student_case,
+        "module_groups": module_groups,
     })
 
 
@@ -1890,7 +2146,7 @@ def library_list(request):
         "education_id", "education__name"
     ).distinct()
     if dossier_query:
-        dossiers = dossiers.filter(title__istartswith=dossier_query)
+        dossiers = dossiers.filter(title__icontains=dossier_query)
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)

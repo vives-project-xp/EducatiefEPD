@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
@@ -23,7 +24,7 @@
             <span class="state status-{{ submission.status }}">{{ submission.get_status_display }}</span>
           </header>
           <div class="student-answer">
-            {% autoescape off %}{{ submission.answer|default:'Nog niet ingevuld'|linebreaks }}{% endautoescape %}
+            {{ submission.answer|default:'Nog niet ingevuld'|safe_clean }}
           </div>
           {% if submission.status in 'approved,resubmit' %}
             <div class="previous-review">
@@ -32,7 +33,7 @@
                 <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
               {% endif %}
               {% if submission.feedback %}
-                <div class="previous-review-feedback">{% autoescape off %}{{ submission.feedback|linebreaks }}{% endautoescape %}</div>
+                <div class="previous-review-feedback">{{ submission.feedback|safe_clean }}</div>
               {% endif %}
             </div>
           {% endif %}
@@ -67,22 +68,26 @@
     </section>
     <section class="editor-section">
       <h2>Ingevuld patiëntendossier</h2>
-      {% for module in student_case.module_responses.all %}
+      {% for group in module_groups %}
+      <h3 class="module-group-title">{{ group.title }}</h3>
+      {% for module in group.registrations %}
       <details class="response-detail">
-        <summary>{{ module.title }}</summary>
+        <summary>Registratie van {{ module.display_name }}</summary>
         {% for field in module.display_values %}
           <div class="response-value"><strong>{{ field.label }}</strong>
             {% if field.matrix_payload %}
               {% include 'dossier/_matrix.html' with locked=True %}
             {% elif field.type == 'matrix' %}
               <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+            {% elif field.type == 'observation' %}{{ field.value|render_observations }}
             {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
-            {% else %}<pre>{{ field.value }}</pre>{% endif %}
+            {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
           </div>
         {% empty %}
-        <p>Dit onderdeel bevat geen invulvelden.</p>
+        <p>Deze registratie is nog leeg.</p>
         {% endfor %}
       </details>
+      {% endfor %}
       {% endfor %}
     </section>
   </div>

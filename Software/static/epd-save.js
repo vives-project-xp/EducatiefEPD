@@ -91,7 +91,9 @@
     setDirty(section, true);
 
     const form = section.closest('form');
-    const moduleId = form?.querySelector('[name="module"]')?.value
+    const registrationId = form?.querySelector('[name="registratie"]')?.value;
+    const moduleId = registrationId
+      || form?.querySelector('[name="module"]')?.value
       || document.querySelector('[name="module"]')?.value;
     const functionId = form?.querySelector('[name="function"]')?.value || '';
     const formKey = section.dataset.formKey === 'module'

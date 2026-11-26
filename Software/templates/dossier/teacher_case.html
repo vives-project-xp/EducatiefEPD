@@ -27,13 +27,12 @@
         {% endif %}
       </form>
       {% if case.status == 'archived' and request.user.epd_profile.role == 'teacher' %}
-      <form method="post" action="{% url 'dossier:teacher_case_delete' case.id %}" onsubmit="return confirm('Gearchiveerde casus verwijderen? Dit kan alleen als er geen studentendossiers aan gekoppeld zijn.');">
+      <form method="post" action="{% url 'dossier:teacher_case_delete' case.id %}" onsubmit="return confirm('Deze gearchiveerde casus zal verwijderd worden samen met de gekoppelde studentenversies! Weet u zeker dat u dit wilt doen?');">
       {% csrf_token %}
       <button class="outline button danger lifecycle-delete-button" type="submit">Casus verwijderen</button>
     </form>
     {% endif %}
     </div>
-    <p>Wijzigingen gelden alleen voor studenten die de casus daarna starten.</p>
   </div>
   <section class="editor-section">
     <div class="section-heading">

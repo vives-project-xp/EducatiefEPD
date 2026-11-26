@@ -1,4 +1,5 @@
 from copy import deepcopy
+from urllib.parse import urlencode, urlparse
 
 from django.db import transaction
 
@@ -70,12 +71,12 @@ def module_schema(module):
 def sync_student_module_response(response):
     """Refresh a student's structure from the case while preserving their edits."""
     module = response.module
-    if module is None:
+    if module is None or response.status == ModuleResponse.Status.PUBLISHED:
         return False
     live_schema = module_schema(module)
-    current_data = deepcopy(response.data or {})
-    source_data = deepcopy(response.source_data or {})
-    base_data = deepcopy(module.base_data or {})
+    current_data = deepcopy(response.data if isinstance(response.data, dict) else {})
+    source_data = deepcopy(response.source_data if isinstance(response.source_data, dict) else {})
+    base_data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
     if isinstance(current_data, dict) and not current_data.get("_functions"):
         current_data.pop("_functions", None)
     for key, default in base_data.items():
@@ -131,10 +132,13 @@ def build_library_structure(module_entries):
 def build_sidebar_structure(module_responses, query=""):
     query = query.casefold()
     structure = []
-    for response in module_responses:
+    for item in module_responses:
+        entry = item if hasattr(item, "meta_key") else None
+        response = entry.representative if entry else item
+        module = entry.module if entry else response.module
         snapshots = (
-            [snapshot for snapshot in response.module.function_snapshots.all() if snapshot.active]
-            if response.module else []
+            [snapshot for snapshot in module.function_snapshots.all() if snapshot.active]
+            if module else []
         )
         functions = []
         for snapshot in snapshots:
@@ -148,16 +152,27 @@ def build_sidebar_structure(module_responses, query=""):
                 ],
             })
         functions = build_function_hierarchy(functions)
+        module_key = entry.meta_key if entry else str(response.id)
+        registration_id = entry.registrations[0].id if entry else response.id
         for function in functions:
-            function["url"] = f"?module={response.id}&function={function['id']}"
+            params = {
+                "module": module_key,
+                "function": function["id"],
+                "weergave": "invoer",
+                "registratie": registration_id,
+            }
+            if query:
+                params["q"] = query
+            function["url"] = f"?{urlencode(params)}"
         searchable = " ".join(
             [response.title, *(item["title"] for item in functions)]
         ).casefold()
         if not query or query in searchable:
             structure.append({
-                "id": response.id,
+                "id": module_key,
                 "title": response.title,
                 "kind": response.kind,
+                "registration_id": registration_id,
                 "functions": functions,
             })
     return structure
@@ -296,6 +311,38 @@ def create_case_structure(case):
             copy_template_to_case(template, case)
 
 
+def new_registration(student_case, module, *, author):
+    """Maakt een nieuwe, lege registratie (invulling) voor één module van een dossier."""
+    if student_case.locked:
+        raise ValueError("Een ingeleverd dossier kan niet bewerkt worden.")
+    with transaction.atomic():
+        response = student_case.module_responses.create(module=module, created_by=author)
+        response.hydrate_from_source()
+        response.schema = module_schema(module)
+        response.data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
+        response.source_data = deepcopy(response.data)
+        response.save()
+    return response
+
+
+def _filled(value):
+    if isinstance(value, dict):
+        return any(_filled(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_filled(item) for item in value)
+    return bool(value)
+
+
+def registration_is_empty(response):
+    """Check both module fields and function answers for submitted content."""
+    module_values = any(
+        _filled(response.data.get(field.get("key")))
+        for field in response.schema
+    )
+    function_values = response.data.get("_functions", {})
+    return not module_values and not bool(function_values)
+
+
 @transaction.atomic
 def synchronize_student_case(student_case):
     if student_case.locked:
@@ -324,33 +371,33 @@ def synchronize_student_case(student_case):
             changed = True
 
     modules = list(student_case.case.modules.prefetch_related("fields").all())
-    responses = {
-        response.module_id: response
-        for response in student_case.module_responses.all()
-        if response.module_id is not None
-    }
+    responses_by_module = {}
+    for response in student_case.module_responses.all():
+        if response.module_id is not None:
+            responses_by_module.setdefault(response.module_id, []).append(response)
     for module in modules:
-        response = responses.get(module.id)
         schema = module_schema(module)
-        if response is None:
-            response = ModuleResponse(student_case=student_case, module=module)
-            response.hydrate_from_source()
-            response.schema = schema
-            response.data = deepcopy(module.base_data)
-            response.save()
+        module_responses = responses_by_module.get(module.id, [])
+        if not module_responses:
+            new_registration(student_case, module, author=student_case.student)
             changed = True
             continue
         source_values = (module.title, module.kind, module.instructions, module.position, schema)
-        current_values = (
-            response.title, response.kind, response.instructions, response.position, response.schema
-        )
-        if source_values != current_values:
-            response.hydrate_from_source()
-            response.schema = schema
-            response.save(update_fields=[
-                "title", "kind", "instructions", "position", "schema", "updated_at"
-            ])
-            changed = True
+        for response in module_responses:
+            if response.status == ModuleResponse.Status.PUBLISHED:
+                continue
+            current_values = (
+                response.title, response.kind, response.instructions, response.position, response.schema
+            )
+            if source_values != current_values:
+                response.hydrate_from_source()
+                response.schema = schema
+                response.save(update_fields=[
+                    "title", "kind", "instructions", "position", "schema", "updated_at"
+                ])
+                changed = True
+            if sync_student_module_response(response):
+                changed = True
     return changed
 
 
@@ -376,12 +423,7 @@ def start_student_case(case, student):
             submission.save()
 
         for module in case.modules.prefetch_related("fields").all():
-            response = ModuleResponse(student_case=student_case, module=module)
-            response.hydrate_from_source()
-            response.schema = module_schema(module)
-            response.data = deepcopy(module.base_data)
-            response.source_data = deepcopy(module.base_data)
-            response.save()
+            new_registration(student_case, module, author=student)
     else:
         synchronize_student_case(student_case)
     return student_case, created
@@ -694,6 +736,23 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
+# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
+_UNSAFE_LINK_SCHEMES = {"data", "javascript"}
+
+
+def _reject_unsafe_link(tag, attr, value):
+    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
+    if attr == "href" and value:
+        if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
+            return None
+    return value
+
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})
+    return nh3.clean(
+        value,
+        tags=ALLOWED_TAGS,
+        attributes={"a": {"href"}, "img": {"src", "alt"}},
+        url_schemes={"http", "https", "mailto", "data"},
+        attribute_filter=_reject_unsafe_link,
+    )
