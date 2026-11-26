@@ -255,6 +255,125 @@ class DynamicCaseTests(TestCase):
         self.assertIsNone(student_response.module_id)
         self.assertEqual(student_response.data, {"notitie": "Bestaand antwoord"})
 
+    def test_readded_module_reuses_student_answers_and_applies_latest_schema(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-READD-ANSWERS")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        student = get_user_model().objects.create_user("readded-module-student")
+        student_case, _ = start_student_case(case, student)
+        student_response = student_case.module_responses.get(module=module)
+        student_response.data = {"notitie": "Bestaand antwoord"}
+        student_response.save(update_fields=["data"])
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        module.configuration["library_dossier_module_removed"] = True
+        module.save(update_fields=["configuration"])
+        self.client.post(
+            reverse("dossier:teacher_published_module_resolve", args=[case.pk, module.pk]),
+            {"action": "sync_students"},
+        )
+        student_response.refresh_from_db()
+        self.assertIsNone(student_response.module_id)
+        student_case.module_responses.create(
+            title=module.title,
+            schema=student_response.schema,
+            data={"legacy_answer": "Ook behouden"},
+        )
+
+        templates[0].fields.filter(key="notitie").update(label="Gewijzigde notitie")
+        LibraryField.objects.create(
+            template=templates[0],
+            key="nieuw",
+            label="Nieuw veld",
+            field_type="short_text",
+        )
+        templates[0].version += 1
+        templates[0].save(update_fields=["version"])
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=templates[0], position=0
+        )
+        synchronize_dossier_additions_to_cases(dossier, {templates[1].pk})
+        updated_module = case.modules.get(source_template=templates[0])
+
+        reopened_case, created = start_student_case(case, student)
+        self.assertFalse(created)
+        self.assertEqual(reopened_case.module_responses.count(), 2)
+        self.assertFalse(reopened_case.module_responses.filter(module__isnull=True).exists())
+        updated_response = reopened_case.module_responses.get(module=updated_module)
+        self.assertEqual(
+            updated_response.data,
+            {"notitie": "Bestaand antwoord", "legacy_answer": "Ook behouden"},
+        )
+        self.assertEqual(
+            {field["key"] for field in updated_response.schema},
+            {"notitie", "nieuw"},
+        )
+        self.assertEqual(
+            next(field["label"] for field in updated_response.schema if field["key"] == "notitie"),
+            "Gewijzigde notitie",
+        )
+
+    def test_module_reorder_updates_student_versions_on_republish(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-REORDER")
+        modules = copy_library_dossier_to_case(dossier, case)
+        for module, template in zip(modules, templates):
+            configuration = dict(module.configuration)
+            configuration["library_change_handled_version"] = template.version
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
+        Assignment.objects.create(case=case, title="Opdracht")
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        student = get_user_model().objects.create_user("reorder-student")
+        student_case, _ = start_student_case(case, student)
+        response = student_case.module_responses.get(module=modules[0])
+        response.data = {"notitie": "Antwoord behouden"}
+        response.save(update_fields=["data"])
+
+        draft_transition = self.client.post(
+            reverse("dossier:teacher_case_transition", args=[case.pk]),
+            {"action": "draft"},
+        )
+        self.assertEqual(draft_transition.status_code, 302)
+
+        dossier.module_entries.all().delete()
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=templates[1], position=0
+        )
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=templates[0], position=1
+        )
+        synchronize_dossier_additions_to_cases(dossier, {template.pk for template in templates})
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+        self.assertEqual(len(page.context["module_changes"]), 2)
+        self.client.post(
+            reverse("dossier:teacher_removed_module_resolve", args=[case.pk, modules[1].pk]),
+            {"action": "remove"},
+        )
+        self.assertEqual(
+            list(case.modules.order_by("position").values_list("source_template_id", flat=True)),
+            [templates[1].pk, templates[0].pk],
+        )
+
+        transition = self.client.post(
+            reverse("dossier:teacher_case_transition", args=[case.pk]),
+            {"action": "publish"},
+        )
+
+        self.assertEqual(transition.status_code, 302)
+        student_case.refresh_from_db()
+        response.refresh_from_db()
+        self.assertEqual(response.data, {"notitie": "Antwoord behouden"})
+        self.assertEqual(response.position, 1)
+        self.assertEqual(
+            student_case.module_responses.get(module=modules[1]).position,
+            0,
+        )
+
     def test_returned_draft_can_resolve_removed_module_with_student_cases(self):
         dossier, _ = self.new_bundle()
         case = self.new_case("DYNAMIC-DRAFT-REMOVAL")

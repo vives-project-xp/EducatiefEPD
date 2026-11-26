@@ -93,32 +93,91 @@ def synchronize_student_case(student_case):
             changed = True
 
     modules = list(student_case.case.modules.prefetch_related("fields").all())
+    all_responses = list(student_case.module_responses.all())
     responses = {
         response.module_id: response
-        for response in student_case.module_responses.all()
+        for response in all_responses
         if response.module_id is not None
     }
+    detached_by_template = {}
+    detached_by_title = {}
+    for response in all_responses:
+        if response.module_id is not None:
+            continue
+        if response.source_template_id_snapshot is None:
+            detached_by_title.setdefault(response.title, []).append(response)
+        else:
+            detached_by_template.setdefault(
+                response.source_template_id_snapshot, []
+            ).append(response)
+    title_counts = {}
+    for module in modules:
+        title_counts[module.title] = title_counts.get(module.title, 0) + 1
+
     for module in modules:
         response = responses.get(module.id)
+        detached_responses = detached_by_template.pop(module.source_template_id, [])
+        if (
+            module.source_template_id
+            and title_counts[module.title] == 1
+        ):
+            detached_responses.extend(detached_by_title.pop(module.title, []))
+        reattached = response is None and bool(detached_responses)
         schema = module_schema(module)
         if response is None:
-            response = ModuleResponse(student_case=student_case, module=module)
-            response.hydrate_from_source()
-            response.schema = schema
-            response.data = deepcopy(module.base_data)
-            response.save()
-            changed = True
-            continue
+            if reattached:
+                response = max(detached_responses, key=lambda item: item.updated_at)
+                response.module = module
+            else:
+                response = ModuleResponse(
+                    student_case=student_case,
+                    module=module,
+                    source_template_id_snapshot=module.source_template_id,
+                )
+                response.hydrate_from_source()
+                response.schema = schema
+                response.data = deepcopy(module.base_data)
+                response.save()
+                changed = True
+                continue
+
+        if reattached:
+            data_sources = sorted(detached_responses, key=lambda item: item.updated_at)
+        else:
+            data_sources = [response]
+            data_sources.extend(
+                sorted(detached_responses, key=lambda item: item.updated_at)
+            )
+        merged_data = {}
+        for item in data_sources:
+            merged_data.update(item.data or {})
+        data_changed = merged_data != response.data
+        if data_changed:
+            response.data = merged_data
+
         source_values = (module.title, module.kind, module.instructions, module.position, schema)
         current_values = (
             response.title, response.kind, response.instructions, response.position, response.schema
         )
-        if source_values != current_values:
+        if (
+            reattached
+            or data_changed
+            or response.source_template_id_snapshot != module.source_template_id
+            or source_values != current_values
+        ):
             response.hydrate_from_source()
             response.schema = schema
+            response.source_template_id_snapshot = module.source_template_id
             response.save(update_fields=[
-                "title", "kind", "instructions", "position", "schema", "updated_at"
+                "module", "source_template_id_snapshot", "title", "kind", "instructions",
+                "position", "schema", "data", "updated_at",
             ])
+            changed = True
+        duplicate_ids = [
+            item.pk for item in detached_responses if item.pk != response.pk
+        ]
+        if duplicate_ids:
+            ModuleResponse.objects.filter(pk__in=duplicate_ids).delete()
             changed = True
     return changed
 
@@ -145,7 +204,11 @@ def start_student_case(case, student):
             submission.save()
 
         for module in case.modules.prefetch_related("fields").all():
-            response = ModuleResponse(student_case=student_case, module=module)
+            response = ModuleResponse(
+                student_case=student_case,
+                module=module,
+                source_template_id_snapshot=module.source_template_id,
+            )
             response.hydrate_from_source()
             response.schema = module_schema(module)
             response.data = deepcopy(module.base_data)
@@ -221,7 +284,10 @@ def synchronize_module_to_students(module):
 
 @transaction.atomic
 def detach_module_responses(module):
-    ModuleResponse.objects.filter(module=module).update(module=None)
+    ModuleResponse.objects.filter(module=module).update(
+        module=None,
+        source_template_id_snapshot=module.source_template_id,
+    )
 
 
 @transaction.atomic
@@ -321,6 +387,9 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
                     configuration["library_dossier_module_removed"] = True
                     if membership_changed:
                         configuration.pop("library_removal_handled", None)
+                    configuration.pop("library_dossier_order_changed", None)
+                    configuration.pop("library_dossier_pending_position", None)
+                    configuration.pop("library_dossier_order_handled_position", None)
                 else:
                     configuration.pop("library_dossier_module_removed", None)
                     configuration.pop("library_removal_handled", None)
@@ -344,7 +413,65 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
             module.source_template_version = max(entry.template.version - 1, 0)
             module.save(update_fields=["source_template_version"])
             added_modules += 1
+
+        modules_by_template = {
+            module.source_template_id: module
+            for module in case.modules.all()
+            if (
+                str((module.configuration or {}).get("source_library_dossier_id"))
+                == str(dossier.pk)
+                and module.source_template_id in current_template_ids
+            )
+        }
+        ordered_modules = [
+            modules_by_template[entry.template_id]
+            for entry in entries
+            if entry.template_id in modules_by_template
+        ]
+        position_slots = sorted(module.position for module in ordered_modules)
+        for module, position in zip(ordered_modules, position_slots):
+            configuration = dict(module.configuration or {})
+            if module.position == position:
+                configuration.pop("library_dossier_order_changed", None)
+                configuration.pop("library_dossier_pending_position", None)
+                configuration.pop("library_dossier_order_handled_position", None)
+            elif configuration.get("library_dossier_order_handled_position") != position:
+                configuration["library_dossier_order_changed"] = True
+                configuration["library_dossier_pending_position"] = position
+                configuration.pop("library_dossier_order_handled_position", None)
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
     return added_modules
+
+
+@transaction.atomic
+def resolve_dossier_module_order(case, dossier_id, apply):
+    modules = case.modules.select_for_update().filter(
+        Q(configuration__source_library_dossier_id=dossier_id)
+        | Q(configuration__source_library_dossier_id=str(dossier_id))
+    )
+    updated_modules = []
+    for module in modules:
+        configuration = dict(module.configuration or {})
+        if not configuration.get("library_dossier_order_changed"):
+            continue
+        position = configuration.get("library_dossier_pending_position")
+        if not isinstance(position, int):
+            continue
+        if apply:
+            module.position = position
+            configuration.pop("library_dossier_order_handled_position", None)
+        else:
+            configuration["library_dossier_order_handled_position"] = position
+        configuration.pop("library_dossier_order_changed", None)
+        configuration.pop("library_dossier_pending_position", None)
+        module.configuration = configuration
+        update_fields = ["configuration"]
+        if apply:
+            update_fields.append("position")
+            updated_modules.append(module)
+        module.save(update_fields=update_fields)
+    return updated_modules
 
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
