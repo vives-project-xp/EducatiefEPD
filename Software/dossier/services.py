@@ -11,6 +11,7 @@ from .models import (
     LibraryDossier,
     LibraryTemplate,
     CaseFunctionSnapshot,
+    ManagedForm,
     Module,
     ModuleField,
     ModuleResponse,
@@ -131,7 +132,10 @@ def build_sidebar_structure(module_responses, query=""):
     query = query.casefold()
     structure = []
     for response in module_responses:
-        snapshots = list(response.module.function_snapshots.all()) if response.module else []
+        snapshots = (
+            [snapshot for snapshot in response.module.function_snapshots.all() if snapshot.active]
+            if response.module else []
+        )
         functions = []
         for snapshot in snapshots:
             definition = snapshot.definition or {}
@@ -441,6 +445,58 @@ def synchronize_template_module(template, module):
     return _synchronize_template_module(template, module)
 
 
+def _function_snapshot_values(link):
+    return {
+        "source_function_id": link.function_id,
+        "title": link.function.title,
+        "kind": link.function.kind,
+        "position": link.position,
+        "definition": {
+            "title": link.function.title,
+            "kind": link.function.kind,
+            "forms": [
+                {
+                    "id": form.id,
+                    "title": form.title,
+                    "position": form.position,
+                    "questions": [
+                        {
+                            "id": question.id,
+                            "fieldType": question.field_type,
+                            "question": question.question,
+                            "unit": question.unit,
+                            "required": question.required,
+                            "options": question.options,
+                            "columns": question.columns,
+                            "rows": question.rows,
+                            "matrixDefinition": deepcopy(question.matrix_definition) or (
+                                legacy_definition(question.rows, question.columns)
+                                if question.field_type == "matrix" else {}
+                            ),
+                            "url": question.url,
+                            "buttonText": question.button_text,
+                            "image": question.image,
+                            "caption": question.caption,
+                            "explanation": question.explanation,
+                            "position": question.position,
+                        }
+                        for question in form.questions.all()
+                    ],
+                }
+                for form in link.function.forms.all()
+            ],
+        },
+    }
+
+
+def _template_function_links(template):
+    return list(
+        template.function_links.filter(function__deleted_at__isnull=True)
+        .select_related("function")
+        .prefetch_related("function__forms__questions")
+    )
+
+
 @transaction.atomic
 def synchronize_module_to_students(module):
     for student_case in module.case.student_cases.select_for_update().all():
@@ -476,11 +532,6 @@ def copy_template_to_case(template, case, source_dossier=None):
     )
     existing = case.modules.filter(source_template=template).first()
     if existing:
-        if (
-            case.status == Case.Status.DRAFT
-            and existing.source_template_version != template.version
-        ):
-            _synchronize_template_module(template, existing, list(template.fields.all()))
         return existing
     fields = list(template.fields.all())
     last_position = case.modules.order_by("-position").values_list("position", flat=True).first()
@@ -514,55 +565,82 @@ def copy_template_to_case(template, case, source_dossier=None):
 def snapshot_template_functions(module, template):
     if module.function_snapshots.exists():
         return
-    function_links = list(
-        template.function_links.filter(function__deleted_at__isnull=True)
-        .select_related("function")
-        .prefetch_related("function__forms__questions")
-    )
     CaseFunctionSnapshot.objects.bulk_create([
-        CaseFunctionSnapshot(
-            module=module,
-            title=link.function.title,
-            kind=link.function.kind,
-            position=link.position,
-            definition={
-                "title": link.function.title,
-                "kind": link.function.kind,
-                "forms": [
-                    {
-                        "id": form.id,
-                        "title": form.title,
-                        "position": form.position,
-                        "questions": [
-                            {
-                                "id": question.id,
-                                "fieldType": question.field_type,
-                                "question": question.question,
-                                "unit": question.unit,
-                                "required": question.required,
-                                "options": question.options,
-                                "columns": question.columns,
-                                "rows": question.rows,
-                                "matrixDefinition": deepcopy(question.matrix_definition) or (
-                                    legacy_definition(question.rows, question.columns)
-                                    if question.field_type == "matrix" else {}
-                                ),
-                                "url": question.url,
-                                "buttonText": question.button_text,
-                                "image": question.image,
-                                "caption": question.caption,
-                                "explanation": question.explanation,
-                                "position": question.position,
-                            }
-                            for question in form.questions.all()
-                        ],
-                    }
-                    for form in link.function.forms.all()
-                ],
-            },
-        )
-        for link in function_links
+        CaseFunctionSnapshot(module=module, **_function_snapshot_values(link))
+        for link in _template_function_links(template)
     ])
+
+
+@transaction.atomic
+def synchronize_template_function_snapshots(template, module):
+    links = _template_function_links(template)
+    live_function_ids = {link.function_id for link in links}
+    all_snapshots = list(module.function_snapshots.all())
+    active_snapshots = [snapshot for snapshot in all_snapshots if snapshot.active]
+    legacy_form_ids = {
+        int(form["id"])
+        for snapshot in active_snapshots
+        for form in (snapshot.definition or {}).get("forms", [])
+        if isinstance(form, dict) and str(form.get("id", "")).isdigit()
+    }
+    form_owners = dict(
+        ManagedForm.objects.filter(id__in=legacy_form_ids).values_list("id", "function_id")
+    )
+    existing_function_ids = set()
+    inactive_by_function_id = {}
+
+    for snapshot in active_snapshots:
+        source_function_id = snapshot.source_function_id
+        source_id_was_missing = source_function_id is None
+        if source_function_id is None:
+            form_function_ids = {
+                form_owners[int(form["id"])]
+                for form in (snapshot.definition or {}).get("forms", [])
+                if isinstance(form, dict)
+                and str(form.get("id", "")).isdigit()
+                and int(form["id"]) in form_owners
+            }
+            if len(form_function_ids) == 1:
+                source_function_id = form_function_ids.pop()
+                snapshot.source_function_id = source_function_id
+
+        if source_function_id not in live_function_ids:
+            snapshot.active = False
+            snapshot.save(update_fields=["source_function_id", "active"])
+            continue
+
+        existing_function_ids.add(source_function_id)
+        link = next(item for item in links if item.function_id == source_function_id)
+        if snapshot.position != link.position or source_id_was_missing:
+            snapshot.position = link.position
+            snapshot.save(update_fields=["source_function_id", "position"])
+
+    for snapshot in all_snapshots:
+        if not snapshot.active and snapshot.source_function_id is not None:
+            inactive_by_function_id.setdefault(snapshot.source_function_id, []).append(snapshot)
+
+    new_snapshots = []
+    for link in links:
+        if link.function_id in existing_function_ids:
+            continue
+        values = _function_snapshot_values(link)
+        previous = inactive_by_function_id.get(link.function_id, [])
+        reusable = next((
+            snapshot for snapshot in reversed(previous)
+            if (
+                snapshot.title == values["title"]
+                and snapshot.kind == values["kind"]
+                and snapshot.definition == values["definition"]
+            )
+        ), None)
+        if reusable:
+            reusable.active = True
+            reusable.position = link.position
+            reusable.save(update_fields=["active", "position"])
+        else:
+            new_snapshots.append(CaseFunctionSnapshot(module=module, **values))
+
+    CaseFunctionSnapshot.objects.bulk_create(new_snapshots)
 
 
 @transaction.atomic

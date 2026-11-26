@@ -76,7 +76,8 @@ from .services import (
     ensure_default_templates, module_schema, sync_student_module_response,
     start_student_case, clean_html,
     remove_module_from_students, synchronize_module_to_students,
-    synchronize_template_module, synchronize_dossier_additions_to_cases,
+    synchronize_template_module, synchronize_template_function_snapshots,
+    synchronize_dossier_additions_to_cases,
 )
 
 logger = logging.getLogger(__name__)
@@ -621,7 +622,9 @@ def save_form(request):
     if is_teacher(request.user):
         module = get_object_or_404(Module.objects.prefetch_related("function_snapshots"), pk=module_id)
         editable_case(request.user, module.case_id)
-        if function_id is not None and not module.function_snapshots.filter(pk=function_id).exists():
+        if function_id is not None and not module.function_snapshots.filter(
+            pk=function_id, active=True
+        ).exists():
             return JsonResponse({"error": "Het formulier behoort niet tot dit dossieronderdeel."}, status=403)
         data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
         if form_key == "module":
@@ -842,7 +845,10 @@ def dossier(request, case_id):
     if selected is None and modules:
         selected = next((item for item in modules if item.id in visible_ids), modules[0])
     selected_snapshots = (
-        selected.module.function_snapshots.all()
+        [
+            snapshot for snapshot in selected.module.function_snapshots.all()
+            if snapshot.active
+        ]
         if selected and selected.module else []
     )
     function_id = request.POST.get("function") or request.GET.get("function")
@@ -1061,6 +1067,33 @@ def teacher_case_edit(request, case_id):
     })
 
 
+def library_function_changes(module):
+    template = module.source_template
+    if template is None:
+        return [], []
+    live_links = list(
+        template.function_links.filter(function__deleted_at__isnull=True)
+        .select_related("function")
+    )
+    active_snapshots = list(module.function_snapshots.filter(active=True))
+    live_ids = {link.function_id for link in live_links}
+    snapshot_ids = {
+        snapshot.source_function_id
+        for snapshot in active_snapshots
+        if snapshot.source_function_id is not None
+    }
+    added = [
+        link.function.title for link in live_links
+        if link.function_id not in snapshot_ids
+    ]
+    removed = [
+        snapshot.title for snapshot in active_snapshots
+        if snapshot.source_function_id is not None
+        and snapshot.source_function_id not in live_ids
+    ]
+    return added, removed
+
+
 @login_required
 def teacher_case(request, case_id):
     require_teacher(request.user)
@@ -1178,6 +1211,15 @@ def teacher_case(request, case_id):
             or module.configuration.get("library_dossier_module_removed")
         )
 
+    draft_added_functions, draft_removed_functions = (
+        library_function_changes(draft_module_change)
+        if draft_module_change else ([], [])
+    )
+    published_added_functions, published_removed_functions = (
+        library_function_changes(published_module_change)
+        if published_module_change else ([], [])
+    )
+
     return render(request, "dossier/teacher_case.html", {
         "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
@@ -1192,6 +1234,10 @@ def teacher_case(request, case_id):
             published_module_change is not None
             and module_change_is_removal(published_module_change)
         ),
+        "draft_added_functions": draft_added_functions,
+        "draft_removed_functions": draft_removed_functions,
+        "published_added_functions": published_added_functions,
+        "published_removed_functions": published_removed_functions,
         "case_modules": case_modules,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
@@ -1508,7 +1554,10 @@ def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
     module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
-    function_snapshots = list(module.function_snapshots.all())
+    function_snapshots = [
+        snapshot for snapshot in module.function_snapshots.all()
+        if snapshot.active
+    ]
     function_id = request.POST.get("function") or request.GET.get("function")
     try:
         selected_function_id = int(function_id) if function_id else None
@@ -1635,12 +1684,17 @@ def teacher_removed_module_resolve(request, case_id, module_id):
             configuration["library_change_handled_version"] = template.version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
+        audit(
+            request, "library.change_denied", module,
+            version=template.version if template else None,
+        )
         messages.success(request, "De module blijft behouden in de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
     if action != "remove":
         raise PermissionDenied
     if template_updated and not dossier_module_removed:
         synchronize_template_module(template, module)
+        synchronize_template_function_snapshots(template, module)
         messages.success(request, "De bibliotheekwijziging is toegepast op de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
     if case.student_cases.exists():
@@ -1691,6 +1745,10 @@ def teacher_published_module_resolve(request, case_id, module_id):
             configuration["library_change_handled_version"] = template.version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
+        audit(
+            request, "library.change_denied", module,
+            version=template.version if template else None,
+        )
         messages.success(request, "De wijziging blijft alleen in de bibliotheek staan.")
         return redirect("dossier:teacher_case", case_id=case.id)
     if action not in {"accept", "sync_students"}:
@@ -1703,6 +1761,7 @@ def teacher_published_module_resolve(request, case_id, module_id):
         messages.success(request, "De verwijderde module is uit de gepubliceerde casus verwijderd.")
     else:
         synchronize_template_module(template, module)
+        synchronize_template_function_snapshots(template, module)
         if action == "sync_students":
             synchronize_module_to_students(module)
         messages.success(request, "De bibliotheekwijziging is toegepast op de gepubliceerde casus.")
@@ -2196,6 +2255,14 @@ def function_action(request, function_id):
     if action == "delete":
         function.deleted_at = timezone.now()
         function.save(update_fields=["deleted_at"])
+        linked_templates = list(
+            LibraryTemplate.objects.select_for_update()
+            .filter(function_links__function=function)
+            .distinct()
+        )
+        for template in linked_templates:
+            template.version += 1
+            template.save(update_fields=["version", "updated_at"])
         LibraryTemplateFunction.objects.filter(function=function).delete()
         audit(request, "function.deleted", function)
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})

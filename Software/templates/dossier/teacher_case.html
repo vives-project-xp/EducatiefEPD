@@ -70,6 +70,12 @@
           De module <strong>{{ draft_module_change.title }}</strong> is gewijzigd.
           Kies welke versie je wilt behouden voor deze casus.
         </p>
+        {% if draft_added_functions %}
+          <p>Functie(s) toegevoegd: {% for title in draft_added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if draft_removed_functions %}
+          <p>Functie(s) verwijderd: {% for title in draft_removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
         <div class="library-removal-actions">
           <form method="post" action="{% url 'dossier:teacher_removed_module_resolve' case.id draft_module_change.id %}">
             {% csrf_token %}
@@ -99,6 +105,12 @@
           De module <strong>{{ published_module_change.title }}</strong> is gewijzigd.
           Kies welke versie je wilt behouden voor de gepubliceerde casus en studentversies.
         </p>
+        {% if published_added_functions %}
+          <p>Functie(s) toegevoegd: {% for title in published_added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if published_removed_functions %}
+          <p>Functie(s) verwijderd: {% for title in published_removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
         <div class="library-removal-actions">
           <form method="post" action="{% url 'dossier:teacher_published_module_resolve' case.id published_module_change.id %}">
             {% csrf_token %}

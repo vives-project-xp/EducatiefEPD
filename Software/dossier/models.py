@@ -389,6 +389,8 @@ class CaseFunctionSnapshot(models.Model):
     module = models.ForeignKey(
         Module, on_delete=models.CASCADE, related_name="function_snapshots"
     )
+    source_function_id = models.PositiveIntegerField(null=True, blank=True)
+    active = models.BooleanField(default=True)
     title = models.CharField(max_length=180)
     kind = models.CharField(max_length=16)
     position = models.PositiveIntegerField(default=0)
