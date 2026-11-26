@@ -118,6 +118,9 @@ class DynamicCaseTests(TestCase):
         dossier, templates = self.new_bundle()
         case = self.new_case("DYNAMIC-CHANGES")
         copy_library_dossier_to_case(dossier, case)
+        for template in templates:
+            template.version += 1
+            template.save(update_fields=["version"])
 
         page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
 
