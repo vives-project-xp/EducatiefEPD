@@ -17,6 +17,11 @@ from .models import (
     StudentCase,
 )
 
+STUDENT_BASE_DATA_VERSION = "student_base_data_version"
+STUDENT_BASE_DATA_HANDLED_VERSION = "student_base_data_handled_version"
+STUDENT_BASE_DATA_APPROVED_VERSION = "student_base_data_approved_version"
+STUDENT_BASE_DATA_APPLIED_VERSION = "student_base_data_applied_version"
+
 
 def client_ip(request):
     forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
@@ -65,11 +70,35 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def pending_student_base_data_version(configuration):
+    version = configuration.get(STUDENT_BASE_DATA_VERSION)
+    if type(version) is int and version > 0 and configuration.get(
+        STUDENT_BASE_DATA_HANDLED_VERSION
+    ) != version:
+        return version
+    return None
+
+
+def merge_empty_values(data, defaults):
+    if isinstance(data, dict) and isinstance(defaults, dict):
+        merged = deepcopy(data)
+        for key, default in defaults.items():
+            if key in merged:
+                merged[key] = merge_empty_values(merged[key], default)
+            else:
+                merged[key] = deepcopy(default)
+        return merged
+    if data is None or data == "" or data == []:
+        return deepcopy(defaults)
+    return data
+
+
 @transaction.atomic
-def synchronize_student_case(student_case):
+def synchronize_student_case(student_case, *, base_data_module_ids=None):
     if student_case.locked:
         return False
 
+    base_data_module_ids = set(base_data_module_ids or ())
     changed = False
     assignments = list(student_case.case.assignments.all())
     submissions = {
@@ -144,13 +173,15 @@ def synchronize_student_case(student_case):
         if reattached:
             data_sources = sorted(detached_responses, key=lambda item: item.updated_at)
         else:
-            data_sources = [response]
-            data_sources.extend(
-                sorted(detached_responses, key=lambda item: item.updated_at)
+            data_sources = sorted(
+                [response, *detached_responses],
+                key=lambda item: item.updated_at,
             )
         merged_data = {}
         for item in data_sources:
             merged_data.update(item.data or {})
+        if module.pk in base_data_module_ids:
+            merged_data = merge_empty_values(merged_data, module.base_data or {})
         data_changed = merged_data != response.data
         if data_changed:
             response.data = merged_data
@@ -277,9 +308,13 @@ def synchronize_template_module(template, module):
 
 
 @transaction.atomic
-def synchronize_module_to_students(module):
+def synchronize_module_to_students(module, *, apply_base_data=False):
+    base_data_module_ids = {module.pk} if apply_base_data else set()
     for student_case in module.case.student_cases.select_for_update().all():
-        synchronize_student_case(student_case)
+        synchronize_student_case(
+            student_case,
+            base_data_module_ids=base_data_module_ids,
+        )
 
 
 @transaction.atomic

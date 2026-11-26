@@ -374,6 +374,115 @@ class DynamicCaseTests(TestCase):
             0,
         )
 
+    def test_republish_updates_empty_student_values_without_overwriting_answers(self):
+        dossier, _ = self.new_bundle()
+        case = self.new_case("DYNAMIC-EMPTY-VALUES")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        module.base_data = {"notitie": "Oude standaardwaarde"}
+        module.save(update_fields=["base_data"])
+        Assignment.objects.create(case=case, title="Opdracht")
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+
+        students = [
+            get_user_model().objects.create_user(username)
+            for username in (
+                "filled-default-student",
+                "blank-default-student",
+                "missing-default-student",
+            )
+        ]
+        student_cases = [start_student_case(case, student)[0] for student in students]
+        responses = [
+            student_case.module_responses.get(module=module)
+            for student_case in student_cases
+        ]
+        responses[0].data = {"notitie": "Studentantwoord"}
+        responses[0].save(update_fields=["data"])
+        responses[1].data = {"notitie": ""}
+        responses[1].save(update_fields=["data"])
+        responses[2].data = {}
+        responses[2].save(update_fields=["data"])
+
+        admin = get_user_model().objects.create_superuser(
+            "base-data-draft-admin", password="test-only"
+        )
+        self.client.force_login(admin)
+        self.client.post(
+            reverse("dossier:teacher_case_transition", args=[case.pk]),
+            {"action": "draft"},
+        )
+        edit_response = self.client.post(
+            reverse("dossier:teacher_module", args=[case.pk, module.pk]),
+            {"field_notitie": "Nieuwe standaardwaarde", "action": "save"},
+        )
+        self.assertRedirects(edit_response, reverse("dossier:teacher_case", args=[case.pk]))
+        self.client.post(
+            reverse("dossier:teacher_removed_module_resolve", args=[case.pk, module.pk]),
+            {"action": "remove"},
+        )
+        self.client.post(
+            reverse("dossier:teacher_case_transition", args=[case.pk]),
+            {"action": "publish"},
+        )
+
+        for response in responses:
+            response.refresh_from_db()
+        self.assertEqual(responses[0].data, {"notitie": "Studentantwoord"})
+        self.assertEqual(responses[1].data, {"notitie": "Nieuwe standaardwaarde"})
+        self.assertEqual(responses[2].data, {"notitie": "Nieuwe standaardwaarde"})
+
+    def test_published_base_data_change_prompts_and_syncs_empty_answers(self):
+        dossier, _ = self.new_bundle()
+        case = self.new_case("DYNAMIC-PUBLISHED-BASE-DATA")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        module.base_data = {"notitie": "Oude standaardwaarde"}
+        module.save(update_fields=["base_data"])
+        Assignment.objects.create(case=case, title="Opdracht")
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+
+        students = [
+            get_user_model().objects.create_user(username)
+            for username in ("base-answer-student", "base-empty-student")
+        ]
+        student_cases = [start_student_case(case, student)[0] for student in students]
+        responses = [
+            student_case.module_responses.get(module=module)
+            for student_case in student_cases
+        ]
+        responses[0].data = {"notitie": "Studentantwoord"}
+        responses[0].save(update_fields=["data"])
+        responses[1].data = {"notitie": ""}
+        responses[1].save(update_fields=["data"])
+
+        admin = get_user_model().objects.create_superuser(
+            "base-data-admin", password="test-only"
+        )
+        self.client.force_login(admin)
+        edit_response = self.client.post(
+            reverse("dossier:teacher_module", args=[case.pk, module.pk]),
+            {"field_notitie": "Nieuwe standaardwaarde", "action": "save"},
+        )
+        self.assertRedirects(edit_response, reverse("dossier:teacher_case", args=[case.pk]))
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+        self.assertContains(page, "Voorinvulling aangepast")
+        self.assertEqual(len(page.context["module_changes"]), 1)
+        responses[0].refresh_from_db()
+        responses[1].refresh_from_db()
+        self.assertEqual(responses[0].data, {"notitie": "Studentantwoord"})
+        self.assertEqual(responses[1].data, {"notitie": ""})
+
+        self.client.post(
+            reverse("dossier:teacher_published_module_resolve", args=[case.pk, module.pk]),
+            {"action": "sync_students"},
+        )
+        responses[0].refresh_from_db()
+        responses[1].refresh_from_db()
+        self.assertEqual(responses[0].data, {"notitie": "Studentantwoord"})
+        self.assertEqual(responses[1].data, {"notitie": "Nieuwe standaardwaarde"})
+
     def test_returned_draft_can_resolve_removed_module_with_student_cases(self):
         dossier, _ = self.new_bundle()
         case = self.new_case("DYNAMIC-DRAFT-REMOVAL")

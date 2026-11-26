@@ -68,7 +68,7 @@
             <li class="library-change-item">
               <div>
                 <strong>{{ change.module.title }}</strong>
-                <span>{% if change.is_removal %}Verwijderd uit de bibliotheek{% else %}Aangepast in de bibliotheek{% endif %}</span>
+                <span>{% if change.is_removal %}Verwijderd uit de bibliotheek{% elif change.is_base_data %}Voorinvulling aangepast{% else %}Aangepast in de bibliotheek{% endif %}</span>
               </div>
               <div class="library-removal-actions">
                 {% if case.status == 'published' %}

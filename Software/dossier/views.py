@@ -66,6 +66,9 @@ from .services import (
     detach_module_responses, synchronize_module_to_students,
     synchronize_template_module, synchronize_dossier_additions_to_cases,
     resolve_dossier_module_order,
+    STUDENT_BASE_DATA_VERSION, STUDENT_BASE_DATA_HANDLED_VERSION,
+    STUDENT_BASE_DATA_APPROVED_VERSION, STUDENT_BASE_DATA_APPLIED_VERSION,
+    pending_student_base_data_version,
 )
 
 
@@ -552,7 +555,9 @@ def teacher_case(request, case_id):
             and module.source_template_version != module.source_template.version
             and configuration.get("library_change_handled_version")
             != module.source_template.version
-        ) or configuration.get("library_dossier_order_changed")
+        ) or configuration.get("library_dossier_order_changed") or (
+            pending_student_base_data_version(configuration) is not None
+        )
 
     def module_change_is_removal(module):
         return (
@@ -564,6 +569,9 @@ def teacher_case(request, case_id):
         {
             "module": module,
             "is_removal": module_change_is_removal(module),
+            "is_base_data": (
+                pending_student_base_data_version(module.configuration) is not None
+            ),
         }
         for module in case_modules
         if (
@@ -798,8 +806,30 @@ def teacher_case_transition(request, case_id):
         if has_assignments and has_modules:
             case.publish()
             case.save()
+            approved_base_data_modules = []
+            for module in case.modules.all():
+                configuration = module.configuration or {}
+                version = configuration.get(STUDENT_BASE_DATA_VERSION)
+                if (
+                    type(version) is int
+                    and version > 0
+                    and configuration.get(STUDENT_BASE_DATA_APPROVED_VERSION) == version
+                    and configuration.get(STUDENT_BASE_DATA_APPLIED_VERSION) != version
+                ):
+                    approved_base_data_modules.append((module, version))
+            base_data_module_ids = {
+                module.pk for module, _ in approved_base_data_modules
+            }
             for student_case in case.student_cases.all():
-                synchronize_student_case(student_case)
+                synchronize_student_case(
+                    student_case,
+                    base_data_module_ids=base_data_module_ids,
+                )
+            for module, version in approved_base_data_modules:
+                configuration = dict(module.configuration or {})
+                configuration[STUDENT_BASE_DATA_APPLIED_VERSION] = version
+                module.configuration = configuration
+                module.save(update_fields=["configuration"])
             audit(request, "case.published", case)
             messages.success(request, "Casus gepubliceerd voor studenten.")
     elif action == "archive":
@@ -906,9 +936,25 @@ def teacher_module(request, case_id, module_id):
         if form_result.errors:
             messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         else:
+            base_data_changed = module.base_data != form_result.data
             module.base_data = form_result.data
-            module.save(update_fields=["base_data"])
+            update_fields = ["base_data"]
+            has_active_students = case.student_cases.filter(
+                status=StudentCase.Status.ACTIVE
+            ).exists()
+            if base_data_changed and has_active_students:
+                configuration = dict(module.configuration or {})
+                version = configuration.get(STUDENT_BASE_DATA_VERSION, 0)
+                if type(version) is not int or version < 0:
+                    version = 0
+                configuration[STUDENT_BASE_DATA_VERSION] = version + 1
+                module.configuration = configuration
+                update_fields.append("configuration")
+            module.save(update_fields=update_fields)
             audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
+            if base_data_changed and has_active_students:
+                messages.success(request, "Basisdossier bijgewerkt. Kies in de casus of studentversies de nieuwe voorinvulling krijgen.")
+                return redirect("dossier:teacher_case", case_id=case.id)
             messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
             return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
     return render(request, "dossier/teacher_base_module.html", {
@@ -953,9 +999,11 @@ def teacher_removed_module_resolve(request, case_id, module_id):
     )
     dossier_module_removed = module.configuration.get("library_dossier_module_removed")
     order_changed = module.configuration.get("library_dossier_order_changed")
+    base_data_version = pending_student_base_data_version(module.configuration)
+    base_data_updated = base_data_version is not None
     if not (
         template_removed or dossier_removed or dossier_module_removed
-        or template_updated or order_changed
+        or template_updated or order_changed or base_data_updated
     ):
         raise PermissionDenied
     if action == "keep":
@@ -964,6 +1012,8 @@ def teacher_removed_module_resolve(request, case_id, module_id):
             configuration["library_removal_handled"] = True
         if template_updated:
             configuration["library_change_handled_version"] = template.version
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
         if order_changed:
@@ -972,12 +1022,27 @@ def teacher_removed_module_resolve(request, case_id, module_id):
         return redirect("dossier:teacher_case", case_id=case.id)
     if action != "remove":
         raise PermissionDenied
+    if base_data_updated and not (
+        template_removed or dossier_removed or dossier_module_removed
+    ):
+        configuration = dict(module.configuration or {})
+        configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
+        configuration[STUDENT_BASE_DATA_APPROVED_VERSION] = base_data_version
+        module.configuration = configuration
+        module.save(update_fields=["configuration"])
     if template_updated and not dossier_module_removed:
         synchronize_template_module(template, module)
     if order_changed:
         resolve_dossier_module_order(case, source_dossier_id, apply=True)
-    if (template_updated and not dossier_module_removed) or order_changed:
-        messages.success(request, "De bibliotheekwijziging is toegepast op de casus.")
+    if (
+        (template_updated and not dossier_module_removed)
+        or order_changed
+        or (
+            base_data_updated
+            and not (template_removed or dossier_removed or dossier_module_removed)
+        )
+    ):
+        messages.success(request, "De wijziging is toegepast op de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "module.deleted", module, title=module.title)
     module.delete()
@@ -1014,9 +1079,11 @@ def teacher_published_module_resolve(request, case_id, module_id):
     )
     dossier_module_removed = configuration.get("library_dossier_module_removed")
     order_changed = configuration.get("library_dossier_order_changed")
+    base_data_version = pending_student_base_data_version(configuration)
+    base_data_updated = base_data_version is not None
     if not (
         template_removed or dossier_removed or dossier_module_removed
-        or template_updated or order_changed
+        or template_updated or order_changed or base_data_updated
     ):
         raise PermissionDenied
     if action == "keep":
@@ -1024,6 +1091,8 @@ def teacher_published_module_resolve(request, case_id, module_id):
             configuration["library_removal_handled"] = True
         if template_updated:
             configuration["library_change_handled_version"] = template.version
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
         if order_changed:
@@ -1039,6 +1108,11 @@ def teacher_published_module_resolve(request, case_id, module_id):
         module.delete()
         messages.success(request, "De verwijderde module is uit de gepubliceerde casus verwijderd.")
     else:
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
+            configuration[STUDENT_BASE_DATA_APPROVED_VERSION] = base_data_version
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
         if template_updated:
             synchronize_template_module(template, module)
         ordered_modules = (
@@ -1047,13 +1121,21 @@ def teacher_published_module_resolve(request, case_id, module_id):
         )
         if action == "sync_students":
             modules_to_sync = {
-                item.pk: item for item in ordered_modules
+                item.pk: (item, False) for item in ordered_modules
             }
-            if template_updated:
-                modules_to_sync[module.pk] = module
-            for updated_module in modules_to_sync.values():
-                synchronize_module_to_students(updated_module)
-        messages.success(request, "De bibliotheekwijziging is toegepast op de gepubliceerde casus.")
+            if template_updated or base_data_updated:
+                modules_to_sync[module.pk] = (module, base_data_updated)
+            for updated_module, apply_base_data in modules_to_sync.values():
+                synchronize_module_to_students(
+                    updated_module,
+                    apply_base_data=apply_base_data,
+                )
+            if base_data_updated:
+                configuration = dict(module.configuration or {})
+                configuration[STUDENT_BASE_DATA_APPLIED_VERSION] = base_data_version
+                module.configuration = configuration
+                module.save(update_fields=["configuration"])
+        messages.success(request, "De wijziging is toegepast op de gepubliceerde casus.")
     return redirect("dossier:teacher_case", case_id=case.id)
 
 
