@@ -2537,6 +2537,10 @@ def function_action(request, function_id):
             warning=True,
         )
     if action == "delete":
+        query = payload.get("query", "")
+        if not isinstance(query, str):
+            return function_api_error("Ongeldige aanvraag.")
+        query = query.strip()
         function.deleted_at = timezone.now()
         function.save(update_fields=["deleted_at"])
         linked_templates = list(
@@ -2549,7 +2553,21 @@ def function_action(request, function_id):
             template.save(update_fields=["version", "updated_at"])
         LibraryTemplateFunction.objects.filter(function=function).delete()
         audit(request, "function.deleted", function)
-        return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})
+        active_functions = FunctionDefinition.objects.filter(deleted_at__isnull=True)
+        if query:
+            active_functions = active_functions.filter(title__icontains=query)
+        return JsonResponse({
+            "ok": True,
+            "activeCount": active_functions.count(),
+            "deletedCount": FunctionDefinition.objects.filter(
+                deleted_at__isnull=False, std=False
+            ).count(),
+            "redirect": (
+                f"{reverse('dossier:library_list')}"
+                "?manage_functions=1#function-management"
+            ),
+            "message": "Functie verplaatst naar Recent verwijderd",
+        })
     if action == "rename":
         title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
         if not title or len(title) > 180:

@@ -438,10 +438,49 @@ class EpdWorkflowTests(TestCase):
             with self.subTest(path=path):
                 self.assertContains(self.client.get(path), return_link)
 
+    def test_deleting_function_from_embedded_list_returns_to_open_library_section(self):
+        self.client.force_login(self.teacher)
+        function = FunctionDefinition.objects.create(
+            title="Te verwijderen functie", kind=FunctionDefinition.Kind.GROUP
+        )
+        library_url = reverse("dossier:library_list")
+        list_page = self.client.get(library_url, {
+            "manage_functions": "1",
+            "function_q": function.title,
+        })
+        self.assertContains(list_page, function.title)
+
+        deleted = self.client.post(
+            reverse("dossier:function_action", args=[function.id]),
+            json.dumps({"action": "delete", "query": function.title}),
+            content_type="application/json",
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["activeCount"], 0)
+        self.assertEqual(deleted.json()["deletedCount"], 1)
+        self.assertEqual(
+            deleted.json()["redirect"],
+            f"{library_url}?manage_functions=1#function-management",
+        )
+
+        refreshed_page = self.client.get(library_url, {
+            "manage_functions": "1",
+            "function_q": function.title,
+        })
+        self.assertContains(
+            refreshed_page,
+            'id="function-management" class="library-component-management-details" open',
+        )
+        self.assertNotContains(
+            refreshed_page, f'aria-label="Verwijderen: {function.title}"'
+        )
+
     def test_teacher_entry_and_creation_wizard_create_empty_records(self):
         self.client.login(username="teacher", password="testpass")
         library = self.client.get(reverse("dossier:library_list"))
         self.assertContains(library, "Functies beheren")
+        self.assertContains(library, "Modulebeheer")
+        self.assertContains(library, "Functiebeheer")
         self.assertNotContains(library, "Functie beheer</a>")
         self.assertNotContains(library, 'href="/bibliotheek/functies-beheer/">')
         self.assertEqual(FunctionDefinition.objects.count(), 0)

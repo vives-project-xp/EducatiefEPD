@@ -2,7 +2,7 @@
 {% load static %}
 {% block title %}Functies beheer | Educatief EPD{% endblock %}
 {% block content %}
-<main class="teacher-shell function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}">
+<main class="teacher-shell function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}" data-page-param="{{ function_page_param }}" data-page-number="{{ page.number }}" data-page-size="{{ page_size }}" data-total-count="{{ paginator.count }}" data-query="{{ query }}">
   <header class="page-bar">
     <div>
       <p class="eyebrow">Bibliotheek</p>

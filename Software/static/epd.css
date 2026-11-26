@@ -3999,18 +3999,17 @@ summary {
 
 }
 
+.library-component-management {
+  display: grid;
+  gap: 16px;
+}
+
 .library-component-management-details {
-  margin-top: 0;
-}
-
-.library-management-eyebrow {
-  margin-bottom: 12px;
-}
-
-.library-component-management-details + .library-component-management-details {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+  margin: 0;
+  padding: 16px 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
 }
 
 .library-component-management-details>summary {
@@ -4039,6 +4038,10 @@ summary {
 .library-component-management-details>summary>span:first-child {
   display: grid;
   gap: 4px;
+}
+
+.library-component-management-details>summary .eyebrow {
+  margin: 0;
 }
 
 .library-component-management-details>summary strong {

@@ -85,11 +85,10 @@
       {% endfor %}
     </div>
   </section>
-  <section class="editor-section library-component-management">
-    <p class="eyebrow library-management-eyebrow">Bibliotheekbeheer</p>
+  <section class="library-component-management">
     <details class="library-component-management-details" {% if component_filters_active %}open{% endif %}>
       <summary>
-        <span><strong>Beschikbare onderdelen beheren</strong></span>
+        <span><span class="eyebrow">Modulebeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
         <span class="library-toggle-arrow" aria-hidden="true">↓</span>
       </summary>
       <div class="section-heading">
@@ -134,10 +133,10 @@
     </details>
     <details id="function-management" class="library-component-management-details" {% if expand_function_management %}open{% endif %}>
       <summary>
-        <span><strong>Functies beheren</strong></span>
+        <span><span class="eyebrow">Functiebeheer</span><strong>Functies beheren</strong></span>
         <span class="library-toggle-arrow" aria-hidden="true">↓</span>
       </summary>
-      <div class="function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}" data-embedded-functions="true">
+      <div class="function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}" data-page-param="{{ function_page_param }}" data-page-number="{{ page.number }}" data-page-size="{{ page_size }}" data-total-count="{{ paginator.count }}" data-query="{{ query }}" data-embedded-functions="true">
         {% include "dossier/_function_management_toolbar.html" %}
         {% include "dossier/_function_management_list.html" %}
       </div>

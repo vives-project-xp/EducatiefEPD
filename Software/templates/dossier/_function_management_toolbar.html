@@ -5,7 +5,7 @@
     </select>
   </label>
   {% if paginator.count %}
-  <span>{{ page.start_index }}–{{ page.end_index }} van {{ paginator.count }}</span>
+  <span data-function-count>{{ page.start_index }}–{{ page.end_index }} van {{ paginator.count }}</span>
   {% endif %}
 </div>
 <form id="function-pagination-form" method="get" hidden>

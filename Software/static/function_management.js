@@ -92,6 +92,86 @@
   }
 
   function initList() {
+    function pageUrl(pageNumber) {
+      const url = new URL(window.location.href);
+      url.searchParams.set(root.dataset.pageParam || "page", String(pageNumber));
+      if (root.dataset.embeddedFunctions === "true") {
+        url.searchParams.set("manage_functions", "1");
+        url.hash = "function-management";
+      }
+      return url.href;
+    }
+
+    function updateAfterDelete(button, result) {
+      const row = button.closest("[data-function-row]");
+      if (!row) throw new Error("De functie kon niet uit de lijst worden verwijderd.");
+      row.remove();
+
+      const activeCount = Number(result.activeCount);
+      const deletedCount = Number(result.deletedCount);
+      const pageNumber = Number(root.dataset.pageNumber);
+      const pageSize = Number(root.dataset.pageSize);
+      if (
+        !Number.isInteger(activeCount) || activeCount < 0
+        || !Number.isInteger(deletedCount) || deletedCount < 0
+        || !Number.isInteger(pageNumber) || pageNumber < 1
+        || !Number.isInteger(pageSize) || pageSize < 1
+      ) {
+        throw new Error("De bijgewerkte functielijst kon niet worden weergegeven.");
+      }
+
+      root.dataset.totalCount = String(activeCount);
+      const list = root.querySelector("[data-function-list]");
+      const rows = [...list.querySelectorAll("[data-function-row]")];
+      const totalPages = Math.ceil(activeCount / pageSize);
+      if (!rows.length) {
+        const emptyMessage = activeCount === 0
+          ? (root.dataset.query
+            ? "Geen functies gevonden."
+            : "Er zijn nog geen functies. Maak een functie aan om te beginnen.")
+          : "De laatste functie op deze pagina is verwijderd. Gebruik Vorige om verder te bladeren.";
+        list.replaceChildren(node("p", "empty-state", emptyMessage));
+      }
+
+      const count = root.querySelector("[data-function-count]");
+      if (count) {
+        count.hidden = activeCount === 0 || pageNumber > totalPages;
+        if (!count.hidden) {
+          const firstIndex = (pageNumber - 1) * pageSize + 1;
+          const lastIndex = Math.min(firstIndex + rows.length - 1, activeCount);
+          count.textContent = `${firstIndex}–${lastIndex} van ${activeCount}`;
+        }
+      }
+
+      const deletedCountNode = root.querySelector("[data-deleted-count]");
+      if (deletedCountNode) {
+        deletedCountNode.textContent = deletedCount ? ` (${deletedCount})` : "";
+      }
+
+      const pagination = root.querySelector("[data-function-pagination]");
+      if (pagination) {
+        const previous = pagination.querySelector('[data-function-page-link="previous"]');
+        const next = pagination.querySelector('[data-function-page-link="next"]');
+        const hasPrevious = pageNumber > 1;
+        const hasNext = pageNumber < totalPages;
+        if (previous) {
+          previous.hidden = !hasPrevious;
+          if (hasPrevious) previous.href = pageUrl(pageNumber - 1);
+        }
+        if (next) {
+          next.hidden = !hasNext;
+          if (hasNext) next.href = pageUrl(pageNumber + 1);
+        }
+        const pageInfo = pagination.querySelector("[data-function-page-info]");
+        if (pageInfo) {
+          pageInfo.textContent = pageNumber > totalPages
+            ? "Geen functies op deze pagina"
+            : `Pagina ${pageNumber} van ${totalPages}`;
+        }
+        pagination.hidden = !hasPrevious && !hasNext;
+      }
+    }
+
     root.querySelector("[data-page-size]")?.addEventListener("change", (event) => {
       event.currentTarget.form.submit();
     });
@@ -126,9 +206,12 @@
       button.addEventListener("click", async () => {
         if (!await confirm(`Functie \u201c${button.dataset.title}\u201d verwijderen? Je kunt de functie 30 dagen herstellen via Recent verwijderd.`, "Verwijderen")) return;
         try {
-          const result = await post(button.dataset.url, { action: "delete" });
+          const result = await post(button.dataset.url, {
+            action: "delete",
+            query: root.dataset.query,
+          });
+          updateAfterDelete(button, result);
           toast(result.message);
-          window.setTimeout(() => window.location.assign(result.redirect), 1000);
         } catch (error) { toast(error.message, error.warning); }
       });
     });

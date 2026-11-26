@@ -118,6 +118,10 @@ class MergeRecoveryTests(TestCase):
 
         response = self.post_json("function_action", {"action": "delete"}, [self.function.pk])
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["redirect"],
+            f"{reverse('dossier:library_list')}?manage_functions=1#function-management",
+        )
         self.function.refresh_from_db()
         self.assertIsNotNone(self.function.deleted_at)
         self.assertFalse(LibraryTemplateFunction.objects.filter(

@@ -15,7 +15,7 @@
       </form>
       <a class="outline button" href="{% url 'dossier:function_deleted' %}">
         <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 3v7l4 2M17 10a7 7 0 1 1-2-4.95"/></svg>
-        Recent verwijderd{% if deleted_count %} ({{ deleted_count }}){% endif %}
+        Recent verwijderd<span data-deleted-count>{% if deleted_count %} ({{ deleted_count }}){% endif %}</span>
       </a>
       <a class="function-add" href="{% url 'dossier:function_type' %}" aria-label="Nieuwe functie">+</a>
     </div>
@@ -58,13 +58,13 @@
     {% endfor %}
   </div>
   {% if paginator.num_pages > 1 %}
-  <nav class="function-pagination" aria-label="Functies pagina's">
+  <nav class="function-pagination" aria-label="Functies pagina's" data-function-pagination>
     {% if page.has_previous %}
-    <a class="outline button" href="{% if functions_embedded %}?manage_functions=1&{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.previous_page_number }}#function-management{% else %}?{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.previous_page_number }}{% endif %}">Vorige</a>
+  <a class="outline button" data-function-page-link="previous" href="{% if functions_embedded %}?manage_functions=1&{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.previous_page_number }}#function-management{% else %}?{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.previous_page_number }}{% endif %}">Vorige</a>
     {% endif %}
-    <span>Pagina {{ page.number }} van {{ paginator.num_pages }}</span>
+    <span data-function-page-info>Pagina {{ page.number }} van {{ paginator.num_pages }}</span>
     {% if page.has_next %}
-    <a class="outline button" href="{% if functions_embedded %}?manage_functions=1&{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.next_page_number }}#function-management{% else %}?{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.next_page_number }}{% endif %}">Volgende</a>
+    <a class="outline button" data-function-page-link="next" href="{% if functions_embedded %}?manage_functions=1&{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.next_page_number }}#function-management{% else %}?{{ function_query_param }}={{ query|urlencode }}&{{ function_sort_param }}={{ sort }}&{{ function_page_size_param }}={{ page_size }}&{{ function_page_param }}={{ page.next_page_number }}{% endif %}">Volgende</a>
     {% endif %}
   </nav>
   {% endif %}
