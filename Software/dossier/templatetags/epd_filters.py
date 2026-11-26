@@ -3,7 +3,7 @@ from datetime import date, datetime
 from django import template
 from django.utils.html import escape, mark_safe
 
-from ..services import clean_html
+from ..services import render_rich_text
 
 register = template.Library()
 
@@ -28,9 +28,14 @@ def _parse_date(value):
 
 
 @register.filter
-def safe_clean(value):
-    """Render opgeslagen rich text (TinyMCE-HTML) veilig via nh3-sanering."""
-    return mark_safe(clean_html(value or ""))
+def rich_html(value):
+    """Render opgeslagen rich text veilig: HTML via nh3-sanering, gewone tekst
+    met alinea's en regeleindes (zie services.render_rich_text)."""
+    return render_rich_text(value)
+
+
+# Oudere naam, gebruikt in bestaande templates; zelfde weergave als rich_html.
+register.filter("safe_clean", rich_html)
 
 
 @register.filter

@@ -16,7 +16,7 @@ from django.core.management import call_command
 from django.test import Client
 from dossier.models import (
     Assignment, AssignmentSubmission, Case, Education, LibraryField, LibraryTemplate,
-    Patient, Profile, TeachingGroup,
+    ModuleResponse, Patient, Profile, TeachingGroup,
 )
 from dossier.services import copy_template_to_case, start_student_case
 
@@ -53,6 +53,11 @@ AssignmentSubmission.objects.filter(pk=submission.pk).update(
            '<img src="x" onerror="window.__xss = 1"><script>window.__xss = 2</script>',
     status=AssignmentSubmission.Status.SUBMITTED,
 )
+# A published (locked) registration: a revision request must put it back to concept.
+registration = student_case.module_responses.get()
+registration.data = {"reden": "Regelmatige contracties sinds vannacht."}
+registration.status = ModuleResponse.Status.PUBLISHED
+registration.save(update_fields=["data", "status", "updated_at"])
 
 
 def session(user):
@@ -64,6 +69,6 @@ def session(user):
 Path(sys.argv[1]).write_text(json.dumps({
     "teacher": session(teacher), "student": session(student),
     "caseId": case.pk, "studentCaseId": student_case.pk,
-    "submissionId": submission.pk, "moduleId": student_case.module_responses.get().pk,
+    "submissionId": submission.pk, "registrationId": registration.pk,
 }), encoding="utf-8")
 print("Disposable feedback browser fixtures ready.")

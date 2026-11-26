@@ -12,6 +12,7 @@ from dossier.models import (
     Education,
     LibraryField,
     LibraryTemplate,
+    ModuleResponse,
     Patient,
     Profile,
     StudentCase,
@@ -20,6 +21,8 @@ from dossier.models import (
 from dossier.services import (
     clean_html,
     copy_template_to_case,
+    detach_module_responses,
+    new_registration,
     render_rich_text,
     start_student_case,
 )
@@ -31,7 +34,8 @@ class RichTextSanitizingTests(TestCase):
             '<p><span style="color: #e03e2d; position: fixed">rood</span>'
             '<span style="background-color: #fbeeb8">geel</span></p>'
             '<script>alert(1)</script><img src="x" onerror="alert(1)">'
-            '<a href="javascript:alert(1)">link</a>'
+            '<a href="javascript:alert(1)">link</a><a href="data:text/html,x">data</a>'
+            '<a href="https://example.org">ok</a><img src="data:image/png;base64,AA" alt="">'
         )
         self.assertIn('style="color:#e03e2d"', cleaned)
         self.assertIn('style="background-color:#fbeeb8"', cleaned)
@@ -39,6 +43,21 @@ class RichTextSanitizingTests(TestCase):
         self.assertNotIn("<script", cleaned)
         self.assertNotIn("onerror", cleaned)
         self.assertNotIn("javascript:", cleaned)
+        self.assertNotIn("data:text/html", cleaned)
+        self.assertIn('href="https://example.org"', cleaned)
+        # base64-afbeeldingen uit TinyMCE blijven toegestaan
+        self.assertIn('src="data:image/png;base64,AA"', cleaned)
+
+    def test_template_filters_share_one_sanitizer(self):
+        from django.template import Context, Template
+
+        html = Template("{% load epd_filters %}{{ v|rich_html }}|{{ v|safe_clean }}").render(
+            Context({"v": '<span style="color: red">x</span><script>y</script>'})
+        )
+        rich, safe = html.split("|")
+        self.assertEqual(rich, safe)
+        self.assertIn('style="color:red"', rich)
+        self.assertNotIn("<script", rich)
 
     def test_plain_text_keeps_line_breaks_and_is_escaped(self):
         self.assertEqual(str(render_rich_text("a < b\nc")), "<p>a &lt; b<br>c</p>")
@@ -84,7 +103,7 @@ class TeacherFeedbackTests(TestCase):
     def setUp(self):
         self.student_case, _ = start_student_case(self.case, self.student)
         self.submission = self.student_case.assignment_submissions.get()
-        self.module = self.student_case.module_responses.get()
+        self.registration = self.student_case.module_responses.get()
 
     # -- helpers ---------------------------------------------------------
     def submit_answer(self, answer):
@@ -230,34 +249,89 @@ class TeacherFeedbackTests(TestCase):
         self.student_case.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
 
-    # -- 4. modulefeedback en eindfeedback ----------------------------------
-    def post_module_feedback(self, feedback, revision=False):
+    # -- 4. feedback per registratie en eindfeedback ------------------------
+    def post_module_feedback(self, feedback, revision=False, registration=None):
+        registration = registration or self.registration
         self.client.force_login(self.teacher)
         data = {"feedback": feedback}
         if revision:
             data["revision_requested"] = "on"
         return self.client.post(
-            reverse("dossier:teacher_module_feedback", args=[self.student_case.id, self.module.id]), data
+            reverse("dossier:teacher_module_feedback", args=[self.student_case.id, registration.id]), data
+        )
+
+    def student_dossier(self, registration=None, **params):
+        registration = registration or self.registration
+        self.client.force_login(self.student)
+        return self.client.get(
+            reverse("dossier:dossier", args=[self.case.id]),
+            {"module": registration.module_key, **params},
         )
 
     def test_module_feedback_is_saved_audited_and_shown_to_student(self):
         response = self.post_module_feedback("<p>Vermeld ook de <strong>pariteit</strong>.</p>")
         self.assertRedirects(
             response,
-            f"{reverse('dossier:teacher_student_case', args=[self.student_case.id])}#module-{self.module.id}",
+            f"{reverse('dossier:teacher_student_case', args=[self.student_case.id])}#registratie-{self.registration.id}",
             fetch_redirect_response=False,
         )
-        self.module.refresh_from_db()
-        self.assertEqual(self.module.feedback, "<p>Vermeld ook de <strong>pariteit</strong>.</p>")
-        self.assertEqual(self.module.feedback_by, self.teacher)
-        self.assertIsNotNone(self.module.feedback_at)
-        self.assertFalse(self.module.revision_requested)
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.feedback, "<p>Vermeld ook de <strong>pariteit</strong>.</p>")
+        self.assertEqual(self.registration.feedback_by, self.teacher)
+        self.assertIsNotNone(self.registration.feedback_at)
+        self.assertFalse(self.registration.revision_requested)
         self.assertTrue(AuditEvent.objects.filter(action="module_response.feedback").exists())
 
-        self.client.force_login(self.student)
-        response = self.client.get(reverse("dossier:dossier", args=[self.case.id]), {"module": self.module.id})
-        self.assertContains(response, "Feedback docent")
-        self.assertContains(response, "<strong>pariteit</strong>")
+        # Lijstweergave (registratiekaart) en invoerweergave tonen de feedback.
+        for params in ({}, {"weergave": "invoer", "registratie": self.registration.id}):
+            response = self.student_dossier(**params)
+            self.assertContains(response, "Feedback docent")
+            self.assertContains(response, "<strong>pariteit</strong>")
+        self.assertContains(response, 'class="nav-flag"')
+
+    def test_feedback_belongs_to_one_registration(self):
+        second = new_registration(self.student_case, self.registration.module, author=self.student)
+        self.post_module_feedback("Alleen voor de tweede registratie", registration=second)
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.feedback, "")
+
+        response = self.teacher_page()
+        self.assertContains(response, f'id="registratie-{self.registration.id}"')
+        self.assertContains(response, f'id="registratie-{second.id}"')
+        groups = response.context["module_groups"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual([r.id for r in groups[0]["registrations"]], [second.id, self.registration.id])
+        forms = {r.id: r.feedback_form for r in groups[0]["registrations"]}
+        self.assertEqual(forms[second.id].initial["feedback"], "Alleen voor de tweede registratie")
+        self.assertEqual(forms[self.registration.id].initial["feedback"], "")
+
+        response = self.student_dossier(weergave="invoer", registratie=self.registration.id)
+        self.assertNotContains(response, "Alleen voor de tweede registratie")
+        response = self.student_dossier(weergave="invoer", registratie=second.id)
+        self.assertContains(response, "Alleen voor de tweede registratie")
+
+    def test_revision_request_reopens_published_registration(self):
+        ModuleResponse.objects.filter(pk=self.registration.pk).update(status=ModuleResponse.Status.PUBLISHED)
+        self.post_module_feedback("Pas de reden van opname aan", revision=True)
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.status, ModuleResponse.Status.CONCEPT)
+        self.assertTrue(self.registration.revision_requested)
+
+        # Feedback zonder aanpassingsvraag laat een gepubliceerde registratie gepubliceerd.
+        ModuleResponse.objects.filter(pk=self.registration.pk).update(
+            status=ModuleResponse.Status.PUBLISHED, revision_requested=False,
+        )
+        self.post_module_feedback("Goed zo")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.status, ModuleResponse.Status.PUBLISHED)
+
+    def test_feedback_survives_when_module_is_detached(self):
+        self.post_module_feedback("Blijft bewaard")
+        detach_module_responses(self.registration.module)
+        self.registration.refresh_from_db()
+        self.assertIsNone(self.registration.module)
+        self.assertEqual(self.registration.feedback, "Blijft bewaard")
+        self.assertContains(self.teacher_page(), "Blijft bewaard")
 
     def test_module_revision_request_reopens_dossier_until_resubmitted(self):
         self.submit_answer("<p>Antwoord</p>")
@@ -268,12 +342,12 @@ class TeacherFeedbackTests(TestCase):
 
         self.post_module_feedback("Reden van opname ontbreekt", revision=True)
         self.student_case.refresh_from_db()
-        self.module.refresh_from_db()
-        self.assertTrue(self.module.revision_requested)
+        self.registration.refresh_from_db()
+        self.assertTrue(self.registration.revision_requested)
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
 
         # Goedkeuren van de opdracht sluit de studentversie niet af zolang
-        # een gevraagde moduleaanpassing openstaat.
+        # een gevraagde aanpassing openstaat.
         self.review("approved", "")
         self.student_case.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
@@ -281,14 +355,19 @@ class TeacherFeedbackTests(TestCase):
         self.client.force_login(self.student)
         response = self.client.get(reverse("dossier:case_detail", args=[self.case.id]))
         self.assertContains(response, "Aanpassing gevraagd in het patiëntendossier")
-        response = self.client.get(reverse("dossier:dossier", args=[self.case.id]), {"module": self.module.id})
-        self.assertContains(response, "Je docent vraagt dit onderdeel aan te passen")
+        self.assertContains(
+            response,
+            f"?module={self.registration.module_key}&amp;weergave=invoer&amp;registratie={self.registration.id}",
+        )
+        response = self.student_dossier(weergave="invoer", registratie=self.registration.id)
+        self.assertContains(response, "Je docent vraagt deze registratie aan te passen")
+        self.assertContains(response, "nav-flag-revision")
 
         self.client.post(reverse("dossier:submit_student_case", args=[self.case.id]))
         self.student_case.refresh_from_db()
-        self.module.refresh_from_db()
+        self.registration.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.SUBMITTED)
-        self.assertFalse(self.module.revision_requested)
+        self.assertFalse(self.registration.revision_requested)
 
         # Feedback zonder nieuwe aanpassingsvraag rondt de ingediende versie af.
         self.post_module_feedback("Nu in orde")
@@ -323,12 +402,12 @@ class TeacherFeedbackTests(TestCase):
     def test_students_cannot_post_feedback(self):
         self.client.force_login(self.student)
         for url in (
-            reverse("dossier:teacher_module_feedback", args=[self.student_case.id, self.module.id]),
+            reverse("dossier:teacher_module_feedback", args=[self.student_case.id, self.registration.id]),
             reverse("dossier:teacher_final_feedback", args=[self.student_case.id]),
         ):
             self.assertEqual(self.client.post(url, {"feedback": "x", "final_feedback": "x"}).status_code, 403)
-        self.module.refresh_from_db()
-        self.assertEqual(self.module.feedback, "")
+        self.registration.refresh_from_db()
+        self.assertEqual(self.registration.feedback, "")
 
     def test_feedback_views_reject_get(self):
         self.client.force_login(self.teacher)

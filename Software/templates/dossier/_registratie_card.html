@@ -36,6 +36,7 @@
       {% endif %}
     </div>
   </header>
+  {% include 'dossier/_registration_feedback.html' %}
   {% for field in registration.display_values %}
     <div class="response-value"><strong>{{ field.label }}</strong>
       {% if field.matrix_payload %}
