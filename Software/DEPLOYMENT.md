@@ -150,6 +150,6 @@ opstartmigraties op de applicatiedatabase over te slaan, gebruik je voor control
 expliciet de Python-entrypoint:
 
 ```sh
-docker compose run --rm --no-deps --entrypoint python web manage.py test
+docker compose run --rm --no-deps --entrypoint python web manage.py test tests.dossier
 docker compose run --rm --no-deps --entrypoint python -e DJANGO_DEBUG=0 web manage.py check --deploy
 ```

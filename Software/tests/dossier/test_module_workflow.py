@@ -5,11 +5,11 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.html import escape
 
-from .models import (
+from dossier.models import (
     Assignment, AssignmentSubmission, AuditEvent, Case, Education, Module,
     ModuleField, Patient, Profile, StudentCase, TeachingGroup,
 )
-from .services import start_student_case
+from dossier.services import start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -65,7 +65,7 @@ class ModuleWorkflowTests(TestCase):
     def form_data(self, **changes):
         payload = {f"field_{key}": value for key, value in self.complete_data().items() if key not in {"matrix", "observations"}}
         payload.update({f"field_matrix_{key}": value for key, value in self.complete_data()["matrix"].items()})
-        payload.update({"module": self.response.pk, "action": "save"})
+        payload.update({"module": self.module.pk, "registratie": self.response.pk, "action": "save"})
         payload.update(changes)
         return payload
 
@@ -83,7 +83,7 @@ class ModuleWorkflowTests(TestCase):
         for role in ("student", "teacher"):
             with self.subTest(role=role):
                 url, record, attribute = self.target(role)
-                result = self.client.post(url, {"module": self.response.pk, "field_text": "Alvast bewaard", "action": "save"})
+                result = self.client.post(url, {"module": self.module.pk, "registratie": self.response.pk, "field_text": "Alvast bewaard", "action": "save"})
                 self.assertEqual(result.status_code, 302)
                 record.refresh_from_db()
                 self.assertEqual(getattr(record, attribute)["text"], "Alvast bewaard")
@@ -107,11 +107,16 @@ class ModuleWorkflowTests(TestCase):
     def test_final_submission_checks_every_module(self):
         self.save_response(self.complete_data())
         second = self.student_case.module_responses.create(
-            title="Tweede module", schema=[{"key": "extra", "type": "short_text", "label": "Extra", "required": True}],
+            title="Tweede module",
+            schema=[
+                {"key": "extra", "type": "short_text", "label": "Extra", "required": True},
+                {"key": "andere", "type": "short_text", "label": "Andere", "required": False},
+            ],
+            data={"andere": "ingevuld"},
         )
         self.client.force_login(self.student)
         result = self.client.post(self.submit_url)
-        self.assertRedirects(result, f"{self.dossier_url}?module={second.pk}&validate=1")
+        self.assertRedirects(result, f"{self.dossier_url}?module=los-{second.pk}&registratie={second.pk}&validate=1")
         self.student_case.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)
 
@@ -147,7 +152,7 @@ class ModuleWorkflowTests(TestCase):
         self.save_response(original)
         ModuleField.objects.create(module=self.module, key="later", label="Later toegevoegd", field_type="short_text", required=True)
         self.client.force_login(self.student)
-        self.assertRedirects(self.client.post(self.submit_url), f"{self.dossier_url}?module={self.response.pk}&validate=1")
+        self.assertRedirects(self.client.post(self.submit_url), f"{self.dossier_url}?module={self.module.pk}&registratie={self.response.pk}&validate=1")
         self.student_case.refresh_from_db()
         self.response.refresh_from_db()
         self.assertEqual(self.student_case.status, StudentCase.Status.ACTIVE)

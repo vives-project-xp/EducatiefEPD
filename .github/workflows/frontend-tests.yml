@@ -1,0 +1,28 @@
+name: Frontend tests
+
+# Draait zelfstandig bij pull requests en handmatig; op main wordt deze workflow
+# aangeroepen door release.yml, zodat de release pas na geslaagde tests start.
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-node:
+    name: Syntax + Node-matrixtests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: JavaScript syntax check
+        run: |
+          for file in Software/static/*.js Software/static/*.mjs Software/tests/browser/*.mjs Software/tests/js/*.mjs; do
+            node --check "$file" || exit 1
+          done
+      - name: Matrix core tests
+        run: node --test Software/tests/js/matrix-core.test.mjs

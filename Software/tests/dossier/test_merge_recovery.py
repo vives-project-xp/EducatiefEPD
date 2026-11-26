@@ -9,12 +9,12 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from .forms import LibraryDossierForm, PatientForm
-from .models import (
+from dossier.forms import LibraryDossierForm, PatientForm
+from dossier.models import (
     Case, Education, FunctionDefinition, LibraryDossier, LibraryTemplate,
     ManagedForm, ManagedQuestion, Patient, Profile,
 )
-from .test_fixtures import create_library_fixtures
+from .fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

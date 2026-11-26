@@ -6,13 +6,14 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (
+from dossier.models import (
     Assignment, Case, Education, LibraryDossier, LibraryDossierModule,
     LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile,
     StudentCase, TeachingGroup,
 )
-from .services import (
+from dossier.services import (
     copy_library_dossier_to_case,
+    new_registration,
     start_student_case,
     synchronize_dossier_additions_to_cases,
 )
@@ -313,6 +314,49 @@ class DynamicCaseTests(TestCase):
         self.assertEqual(
             next(field["label"] for field in updated_response.schema if field["key"] == "notitie"),
             "Gewijzigde notitie",
+        )
+
+    def test_readded_module_preserves_each_student_registration(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-READD-REGISTRATIONS")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        student = get_user_model().objects.create_user("readded-registrations-student")
+        student_case, _ = start_student_case(case, student)
+        first = student_case.module_responses.get(module=module)
+        second = new_registration(student_case, module, author=student)
+        first.data = {"notitie": "Eerste registratie"}
+        first.save(update_fields=["data"])
+        second.data = {"notitie": "Tweede registratie"}
+        second.save(update_fields=["data"])
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        module.configuration["library_dossier_module_removed"] = True
+        module.save(update_fields=["configuration"])
+        self.client.post(
+            reverse("dossier:teacher_published_module_resolve", args=[case.pk, module.pk]),
+            {"action": "sync_students"},
+        )
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=templates[0], position=0
+        )
+        synchronize_dossier_additions_to_cases(dossier, {templates[1].pk})
+
+        updated_module = case.modules.get(source_template=templates[0])
+        reopened_case, created = start_student_case(case, student)
+        self.assertFalse(created)
+        registrations = list(
+            reopened_case.module_responses.filter(module=updated_module).order_by("id")
+        )
+        self.assertEqual(len(registrations), 2)
+        self.assertEqual(
+            {registration.data["notitie"] for registration in registrations},
+            {"Eerste registratie", "Tweede registratie"},
+        )
+        self.assertEqual(
+            {registration.created_by_id for registration in registrations},
+            {student.id},
         )
 
     def test_module_reorder_updates_student_versions_on_republish(self):

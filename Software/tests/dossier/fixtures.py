@@ -1,5 +1,5 @@
 """Explicit library examples for regression tests; never loaded during app startup."""
-from .models import Education, LibraryField, LibraryTemplate
+from dossier.models import Education, LibraryField, LibraryTemplate
 
 
 def create_library_fixtures():

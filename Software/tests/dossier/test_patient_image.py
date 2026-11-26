@@ -8,8 +8,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .forms import PatientForm
-from .models import Case, Education, Patient, Profile, StudentCase
+from dossier.forms import PatientForm
+from dossier.models import Case, Education, Patient, Profile, StudentCase
 
 
 def photo(name="photo.png", color="blue"):

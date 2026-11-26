@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 import django
@@ -15,7 +15,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import Client
 from dossier.models import FunctionDefinition, ManagedForm, ManagedQuestion, Profile
-from dossier.test_fixtures import create_library_fixtures
+from tests.dossier.fixtures import create_library_fixtures
 
 if settings.DATABASES["default"]["NAME"] != "epd_main_test":
     raise RuntimeError("Browser fixtures require the disposable epd_main_test database.")

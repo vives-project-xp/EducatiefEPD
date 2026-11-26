@@ -49,6 +49,11 @@ EducatiefEPD/
 │   │   └── migrations/
 │   ├── static/
 │   ├── templates/
+│   ├── tests/
+│   │   ├── dossier/
+│   │   ├── deploy/
+│   │   ├── browser/
+│   │   └── js/
 │   ├── backups/
 │   ├── .env.example
 │   ├── compose.yaml

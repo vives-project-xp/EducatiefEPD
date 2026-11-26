@@ -9,7 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from .models import (
+from dossier.models import (
     Assignment,
     AssignmentSubmission,
     Case,
@@ -26,9 +26,9 @@ from .models import (
     StudentCase,
     TeachingGroup,
 )
-from .auth import EpdOIDCAuthenticationBackend
-from .services import copy_template_to_case, start_student_case
-from .test_fixtures import create_library_fixtures
+from dossier.auth import EpdOIDCAuthenticationBackend
+from dossier.services import copy_template_to_case, start_student_case
+from .fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -272,7 +272,7 @@ class EpdWorkflowTests(TestCase):
         response = self.client.get(reverse("dossier:function_detail", args=[function.id]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "function_management.js")
-        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        script = (Path(__file__).resolve().parents[2] / "static" / "function_management.js").read_text(encoding="utf-8")
         self.assertIn("saveButton.disabled = true", script)
         self.assertIn("saveButton.disabled = locked || !dirty", script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
@@ -523,7 +523,7 @@ class EpdWorkflowTests(TestCase):
             title="Extra", category=LibraryTemplate.Category.MODULE,
             education=self.education, created_by=self.teacher,
         )
-        from .services import copy_template_to_case
+        from dossier.services import copy_template_to_case
         added_module = copy_template_to_case(template, self.case)
         for _ in range(2):
             reopened, created = start_student_case(self.case, self.student)
@@ -828,7 +828,7 @@ class EpdWorkflowTests(TestCase):
         substring_page = self.client.get(
             reverse("dossier:library_list"), {"dossier_q": "ossier een"}
         )
-        self.assertEqual(list(substring_page.context["dossiers"]), [])
+        self.assertEqual([item.title for item in substring_page.context["dossiers"]], ["Dossier een"])
         education_filtered_page = self.client.get(
             reverse("dossier:library_list"),
             {"dossier_education": str(self.education.id)},
@@ -1036,7 +1036,8 @@ class EpdWorkflowTests(TestCase):
         field = next(item for item in response.schema if item["type"] == "number")
         self.client.login(username="student", password="testpass")
         self.client.post(reverse("dossier:dossier", args=[self.case.id]), {
-            "module": response.id, f"field_{field['key']}": "geen getal",
+            "module": response.module_id, "registratie": response.pk,
+            "action": "save", f"field_{field['key']}": "geen getal",
         })
         response.refresh_from_db()
         self.assertNotIn(field["key"], response.data)

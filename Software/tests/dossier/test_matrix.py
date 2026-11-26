@@ -10,14 +10,14 @@ from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
-from .forms import LibraryFieldForm
-from .matrix import (
+from dossier.forms import LibraryFieldForm
+from dossier.matrix import (
     convert_base_values, empty_values, fingerprint, legacy_definition,
     normalize_definition, normalize_value, validate_values,
 )
-from .models import Assignment, AssignmentSubmission, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
-from .module_data import parse_module_form
-from .services import copy_library_dossier_to_case, copy_template_to_case, start_student_case
+from dossier.models import Assignment, AssignmentSubmission, Case, Education, LibraryDossier, LibraryDossierModule, LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase, TeachingGroup
+from dossier.module_data import parse_module_form
+from dossier.services import copy_library_dossier_to_case, copy_template_to_case, start_student_case
 
 
 def sheet():
@@ -155,7 +155,9 @@ class MatrixWorkflowTests(TestCase):
         cls.field_url = reverse("dossier:library_field_edit", args=[cls.template.pk, cls.field.pk])
 
     def post_data(self, payload=None, **extra):
-        return {"module": self.response.pk, "matrix_sheet": json.dumps(values() if payload is None else payload), "field_other": "Ook bewaren", "action": "save", **extra}
+        return {"module": self.module.pk, "registratie": self.response.pk,
+                "matrix_sheet": json.dumps(values() if payload is None else payload),
+                "field_other": "Ook bewaren", "action": "save", **extra}
 
     def edit_data(self, field=None, definition=None):
         field = field or self.field
@@ -204,7 +206,7 @@ class MatrixWorkflowTests(TestCase):
         self.assertEqual(other.schema[0]["matrix_definition"], updated_definition)
         self.assertEqual(other.data, {})
         second_values = {"version": 2, "cells": {"r0": {"c0": "Antwoord student 2"}}}
-        self.assertEqual(self.client.post(self.url, self.post_data(second_values, module=other.pk)).status_code, 302)
+        self.assertEqual(self.client.post(self.url, self.post_data(second_values, registratie=other.pk)).status_code, 302)
         other.refresh_from_db()
         self.response.refresh_from_db()
         self.assertEqual(other.data["sheet"], second_values)
@@ -426,7 +428,7 @@ class MatrixWorkflowTests(TestCase):
     def test_missing_payload_preserves_existing_values(self):
         self.response.data = {"sheet": values()}; self.response.save()
         self.client.force_login(self.student)
-        self.assertEqual(self.client.post(self.url, {"module": self.response.pk, "field_other": "Zonder JavaScript"}).status_code, 302)
+        self.assertEqual(self.client.post(self.url, {"module": self.module.pk, "registratie": self.response.pk, "field_other": "Zonder JavaScript"}).status_code, 302)
         self.response.refresh_from_db()
         self.assertEqual(self.response.data["sheet"]["cells"]["r0"]["c1"], "36.75")
 
@@ -473,7 +475,7 @@ class MatrixWorkflowTests(TestCase):
         self.client.force_login(self.student)
         self.assertEqual(self.client.post(self.field_url, self.edit_data()).status_code, 403)
         other_response = self.other_case.module_responses.get(module=self.module)
-        self.assertEqual(self.client.post(self.url, self.post_data(module=other_response.pk)).status_code, 404)
+        self.assertEqual(self.client.post(self.url, self.post_data(registratie=other_response.pk)).status_code, 404)
         self.client.force_login(self.teacher)
         field = self.module.fields.get(key="sheet")
         url = reverse("dossier:teacher_module_field_edit", args=[self.case.pk, self.module.pk, field.pk])

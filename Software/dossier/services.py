@@ -1,4 +1,5 @@
 from copy import deepcopy
+from urllib.parse import urlparse
 
 from django.db import transaction
 from django.db.models import Q
@@ -93,6 +94,36 @@ def merge_empty_values(data, defaults):
     return data
 
 
+def new_registration(student_case, module, *, author):
+    """Maakt een nieuwe, lege registratie (invulling) voor één module van een dossier."""
+    if student_case.locked:
+        raise ValueError("Een ingeleverd dossier kan niet bewerkt worden.")
+    with transaction.atomic():
+        response = student_case.module_responses.create(
+            module=module,
+            source_template_id_snapshot=module.source_template_id,
+        )
+        response.hydrate_from_source()
+        response.schema = module_schema(module)
+        response.data = deepcopy(module.base_data)
+        response.created_by = author
+        response.save()
+    return response
+
+
+def _filled(value):
+    if isinstance(value, dict):
+        return any(_filled(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_filled(item) for item in value)
+    return bool(value)
+
+
+def registration_is_empty(response):
+    """True als de registratie bij geen enkel schema-veld een waarde bevat."""
+    return not any(_filled(response.data.get(field.get("key"))) for field in response.schema)
+
+
 @transaction.atomic
 def synchronize_student_case(student_case, *, base_data_module_ids=None):
     if student_case.locked:
@@ -123,15 +154,12 @@ def synchronize_student_case(student_case, *, base_data_module_ids=None):
 
     modules = list(student_case.case.modules.prefetch_related("fields").all())
     all_responses = list(student_case.module_responses.all())
-    responses = {
-        response.module_id: response
-        for response in all_responses
-        if response.module_id is not None
-    }
+    responses_by_module = {}
     detached_by_template = {}
     detached_by_title = {}
     for response in all_responses:
         if response.module_id is not None:
+            responses_by_module.setdefault(response.module_id, []).append(response)
             continue
         if response.source_template_id_snapshot is None:
             detached_by_title.setdefault(response.title, []).append(response)
@@ -144,72 +172,80 @@ def synchronize_student_case(student_case, *, base_data_module_ids=None):
         title_counts[module.title] = title_counts.get(module.title, 0) + 1
 
     for module in modules:
-        response = responses.get(module.id)
-        detached_responses = detached_by_template.pop(module.source_template_id, [])
+        module_responses = responses_by_module.get(module.id, [])
+        detached_responses = (
+            detached_by_template.pop(module.source_template_id, [])
+            if module.source_template_id
+            else []
+        )
+        legacy_responses = []
         if (
             module.source_template_id
             and title_counts[module.title] == 1
         ):
-            detached_responses.extend(detached_by_title.pop(module.title, []))
-        reattached = response is None and bool(detached_responses)
+            legacy_responses = detached_by_title.pop(module.title, [])
         schema = module_schema(module)
-        if response is None:
-            if reattached:
-                response = max(detached_responses, key=lambda item: item.updated_at)
-                response.module = module
-            else:
-                response = ModuleResponse(
-                    student_case=student_case,
-                    module=module,
-                    source_template_id_snapshot=module.source_template_id,
-                )
-                response.hydrate_from_source()
-                response.schema = schema
-                response.data = deepcopy(module.base_data)
-                response.save()
-                changed = True
-                continue
+        module_responses.extend(detached_responses)
+        if not module_responses and legacy_responses:
+            module_responses.append(
+                max(legacy_responses, key=lambda item: item.updated_at)
+            )
+            legacy_responses.remove(module_responses[0])
+        if not module_responses:
+            new_registration(student_case, module, author=student_case.student)
+            changed = True
+            continue
 
-        if reattached:
-            data_sources = sorted(detached_responses, key=lambda item: item.updated_at)
-        else:
+        if legacy_responses:
+            response = max(module_responses, key=lambda item: item.updated_at)
             data_sources = sorted(
-                [response, *detached_responses],
+                [response, *legacy_responses],
                 key=lambda item: item.updated_at,
             )
-        merged_data = {}
-        for item in data_sources:
-            merged_data.update(item.data or {})
-        if module.pk in base_data_module_ids:
-            merged_data = merge_empty_values(merged_data, module.base_data or {})
-        data_changed = merged_data != response.data
-        if data_changed:
-            response.data = merged_data
+            merged_data = {}
+            for item in data_sources:
+                merged_data.update(item.data or {})
+            if merged_data != response.data:
+                response.data = merged_data
+                changed = True
+            for item in legacy_responses:
+                item.delete()
+                changed = True
 
-        source_values = (module.title, module.kind, module.instructions, module.position, schema)
-        current_values = (
-            response.title, response.kind, response.instructions, response.position, response.schema
-        )
-        if (
-            reattached
-            or data_changed
-            or response.source_template_id_snapshot != module.source_template_id
-            or source_values != current_values
-        ):
-            response.hydrate_from_source()
-            response.schema = schema
-            response.source_template_id_snapshot = module.source_template_id
-            response.save(update_fields=[
-                "module", "source_template_id_snapshot", "title", "kind", "instructions",
-                "position", "schema", "data", "updated_at",
-            ])
-            changed = True
-        duplicate_ids = [
-            item.pk for item in detached_responses if item.pk != response.pk
-        ]
-        if duplicate_ids:
-            ModuleResponse.objects.filter(pk__in=duplicate_ids).delete()
-            changed = True
+        for response in module_responses:
+            detached = response.module_id is None
+            response.module = module
+            if module.pk in base_data_module_ids:
+                merged_data = merge_empty_values(
+                    response.data or {}, module.base_data or {}
+                )
+            else:
+                merged_data = response.data
+            data_changed = merged_data != response.data
+            if data_changed:
+                response.data = merged_data
+
+            source_values = (
+                module.title, module.kind, module.instructions, module.position, schema
+            )
+            current_values = (
+                response.title, response.kind, response.instructions,
+                response.position, response.schema
+            )
+            if (
+                detached
+                or data_changed
+                or response.source_template_id_snapshot != module.source_template_id
+                or source_values != current_values
+            ):
+                response.hydrate_from_source()
+                response.schema = schema
+                response.source_template_id_snapshot = module.source_template_id
+                response.save(update_fields=[
+                    "module", "source_template_id_snapshot", "title", "kind",
+                    "instructions", "position", "schema", "data", "updated_at",
+                ])
+                changed = True
     return changed
 
 
@@ -235,15 +271,7 @@ def start_student_case(case, student):
             submission.save()
 
         for module in case.modules.prefetch_related("fields").all():
-            response = ModuleResponse(
-                student_case=student_case,
-                module=module,
-                source_template_id_snapshot=module.source_template_id,
-            )
-            response.hydrate_from_source()
-            response.schema = module_schema(module)
-            response.data = deepcopy(module.base_data)
-            response.save()
+            new_registration(student_case, module, author=student)
     else:
         synchronize_student_case(student_case)
     return student_case, created
@@ -511,6 +539,23 @@ def resolve_dossier_module_order(case, dossier_id, apply):
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
+# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
+_UNSAFE_LINK_SCHEMES = {"data", "javascript"}
+
+
+def _reject_unsafe_link(tag, attr, value):
+    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
+    if attr == "href" and value:
+        if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
+            return None
+    return value
+
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})
+    return nh3.clean(
+        value,
+        tags=ALLOWED_TAGS,
+        attributes={"a": {"href"}, "img": {"src", "alt"}},
+        url_schemes={"http", "https", "mailto", "data"},
+        attribute_filter=_reject_unsafe_link,
+    )

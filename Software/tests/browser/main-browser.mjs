@@ -1,5 +1,5 @@
 // Browser regression test against disposable fixtures from main_browser_seed.py.
-// Usage: node tests/main-browser.mjs <fixture.json> <artifact-directory>
+// Usage: node tests/browser/main-browser.mjs <fixture.json> <artifact-directory>
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';

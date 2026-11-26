@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newSheet, emptyValues, setSpec, setValue, valueAt, specAt, parseTSV, toTSV, pasteBlock, changeAxis, History, cellError, numberDisplay} from '../static/matrix-core.mjs';
+import {newSheet, emptyValues, setSpec, setValue, valueAt, specAt, parseTSV, toTSV, pasteBlock, changeAxis, History, cellError, numberDisplay} from '../../static/matrix-core.mjs';
 
 test('Excel TSV round trip preserves multiline, tabs, quotes, empty cells and leading zeros', () => {
     const rows = [['0012', 'two\nlines', 'a\tb', '"quoted"', ''], ['', '=1+1', '0', '', 'last']];

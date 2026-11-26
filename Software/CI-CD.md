@@ -1,8 +1,23 @@
 # Automatische webupdates: de VM haalt releases op
 
-Bij een push op `main` doet `.github/workflows/tests.yml` het volgende:
+De CI bestaat uit vier workflows in `.github/workflows/`:
 
-1. Bestaande Django/MySQL-tests, JavaScript-controles en deployregressies uitvoeren.
+| Workflow | Inhoud | Wanneer |
+| --- | --- | --- |
+| `django-tests.yml` | Django system check, migratiedrift en `tests/dossier` tegen MySQL 8.4 | pull request, handmatig, via `release.yml` |
+| `frontend-tests.yml` | `node --check` op alle JavaScript en `tests/js/matrix-core.test.mjs` | pull request, handmatig, via `release.yml` |
+| `deploy-checks.yml` | `tests/deploy`, Compose-validatie, entrypoint- en systemd-controle | pull request, handmatig, via `release.yml` |
+| `release.yml` | roept de drie testworkflows aan, daarna image en release | push op `main`, handmatig |
+
+Alle Python-tests staan in `Software/tests/`: `dossier/` (Django), `deploy/`
+(deployscripts), `browser/` (lokale browserregressies met seeds) en `js/` (Node).
+Alleen `tests/dossier` zit in de Docker-image, zodat de image-job de suite in de
+echte image kan draaien.
+
+Bij een push op `main` doet `release.yml` het volgende:
+
+1. Via de drie testworkflows de Django/MySQL-tests, JavaScript-controles en
+   deployregressies uitvoeren. De image-job start pas als alle drie slagen.
 2. Een Linux/amd64-webimage bouwen met commit-, main- en workflowrunnummetadata.
 3. De Django/MySQL-suite in datzelfde image draaien, productie-statics verzamelen
    en echte startup plus HTTP/databasehealth controleren.
@@ -279,8 +294,8 @@ eventuele lopende release is afgerond, met behoud van lokale config/status/back-
 ## Controles voor deze code
 
 ```sh
-python3 -m unittest discover -s Software/deploy/tests -v
-python3 Software/deploy/tests/check_compose.py
+python3 -m unittest discover -s Software/tests/deploy -v
+python3 Software/tests/deploy/check_compose.py
 sh -n Software/entrypoint.sh
 ```
 
