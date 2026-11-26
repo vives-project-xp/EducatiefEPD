@@ -584,8 +584,15 @@ class AssignmentReview(models.Model):
 
 
 class ModuleResponse(models.Model):
+    class Status(models.TextChoices):
+        CONCEPT = "concept", "Concept"
+        PUBLISHED = "published", "Gepubliceerd"
+
     student_case = models.ForeignKey(
         StudentCase, on_delete=models.CASCADE, related_name="module_responses"
+    )
+    source_template_id_snapshot = models.PositiveIntegerField(
+        null=True, blank=True, editable=False
     )
     module = models.ForeignKey(
         Module,
@@ -612,15 +619,29 @@ class ModuleResponse(models.Model):
     # Docent vraagt de student dit onderdeel aan te passen; heropent de
     # studentversie en wordt gewist zodra de student het dossier opnieuw indient.
     revision_requested = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONCEPT)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="module_responses",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["position", "id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["student_case", "module"], name="unique_module_response"
-            )
-        ]
+        ordering = ["position", "created_at", "id"]
+
+    @property
+    def author_name(self):
+        if self.created_by:
+            return self.created_by.get_full_name() or self.created_by.get_username()
+        return "Onbekend"
+
+    @property
+    def display_name(self):
+        return f"{self.author_name} – {timezone.localtime(self.created_at):%d-%m-%Y %H:%M}"
 
     def hydrate_from_source(self):
         if self.module:

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load rich_text %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Voortgang{% endblock %}
 {% block content %}
 <main class="teacher-shell">
@@ -44,6 +44,10 @@
             <div class="student-answer" data-current-answer>{{ submission.answer|default:'Nog niet ingevuld'|rich_html }}</div>
           {% endif %}
           {% if submission.has_review %}
+          <div class="student-answer">
+            {{ submission.answer|default:'Nog niet ingevuld'|safe_clean }}
+          </div>
+          {% if submission.status in 'approved,resubmit' %}
             <div class="previous-review">
               <strong>
                 Vorige beoordeling{% if submission.latest_review %}: {{ submission.latest_review.get_status_display }}{% elif submission.status in 'approved,resubmit' %}: {{ submission.get_status_display }}{% endif %}
@@ -52,7 +56,7 @@
                 <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}{% if submission.latest_review.reviewer %} · {{ submission.latest_review.reviewer.get_full_name|default:submission.latest_review.reviewer.username }}{% endif %}</small>
               {% endif %}
               {% if submission.feedback %}
-                <div class="previous-review-feedback">{{ submission.feedback|rich_html }}</div>
+                <div class="previous-review-feedback">{{ submission.feedback|safe_clean }}</div>
               {% endif %}
             </div>
           {% endif %}
@@ -150,7 +154,27 @@
             </div>
           </form>
         </div>
+      <h2>Ingevuld patiëntendossier</h2>
+      {% for group in module_groups %}
+      <h3 class="module-group-title">{{ group.title }}</h3>
+      {% for module in group.registrations %}
+      <details class="response-detail">
+        <summary>Registratie van {{ module.display_name }}</summary>
+        {% for field in module.display_values %}
+          <div class="response-value"><strong>{{ field.label }}</strong>
+            {% if field.matrix_payload %}
+              {% include 'dossier/_matrix.html' with locked=True %}
+            {% elif field.type == 'matrix' %}
+              <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+            {% elif field.type == 'observation' %}{{ field.value|render_observations }}
+            {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
+            {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
+          </div>
+        {% empty %}
+        <p>Deze registratie is nog leeg.</p>
+        {% endfor %}
       </details>
+      {% endfor %}
       {% endfor %}
     </section>
     <section class="editor-section final-feedback" id="algemene-feedback">

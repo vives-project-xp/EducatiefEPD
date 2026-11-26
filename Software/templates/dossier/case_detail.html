@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load rich_text %}
+{% load epd_filters %}
 {% block title %}{{ student_case.case_title }} | Educatief EPD{% endblock %}
 {% block content %}
 <main class="case-viewer">
@@ -18,7 +18,7 @@
       {% if selected %}
         <h2>{{ selected.phase }}: {{ selected.title }}</h2>
         <div class="assignment-content">
-          {{ selected.content|rich_html }}
+          {{ selected.content|safe_clean }}
         </div>
         <form method="post" class="answer-form">
           {% csrf_token %}
@@ -28,7 +28,7 @@
           {% if selected.feedback %}
             <div class="feedback">
               <strong>Feedback docent</strong>
-              {{ selected.feedback|rich_html }}
+              {{ selected.feedback|safe_clean }}
             </div>
           {% endif %}
           {% if selected.earlier_reviews %}

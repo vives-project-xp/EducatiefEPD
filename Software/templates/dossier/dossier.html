@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load rich_text %}
+{% load epd_filters %}
 {% block title %}{{ student_case.patient_name }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
@@ -19,6 +19,8 @@
           <span>{{ module.title }}</span>
           {% if module.revision_requested %}<i class="nav-flag nav-flag-revision" title="Aanpassing gevraagd">!</i>{% elif module.feedback %}<i class="nav-flag" title="Feedback van je docent">✎</i>{% endif %}
           <b>›</b>
+        <a href="?module={{ module.meta_key }}" class="nav-item {% if selected.meta_key == module.meta_key %}selected{% endif %}">
+          <span>{{ module.title }}</span><b>›</b>
         </a>
       {% empty %}
         <p class="empty">Geen functies gevonden.</p>
@@ -59,8 +61,63 @@
         {% include 'dossier/_dynamic_fields.html' with locked=student_case.locked %}
         {% if not student_case.locked and selected.kind != 'information' %}
           <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
+        {% if not student_case.locked %}
+          <div class="registration-bar">
+            <div class="view-toggle">
+              <a class="button {% if view_mode == 'lijst' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=lijst{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Lijst</a>
+              <a class="button {% if view_mode == 'invoer' %}primary{% else %}secundary{% endif %}" href="?module={{ selected.meta_key }}&amp;weergave=invoer{% if selected_registration %}&amp;registratie={{ selected_registration.id }}{% endif %}{% if query %}&amp;q={{ query|urlencode }}{% endif %}">Invoer</a>
+            </div>
+            <form method="post" class="registration-actions">
+              {% csrf_token %}
+              <input type="hidden" name="module" value="{{ selected.meta_key }}">
+              <input type="hidden" name="action" value="new">
+              <button class="primary button" type="submit">＋ Nieuwe registratie</button>
+            </form>
+          </div>
         {% endif %}
-      </form>
+        {% if view_mode == 'lijst' %}
+          {% for registration in registrations %}
+            {% include 'dossier/_registratie_card.html' %}
+          {% empty %}
+            <p class="empty-state">Nog geen registraties voor dit onderdeel.</p>
+          {% endfor %}
+        {% elif selected_registration %}
+          {% if registrations %}
+            <form method="get" class="registration-select-form">
+              <input type="hidden" name="module" value="{{ selected.meta_key }}">
+              <input type="hidden" name="weergave" value="invoer">
+              <label for="id_registratie_select">Registraties: </label>
+              <select id="id_registratie_select" name="registratie" onchange="this.form.submit()">
+                {% for registration in registrations %}
+                  <option value="{{ registration.id }}" {% if registration.id == selected_registration.id %}selected{% endif %}>{{ registration.display_name }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          {% endif %}
+          {% if selected.instructions %}
+            <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
+          {% endif %}
+          <form method="post" class="module-form">{% csrf_token %}
+            <input type="hidden" name="module" value="{{ selected.meta_key }}">
+            <input type="hidden" name="registratie" value="{{ selected_registration.id }}">
+            {% if not form_locked and selected_registration.kind != 'information' %}<p class="muted">Je kunt onvolledige invoer bewaren. Velden met * zijn verplicht bij het indienen van het volledige dossier. Bewaren slaat ook ingevulde observaties op.</p>{% endif %}
+            {% include 'dossier/_dynamic_fields.html' with locked=form_locked %}
+            {% if not student_case.locked and selected_registration.kind != 'information' %}
+              <div class="registration-actions">
+                {% if selected_registration.status == 'published' %}
+                  <p class="muted">Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar terug naar concept om alsnog te wijzigen.</p>
+                  <button class="button" type="submit" name="action" value="unpublish">Terug naar concept</button>
+                {% else %}
+                  <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
+                  <button class="button" type="submit" name="action" value="publish">Publiceren</button>
+                  <button class="outline button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
+                {% endif %}
+              </div>
+            {% endif %}
+          </form>
+        {% else %}
+          <p class="empty-state">Nog geen registraties voor dit onderdeel. Maak er een aan met “＋ Nieuwe registratie”.</p>
+        {% endif %}
       {% else %}
         <p class="empty-state">Dit dossier bevat geen onderdelen.</p>
       {% endif %}

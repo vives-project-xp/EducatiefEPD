@@ -68,7 +68,13 @@ from .services import (
     module_schema, start_student_case, clean_html, render_rich_text,
     update_student_case_review_state,
     remove_module_from_students, synchronize_module_to_students,
+    module_schema, new_registration, registration_is_empty, start_student_case, clean_html,
+    synchronize_student_case, detach_module_responses, synchronize_module_to_students,
     synchronize_template_module, synchronize_dossier_additions_to_cases,
+    resolve_dossier_module_order,
+    STUDENT_BASE_DATA_VERSION, STUDENT_BASE_DATA_HANDLED_VERSION,
+    STUDENT_BASE_DATA_APPROVED_VERSION, STUDENT_BASE_DATA_APPLIED_VERSION,
+    pending_student_base_data_version,
 )
 
 
@@ -133,6 +139,8 @@ def require_post(request):
 
 def get_student_case(request, case_id):
     case = get_object_or_404(Case.objects.select_related("patient"), id=case_id)
+    if case.status != Case.Status.PUBLISHED:
+        raise PermissionDenied
     if not case.allowed_groups.filter(members=request.user).exists():
         raise PermissionDenied
     existing = StudentCase.objects.filter(case=case, student=request.user).first()
@@ -190,7 +198,7 @@ def home(request):
         return redirect("dossier:teacher_dashboard")
     cases = list(
         Case.objects.filter(
-            Q(status=Case.Status.PUBLISHED) | Q(student_cases__student=request.user),
+            Q(status=Case.Status.PUBLISHED),
             allowed_groups__members=request.user,
         )
         .select_related("patient")
@@ -228,7 +236,7 @@ def case_detail(request, case_id):
         }:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            selected.answer = clean_html(request.POST.get("answer", "").strip()).strip()
+            selected.answer = clean_html(request.POST.get("answer", "").strip())
             if request.POST.get("action") == "submit":
                 if not selected.answer:
                     messages.error(request, "Vul eerst een antwoord in.")
@@ -325,6 +333,46 @@ def prepare_schema_fields(schema, data, *, errors=None, pending_observations=Non
     return prepared
 
 
+class _ModuleEntry:
+    """Een dossiermodule met al haar registraties (saved fill-ins)."""
+
+    def __init__(self, module, responses):
+        self.module = module
+        self.responses = responses
+
+    @property
+    def registrations(self):
+        return list(reversed(self.responses))
+
+    @property
+    def meta_key(self):
+        return str(self.module_id) if self.module_id is not None else f"los-{self.responses[0].id}"
+
+    @property
+    def module_id(self):
+        return self.module.id if self.module is not None else None
+
+    @property
+    def representative(self):
+        return self.responses[0]
+
+    @property
+    def title(self):
+        return self.representative.title
+
+    @property
+    def kind(self):
+        return self.representative.kind
+
+    @property
+    def get_kind_display(self):
+        return self.representative.get_kind_display()
+
+    @property
+    def instructions(self):
+        return self.representative.instructions
+
+
 @login_required
 @transaction.atomic
 def dossier(request, case_id):
@@ -334,46 +382,151 @@ def dossier(request, case_id):
     if request.method == "POST":
         student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
-    modules = list(student_case.module_responses.all())
-    visible_modules = [item for item in modules if query.lower() in item.title.lower()] if query else modules
-    selected_id = request.POST.get("module") or request.GET.get("module")
-    selected = next((item for item in modules if str(item.id) == selected_id), None)
+
+    responses = list(student_case.module_responses.select_related("module", "created_by").order_by("module_id", "id"))
+    grouped = {}
+    entries = []
+    for response in responses:
+        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
+        if key not in grouped:
+            grouped[key] = _ModuleEntry(response.module, [])
+            entries.append(grouped[key])
+        grouped[key].responses.append(response)
+
+    visible_modules = [entry for entry in entries if query.lower() in entry.title.lower()] if query else entries
+    selected_key = request.POST.get("module") or request.GET.get("module")
+    selected = next((entry for entry in entries if entry.meta_key == selected_key), None)
     if request.method == "POST" and selected is None:
         raise Http404
-    if selected is None and modules:
-        selected = modules[0]
+    if selected is None and entries:
+        selected = entries[0]
 
-    form_result = None
-    errors = {}
+    def entry_redirect(entry, registration=None, mode="invoer"):
+        params = {"module": entry.meta_key, "weergave": mode}
+        if registration is not None:
+            params["registratie"] = registration.id
+        if query:
+            params["q"] = query
+        return redirect(f"{request.path}?{urlencode(params)}")
+
     if request.method == "POST" and selected:
+        action = request.POST.get("action", "save")
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
-        else:
-            form_result = parse_module_form(request.POST, selected.schema, selected.data)
-            errors = form_result.errors
-            if errors:
-                messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+            return entry_redirect(selected, None, "lijst")
+        if action == "new":
+            if selected.module is None:
+                messages.error(request, "Voor dit onderdeel kan geen nieuwe registratie aangemaakt worden.")
+                return entry_redirect(selected, None, "lijst")
+            registration = new_registration(student_case, selected.module, author=request.user)
+            audit(request, "module_response.created", registration)
+            messages.success(request, "Nieuwe registratie aangemaakt.")
+            return entry_redirect(selected, registration)
+        target_pk = request.POST.get("registratie")
+        target = next((item for item in selected.responses if str(item.pk) == target_pk), None)
+        if target is None:
+            raise Http404
+        is_published = target.status == ModuleResponse.Status.PUBLISHED
+        if action == "delete":
+            if is_published:
+                messages.error(request, "Een gepubliceerde registratie kan niet worden verwijderd. Zet haar eerst terug naar concept.")
+                return entry_redirect(selected, target)
+            audit(request, "module_response.deleted", target)
+            target.delete()
+            messages.success(request, "Registratie verwijderd.")
+            remaining = [item for item in selected.registrations if item.pk != target.pk]
+            if remaining:
+                return entry_redirect(selected, remaining[0])
+            return entry_redirect(selected)
+        if action == "edit":
+            if is_published:
+                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
+            return entry_redirect(selected, target)
+        if action == "unpublish":
+            if not is_published:
+                messages.error(request, "Deze registratie is nog niet gepubliceerd.")
+                return entry_redirect(selected, target)
+            target.status = ModuleResponse.Status.CONCEPT
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.unpublished", target)
+            messages.success(request, "Registratie teruggezet naar concept. Je kunt haar opnieuw bewerken.")
+            return entry_redirect(selected, target)
+        if action == "publish" and not any(key.startswith("field_") for key in request.POST):
+            if is_published:
+                messages.error(request, "Deze registratie is al gepubliceerd.")
+                return entry_redirect(selected, target)
+            target.status = ModuleResponse.Status.PUBLISHED
+            target.save(update_fields=["status", "updated_at"])
+            audit(request, "module_response.published", target)
+            messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+            return entry_redirect(selected, target)
+        if is_published:
+            messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
+            return entry_redirect(selected, target)
+
+        form_result = parse_module_form(request.POST, target.schema, target.data)
+        if not form_result.errors:
+            target.data = form_result.data
+            if action == "publish":
+                target.status = ModuleResponse.Status.PUBLISHED
+                target.save(update_fields=["data", "status", "updated_at"])
+                messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
+                audit(request, "module_response.published", target, observations_added=len(form_result.added_observations))
             else:
-                selected.data = form_result.data
-                selected.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Dossieronderdeel en observaties bewaard." if form_result.added_observations else "Dossieronderdeel bewaard.")
-                audit(request, "module_response.updated", selected, observations_added=len(form_result.added_observations))
-        if not errors:
-            params = {"module": selected.id}
-            if query:
-                params["q"] = query
-            return redirect(f"{request.path}?{urlencode(params)}")
-    elif selected and request.GET.get("validate") == "1":
-        errors = validate_module_data(selected.schema, selected.data, require_complete=True)
+                target.save(update_fields=["data", "updated_at"])
+                messages.success(request, "Registratie en observaties bewaard." if form_result.added_observations else "Registratie bewaard.")
+                audit(request, "module_response.updated", target, observations_added=len(form_result.added_observations))
+            return entry_redirect(selected, target)
+        messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+        view_mode = "invoer"
+        registrations = selected.registrations
+        failed_form = form_result
+        target.display_values = prepare_schema_fields(target.schema, form_result.display_data)
+        registrations_by_id = {item.pk: item for item in registrations}
+        selected_registration = registrations_by_id.get(target.pk, target)
+
+    else:
+        view_mode = request.GET.get("weergave", "lijst")
+        if view_mode not in ("lijst", "invoer"):
+            view_mode = "lijst"
+        if request.GET.get("validate") == "1":
+            view_mode = "invoer"
+
+        registrations = selected.registrations if selected else []
+        selected_id = request.GET.get("registratie")
+        selected_registration = next((item for item in registrations if str(item.id) == selected_id), None)
+        if selected_registration is None:
+            selected_registration = registrations[0] if registrations else None
+        failed_form = None
+
+    for response in responses:
+        if not hasattr(response, "display_values"):
+            response.display_values = prepare_schema_fields(response.schema, response.data)
+
+    errors = {}
+    if failed_form is None and selected_registration and request.GET.get("validate") == "1":
+        errors = validate_module_data(selected_registration.schema, selected_registration.data, require_complete=True)
+
+    fields = []
+    if selected and view_mode == "invoer" and selected_registration:
+        fields = prepare_schema_fields(
+            selected_registration.schema,
+            failed_form.display_data if failed_form else selected_registration.data,
+            errors=failed_form.errors if failed_form else errors,
+            pending_observations=failed_form.pending_observations if failed_form else None,
+        )
 
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": visible_modules,
         "selected": selected, "query": query,
-        "fields": prepare_schema_fields(
-            selected.schema, form_result.display_data if form_result else selected.data,
-            errors=errors,
-            pending_observations=form_result.pending_observations if form_result else None,
-        ) if selected else [],
+        "registrations": registrations,
+        "selected_registration": selected_registration,
+        "view_mode": view_mode,
+        "fields": fields,
+        "form_locked": bool(student_case.locked or (
+            selected_registration is not None
+            and selected_registration.status == ModuleResponse.Status.PUBLISHED
+        )),
     })
 
 
@@ -394,14 +547,19 @@ def submit_student_case(request, case_id):
         messages.error(request, "Dien eerst alle opdrachten in.")
     invalid_modules = []
     for module in student_case.module_responses.all():
+        if registration_is_empty(module):
+            continue
         errors = validate_module_data(module.schema, module.data, require_complete=True)
         if errors:
             invalid_modules.append(module)
             labels = ", ".join(field["label"] for field in module.schema if field["key"] in errors)
-            messages.error(request, f"Controleer {module.title}: {labels}.")
+            messages.error(request, f"Controleer {module.display_name} ({module.title}): {labels}.")
     if invalid_modules:
         url = redirect("dossier:dossier", case_id=case_id).url
-        return redirect(f"{url}?{urlencode({'module': invalid_modules[0].id, 'validate': '1'})}")
+        first = invalid_modules[0]
+        params = {"validate": "1", "registratie": first.id}
+        params["module"] = str(first.module_id) if first.module_id is not None else f"los-{first.id}"
+        return redirect(f"{url}?{urlencode(params)}")
     if incomplete:
         return redirect("dossier:case_detail", case_id=case_id)
     student_case.status = StudentCase.Status.SUBMITTED
@@ -552,72 +710,48 @@ def teacher_case(request, case_id):
             and module.source_template.status == LibraryTemplate.Status.ARCHIVED
         ) or str(source_dossier_id) in archived_dossier_ids
 
-    draft_module_change = next((
-        module for module in case_modules
-        if (
-            case.status in {Case.Status.DRAFT, Case.Status.ARCHIVED}
-            and module.source_template
-            and (
-                (
-                    module_source_removed(module)
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.configuration.get("library_dossier_module_removed")
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.source_template.status == LibraryTemplate.Status.ACTIVE
-                    and module.source_template_version != module.source_template.version
-                    and module.configuration.get("library_change_handled_version")
-                    != module.source_template.version
-                )
-            )
+    def module_has_unhandled_change(module):
+        configuration = module.configuration
+        removal_unhandled = not configuration.get("library_removal_handled")
+        return (
+            (module_source_removed(module) or configuration.get("library_dossier_module_removed"))
+            and removal_unhandled
+        ) or (
+            module.source_template.status == LibraryTemplate.Status.ACTIVE
+            and module.source_template_version != module.source_template.version
+            and configuration.get("library_change_handled_version")
+            != module.source_template.version
+        ) or configuration.get("library_dossier_order_changed") or (
+            pending_student_base_data_version(configuration) is not None
         )
-    ), None)
-    published_module_change = next((
-        module for module in case_modules
-        if (
-            case.status == Case.Status.PUBLISHED
-            and module.source_template
-            and (
-                (
-                    module_source_removed(module)
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.configuration.get("library_dossier_module_removed")
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.source_template.status == LibraryTemplate.Status.ACTIVE
-                    and module.source_template_version != module.source_template.version
-                    and module.configuration.get("library_change_handled_version")
-                    != module.source_template.version
-                )
-            )
-        )
-    ), None)
+
     def module_change_is_removal(module):
         return (
             module_source_removed(module)
             or module.configuration.get("library_dossier_module_removed")
         )
 
+    module_changes = [
+        {
+            "module": module,
+            "is_removal": module_change_is_removal(module),
+            "is_base_data": (
+                pending_student_base_data_version(module.configuration) is not None
+            ),
+        }
+        for module in case_modules
+        if (
+            case.status in {Case.Status.DRAFT, Case.Status.ARCHIVED, Case.Status.PUBLISHED}
+            and module.source_template
+            and module_has_unhandled_change(module)
+        )
+    ]
+
     return render(request, "dossier/teacher_case.html", {
         "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
         "available_dossiers": dossiers,
-        "draft_module_change": draft_module_change,
-        "published_module_change": published_module_change,
-        "draft_change_is_removal": (
-            draft_module_change is not None
-            and module_change_is_removal(draft_module_change)
-        ),
-        "published_change_is_removal": (
-            published_module_change is not None
-            and module_change_is_removal(published_module_change)
-        ),
+        "module_changes": module_changes,
         "case_modules": case_modules,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
@@ -822,6 +956,7 @@ def teacher_case_add_dossier(request, case_id):
 
 
 @login_required
+@transaction.atomic
 def teacher_case_transition(request, case_id):
     require_teacher(request.user)
     require_post(request)
@@ -837,6 +972,30 @@ def teacher_case_transition(request, case_id):
         if has_assignments and has_modules:
             case.publish()
             case.save()
+            approved_base_data_modules = []
+            for module in case.modules.all():
+                configuration = module.configuration or {}
+                version = configuration.get(STUDENT_BASE_DATA_VERSION)
+                if (
+                    type(version) is int
+                    and version > 0
+                    and configuration.get(STUDENT_BASE_DATA_APPROVED_VERSION) == version
+                    and configuration.get(STUDENT_BASE_DATA_APPLIED_VERSION) != version
+                ):
+                    approved_base_data_modules.append((module, version))
+            base_data_module_ids = {
+                module.pk for module, _ in approved_base_data_modules
+            }
+            for student_case in case.student_cases.all():
+                synchronize_student_case(
+                    student_case,
+                    base_data_module_ids=base_data_module_ids,
+                )
+            for module, version in approved_base_data_modules:
+                configuration = dict(module.configuration or {})
+                configuration[STUDENT_BASE_DATA_APPLIED_VERSION] = version
+                module.configuration = configuration
+                module.save(update_fields=["configuration"])
             audit(request, "case.published", case)
             messages.success(request, "Casus gepubliceerd voor studenten.")
     elif action == "archive":
@@ -868,7 +1027,7 @@ def teacher_case_delete(request, case_id):
     if case.student_cases.exists():
         messages.error(
             request,
-            "Deze gearchiveerde casus kan niet worden verwijderd zolang er studentendossiers aan gekoppeld zijn.",
+            "Gearchiveerde casus verwijderen? Dit kan alleen als er geen studentendossiers aan gekoppeld zijn.",
         )
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "case.deleted", case, title=case.title)
@@ -943,9 +1102,25 @@ def teacher_module(request, case_id, module_id):
         if form_result.errors:
             messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         else:
+            base_data_changed = module.base_data != form_result.data
             module.base_data = form_result.data
-            module.save(update_fields=["base_data"])
+            update_fields = ["base_data"]
+            has_active_students = case.student_cases.filter(
+                status=StudentCase.Status.ACTIVE
+            ).exists()
+            if base_data_changed and has_active_students:
+                configuration = dict(module.configuration or {})
+                version = configuration.get(STUDENT_BASE_DATA_VERSION, 0)
+                if type(version) is not int or version < 0:
+                    version = 0
+                configuration[STUDENT_BASE_DATA_VERSION] = version + 1
+                module.configuration = configuration
+                update_fields.append("configuration")
+            module.save(update_fields=update_fields)
             audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
+            if base_data_changed and has_active_students:
+                messages.success(request, "Basisdossier bijgewerkt. Kies in de casus of studentversies de nieuwe voorinvulling krijgen.")
+                return redirect("dossier:teacher_case", case_id=case.id)
             messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
             return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
     return render(request, "dossier/teacher_base_module.html", {
@@ -985,31 +1160,55 @@ def teacher_removed_module_resolve(request, case_id, module_id):
         template
         and template.status == LibraryTemplate.Status.ACTIVE
         and module.source_template_version != template.version
+        and module.configuration.get("library_change_handled_version")
+        != template.version
     )
     dossier_module_removed = module.configuration.get("library_dossier_module_removed")
-    if not (template_removed or dossier_removed or dossier_module_removed or template_updated):
+    order_changed = module.configuration.get("library_dossier_order_changed")
+    base_data_version = pending_student_base_data_version(module.configuration)
+    base_data_updated = base_data_version is not None
+    if not (
+        template_removed or dossier_removed or dossier_module_removed
+        or template_updated or order_changed or base_data_updated
+    ):
         raise PermissionDenied
     if action == "keep":
         configuration = dict(module.configuration or {})
         if template_removed or dossier_removed or dossier_module_removed:
             configuration["library_removal_handled"] = True
-        else:
+        if template_updated:
             configuration["library_change_handled_version"] = template.version
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
+        if order_changed:
+            resolve_dossier_module_order(case, source_dossier_id, apply=False)
         messages.success(request, "De module blijft behouden in de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
     if action != "remove":
         raise PermissionDenied
+    if base_data_updated and not (
+        template_removed or dossier_removed or dossier_module_removed
+    ):
+        configuration = dict(module.configuration or {})
+        configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
+        configuration[STUDENT_BASE_DATA_APPROVED_VERSION] = base_data_version
+        module.configuration = configuration
+        module.save(update_fields=["configuration"])
     if template_updated and not dossier_module_removed:
         synchronize_template_module(template, module)
-        messages.success(request, "De bibliotheekwijziging is toegepast op de casus.")
-        return redirect("dossier:teacher_case", case_id=case.id)
-    if case.student_cases.exists():
-        messages.error(
-            request,
-            "Deze module kan niet worden verwijderd omdat de casus al studentversies bevat.",
+    if order_changed:
+        resolve_dossier_module_order(case, source_dossier_id, apply=True)
+    if (
+        (template_updated and not dossier_module_removed)
+        or order_changed
+        or (
+            base_data_updated
+            and not (template_removed or dossier_removed or dossier_module_removed)
         )
+    ):
+        messages.success(request, "De wijziging is toegepast op de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "module.deleted", module, title=module.title)
     module.delete()
@@ -1042,32 +1241,67 @@ def teacher_published_module_resolve(request, case_id, module_id):
         template
         and template.status == LibraryTemplate.Status.ACTIVE
         and module.source_template_version != template.version
+        and configuration.get("library_change_handled_version") != template.version
     )
     dossier_module_removed = configuration.get("library_dossier_module_removed")
-    if not (template_removed or dossier_removed or dossier_module_removed or template_updated):
+    order_changed = configuration.get("library_dossier_order_changed")
+    base_data_version = pending_student_base_data_version(configuration)
+    base_data_updated = base_data_version is not None
+    if not (
+        template_removed or dossier_removed or dossier_module_removed
+        or template_updated or order_changed or base_data_updated
+    ):
         raise PermissionDenied
     if action == "keep":
         if template_removed or dossier_removed or dossier_module_removed:
             configuration["library_removal_handled"] = True
-        else:
+        if template_updated:
             configuration["library_change_handled_version"] = template.version
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
         module.configuration = configuration
         module.save(update_fields=["configuration"])
+        if order_changed:
+            resolve_dossier_module_order(case, dossier_id, apply=False)
         messages.success(request, "De wijziging blijft alleen in de bibliotheek staan.")
         return redirect("dossier:teacher_case", case_id=case.id)
     if action not in {"accept", "sync_students"}:
         raise PermissionDenied
     if template_removed or dossier_removed or dossier_module_removed:
         if action == "sync_students":
-            remove_module_from_students(module)
+            detach_module_responses(module)
         audit(request, "module.deleted", module, title=module.title)
         module.delete()
         messages.success(request, "De verwijderde module is uit de gepubliceerde casus verwijderd.")
     else:
-        synchronize_template_module(template, module)
+        if base_data_updated:
+            configuration[STUDENT_BASE_DATA_HANDLED_VERSION] = base_data_version
+            configuration[STUDENT_BASE_DATA_APPROVED_VERSION] = base_data_version
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
+        if template_updated:
+            synchronize_template_module(template, module)
+        ordered_modules = (
+            resolve_dossier_module_order(case, dossier_id, apply=True)
+            if order_changed else []
+        )
         if action == "sync_students":
-            synchronize_module_to_students(module)
-        messages.success(request, "De bibliotheekwijziging is toegepast op de gepubliceerde casus.")
+            modules_to_sync = {
+                item.pk: (item, False) for item in ordered_modules
+            }
+            if template_updated or base_data_updated:
+                modules_to_sync[module.pk] = (module, base_data_updated)
+            for updated_module, apply_base_data in modules_to_sync.values():
+                synchronize_module_to_students(
+                    updated_module,
+                    apply_base_data=apply_base_data,
+                )
+            if base_data_updated:
+                configuration = dict(module.configuration or {})
+                configuration[STUDENT_BASE_DATA_APPLIED_VERSION] = base_data_version
+                module.configuration = configuration
+                module.save(update_fields=["configuration"])
+        messages.success(request, "De wijziging is toegepast op de gepubliceerde casus.")
     return redirect("dossier:teacher_case", case_id=case.id)
 
 
@@ -1116,41 +1350,24 @@ def teacher_module_field_delete(request, case_id, module_id, field_id):
 def _student_case_for_teacher(request, student_case_id):
     require_teacher(request.user)
     student_case = get_object_or_404(
-        StudentCase.objects.select_related("case", "student", "final_feedback_by").prefetch_related(
-            Prefetch(
-                "assignment_submissions",
-                queryset=AssignmentSubmission.objects.prefetch_related(
-                    Prefetch("reviews", queryset=AssignmentReview.objects.select_related("reviewer"))
-                ),
-            ),
-            Prefetch("module_responses", queryset=ModuleResponse.objects.select_related("feedback_by")),
+        StudentCase.objects.select_related("case", "student").prefetch_related(
+            "assignment_submissions",
+            Prefetch("module_responses", queryset=ModuleResponse.objects.select_related("module", "created_by")),
         ), id=student_case_id
     )
     editable_case(request.user, student_case.case_id)
-    return student_case
-
-
-def attach_review_history(submission):
-    """Zet beoordelingsgeschiedenis klaar voor docent- en studentweergave."""
-    history = list(submission.reviews.all())
-    submission.latest_review = history[-1] if history else None
-    submission.earlier_reviews = list(reversed(history[:-1]))
-    submission.answer_changed_since_review = bool(
-        submission.latest_review and submission.latest_review.answer != submission.answer
-    )
-    submission.has_review = bool(submission.reviewed_at or submission.latest_review)
-
-
-def render_teacher_student_case(request, student_case, *, bound_forms=None):
-    """Beoordelingspagina; bound_forms houdt een ongeldig ingediend formulier
-    (met getypte feedback en foutmeldingen) vast in plaats van een stille redirect."""
-    bound_forms = bound_forms or {}
-    for module in student_case.module_responses.all():
-        module.display_values = prepare_schema_fields(module.schema, module.data)
-        module.feedback_form = bound_forms.get(("module", module.id)) or ModuleFeedbackForm(
-            initial={"feedback": module.feedback, "revision_requested": module.revision_requested},
-            auto_id=f"id_module_%s_{module.id}",
-        )
+    for response in student_case.module_responses.all():
+        response.display_values = prepare_schema_fields(response.schema, response.data)
+    grouped = {}
+    module_groups = []
+    for response in student_case.module_responses.all():
+        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
+        if key not in grouped:
+            grouped[key] = {"title": response.title, "registrations": []}
+            module_groups.append(grouped[key])
+        grouped[key]["registrations"].append(response)
+    for group in module_groups:
+        group["registrations"] = list(reversed(group["registrations"]))
     for submission in student_case.assignment_submissions.all():
         attach_review_history(submission)
         # Bij een herbeoordeling staan de huidige status en eerdere feedback al
@@ -1177,6 +1394,8 @@ def render_teacher_student_case(request, student_case, *, bound_forms=None):
 def teacher_student_case(request, student_case_id):
     student_case = _student_case_for_teacher(request, student_case_id)
     return render_teacher_student_case(request, student_case)
+        "module_groups": module_groups,
+    })
 
 
 @login_required
@@ -1299,7 +1518,7 @@ def library_list(request):
         "education_id", "education__name"
     ).distinct()
     if dossier_query:
-        dossiers = dossiers.filter(title__istartswith=dossier_query)
+        dossiers = dossiers.filter(title__icontains=dossier_query)
     if dossier_education.isdecimal():
         dossiers = dossiers.filter(education_id=dossier_education)
     ordered_dossiers = list(dossiers)

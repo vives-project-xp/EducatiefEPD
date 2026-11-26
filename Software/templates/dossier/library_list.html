@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}Bibliotheek | Educatief EPD{% endblock %}
 {% block content %}
+<script src="{% static 'library-search.js' %}" defer></script>
+
 <main class="teacher-shell">
   <header class="page-bar library-page-header">
     <div>
@@ -20,7 +23,7 @@
     <div class="section-heading">
       <div><p class="eyebrow">Samengestelde dossiers</p><h2>Dossiersjablonen</h2></div>
     </div>
-    <form class="filter-bar" method="get">
+    <form class="filter-bar" method="get" id="dossier-filter">
       <input type="hidden" name="q" value="{{ query }}">
       <input type="hidden" name="category" value="{{ category_filter }}">
       <input type="hidden" name="education" value="{{ education_filter }}">
@@ -34,7 +37,7 @@
       </select>
       <button class="outline button">Dossiers filteren</button>
     </form>
-    <div class="library-grid">
+    <div class="library-grid" id="dossier-results">
       {% for dossier in dossiers %}
       <article class="library-card">
         <details class="library-dossier-card">
