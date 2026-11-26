@@ -141,10 +141,13 @@ class TeacherOptionalPrefillTests(TestCase):
         self.client.force_login(self.student)
         response = self.client.post(reverse("dossier:dossier", args=[self.case.pk]), {
             "action": "save", "module": self.module.pk, "registratie": module_response.pk,
+            "field_short_text": "Gedeeltelijk ingevuld",
         }, follow=True)
-        self.assertContains(response, "bewaard")
+        self.assertContains(response, "Registratie bewaard.")
         module_response.refresh_from_db()
-        self.assertEqual(module_response.data["short_text"], "")
+        # A partially filled registration is validated on submission; only
+        # completely empty registrations are skipped by the submit flow.
+        self.assertEqual(module_response.data["short_text"], "Gedeeltelijk ingevuld")
         self.assertTrue(all(field["required"] for field in module_response.schema))
         # Matrix's draft workflow checks completeness when submitting the dossier.
         submission = student_case.assignment_submissions.get()
