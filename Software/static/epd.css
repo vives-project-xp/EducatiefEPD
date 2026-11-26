@@ -4001,7 +4001,6 @@ summary {
 
 .library-component-management {
   display: grid;
-  gap: 16px;
 }
 
 .library-component-management-details {
