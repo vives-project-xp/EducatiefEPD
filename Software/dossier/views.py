@@ -58,6 +58,7 @@ from .models import (
     ManagedForm,
     ManagedQuestion,
     ModuleResponse,
+    Registration,
     Profile,
     StudentCase,
     TeachingGroup,
@@ -66,8 +67,10 @@ from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case,
     module_schema, new_registration, registration_is_empty, start_student_case, clean_html,
     remove_module_from_students, synchronize_module_to_students,
-    synchronize_template_module, synchronize_dossier_additions_to_cases,
+    synchronize_template_module, synchronize_dossier_additions_to_cases, create_registration,
 )
+
+from .registration import annotate_permissions, can_create, visible_registrations
 
 
 def user_role(user):
@@ -261,6 +264,106 @@ def case_detail(request, case_id):
         "previous_assignment": previous_assignment, "next_assignment": next_assignment,
     })
 
+def registration_url(request, module, registration=None, mode="invoer", query=""):
+    params = {"module": module.pk, "weergave": mode}
+    if registration is not None:
+        params["registratie"] = registration.pk
+    if query:
+        params["q"] = query
+    return f"{request.path}?{urlencode(params)}"
+
+
+def handle_registration_post(request, case, module, registrations, *, query=""):
+    """Gedeelde POST-afhandeling voor student en docent.
+
+    Geeft (redirect_url, mislukt_formulier, doelregistratie) terug; precies één van de
+    eerste twee is gevuld. `registrations` moet de zichtbare registraties van deze module
+    zijn, met can_edit/can_unpublish al gezet (annotate_permissions).
+    """
+    user = request.user
+    staff = is_teacher(user)
+    action = request.POST.get("action", "save")
+
+    def url(registration=None, mode="invoer"):
+        return registration_url(request, module, registration, mode, query)
+
+    if action == "new":
+        if not can_create(user, case):
+            raise PermissionDenied
+        created = create_registration(case, module, author=user)
+        audit(request, "registration.created", created)
+        messages.success(request, "Nieuwe registratie aangemaakt.")
+        return url(created), None, None
+
+    target = next(
+        (item for item in registrations if str(item.pk) == request.POST.get("registratie", "")),
+        None,
+    )
+    if target is None:
+        raise Http404  # bestaat niet, of is niet zichtbaar voor deze gebruiker
+
+    if action == "copy_to_new":
+        if not can_create(user, case):
+            raise PermissionDenied
+        created = create_registration(case, module, author=user, source=target)
+        audit(request, "registration.copied", created, source_id=target.id)
+        messages.success(request, f"Nieuw concept aangemaakt op basis van {target.display_name}.")
+        return url(created), None, None
+
+    if action == "edit":
+        if not target.can_edit:
+            messages.error(request, "Deze registratie kan niet worden bewerkt.")
+        return url(target), None, None
+
+    if action == "unpublish":
+        if not target.can_unpublish:
+            raise PermissionDenied
+        target.status = Registration.Status.CONCEPT
+        target.save(update_fields=["status", "updated_at"])
+        audit(request, "registration.unpublished", target)
+        messages.success(request, "Registratie teruggezet naar concept. Je kunt haar opnieuw bewerken.")
+        return url(target), None, None
+
+    if not target.can_edit:
+        raise PermissionDenied
+
+    if action == "delete":
+        audit(request, "registration.deleted", target)
+        target.delete()
+        messages.success(request, "Registratie verwijderd.")
+        return url(None, "lijst"), None, None
+
+    if action == "publish" and not any(
+        key.startswith(("field_", "matrix_", "observation_")) for key in request.POST
+    ):
+        target.status = Registration.Status.PUBLISHED
+        target.save(update_fields=["status", "updated_at"])
+        audit(request, "registration.published", target)
+        messages.success(request, "Registratie gepubliceerd.")
+        return url(target), None, None
+
+    result = parse_module_form(request.POST, target.schema, target.data, edit_readonly=staff)
+    if result.errors:
+        return None, result, target
+    target.data = result.data
+    update_fields = ["data", "updated_at"]
+    if action == "publish":
+        target.status = Registration.Status.PUBLISHED
+        update_fields.append("status")
+    target.save(update_fields=update_fields)
+    audit(
+        request,
+        "registration.published" if action == "publish" else "registration.updated",
+        target, observations_added=len(result.added_observations),
+    )
+    if action == "publish":
+        messages.success(request, "Registratie gepubliceerd.")
+    else:
+        messages.success(
+            request,
+            "Registratie en observaties bewaard." if result.added_observations else "Registratie bewaard.",
+        )
+    return url(target), None, None
 
 def prepare_schema_fields(schema, data, *, errors=None, pending_observations=None, edit_readonly=False):
     prepared = []
@@ -369,154 +472,64 @@ def dossier(request, case_id):
         student_case = StudentCase.objects.select_for_update().get(pk=student_case.pk)
     query = request.GET.get("q", "").strip()
 
-    responses = list(student_case.module_responses.select_related("module", "created_by").order_by("module_id", "id"))
-    grouped = {}
-    entries = []
-    for response in responses:
-        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
-        if key not in grouped:
-            grouped[key] = _ModuleEntry(response.module, [])
-            entries.append(grouped[key])
-        grouped[key].responses.append(response)
-
-    visible_modules = [entry for entry in entries if query.lower() in entry.title.lower()] if query else entries
+    modules = list(case.modules.all())
+    visible_modules = [m for m in modules if query.lower() in m.title.lower()] if query else modules
     selected_key = request.POST.get("module") or request.GET.get("module")
-    selected = next((entry for entry in entries if entry.meta_key == selected_key), None)
+    selected = next((m for m in modules if str(m.pk) == str(selected_key)), None)
     if request.method == "POST" and selected is None:
         raise Http404
-    if selected is None and entries:
-        selected = entries[0]
+    if selected is None and modules:
+        selected = modules[0]
 
-    def entry_redirect(entry, registration=None, mode="invoer"):
-        params = {"module": entry.meta_key, "weergave": mode}
-        if registration is not None:
-            params["registratie"] = registration.id
-        if query:
-            params["q"] = query
-        return redirect(f"{request.path}?{urlencode(params)}")
+    registrations = []
+    if selected:
+        registrations = list(
+            visible_registrations(request.user, case)
+            .filter(module=selected).order_by("-created_at", "-id")
+        )
+        annotate_permissions(request.user, case.id, registrations)
 
+    failed_form = None
+    selected_registration = None
     if request.method == "POST" and selected:
-        action = request.POST.get("action", "save")
         if student_case.locked:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
-            return entry_redirect(selected, None, "lijst")
-        if action == "new":
-            if selected.module is None:
-                messages.error(request, "Voor dit onderdeel kan geen nieuwe registratie aangemaakt worden.")
-                return entry_redirect(selected, None, "lijst")
-            registration = new_registration(student_case, selected.module, author=request.user)
-            audit(request, "module_response.created", registration)
-            messages.success(request, "Nieuwe registratie aangemaakt.")
-            return entry_redirect(selected, registration)
-        target_pk = request.POST.get("registratie")
-        target = next((item for item in selected.responses if str(item.pk) == target_pk), None)
-        if target is None:
-            raise Http404
-        is_published = target.status == ModuleResponse.Status.PUBLISHED
-        if action == "delete":
-            if is_published:
-                messages.error(request, "Een gepubliceerde registratie kan niet worden verwijderd. Zet haar eerst terug naar concept.")
-                return entry_redirect(selected, target)
-            audit(request, "module_response.deleted", target)
-            target.delete()
-            messages.success(request, "Registratie verwijderd.")
-            remaining = [item for item in selected.registrations if item.pk != target.pk]
-            if remaining:
-                return entry_redirect(selected, remaining[0])
-            return entry_redirect(selected)
-        if action == "edit":
-            if is_published:
-                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
-            return entry_redirect(selected, target)
-        if action == "unpublish":
-            if not is_published:
-                messages.error(request, "Deze registratie is nog niet gepubliceerd.")
-                return entry_redirect(selected, target)
-            target.status = ModuleResponse.Status.CONCEPT
-            target.save(update_fields=["status", "updated_at"])
-            audit(request, "module_response.unpublished", target)
-            messages.success(request, "Registratie teruggezet naar concept. Je kunt haar opnieuw bewerken.")
-            return entry_redirect(selected, target)
-        if action == "publish" and not any(key.startswith("field_") for key in request.POST):
-            if is_published:
-                messages.error(request, "Deze registratie is al gepubliceerd.")
-                return entry_redirect(selected, target)
-            target.status = ModuleResponse.Status.PUBLISHED
-            target.save(update_fields=["status", "updated_at"])
-            audit(request, "module_response.published", target)
-            messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
-            return entry_redirect(selected, target)
-        if is_published:
-            messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
-            return entry_redirect(selected, target)
-        if action == "copy_to_new":
-            if selected.module is None:
-                messages.error(request, "Voor dit onderdeel kan geen nieuwe registratie aangemaakt worden.")
-                return entry_redirect(selected, None, "lijst")
-
-            # Match this name to whatever `name="..."` attribute your existing registration <select> uses
-            source_id_raw = request.POST.get("source_registration") or request.POST.get("registratie")
-            source_reg = next(
-                (item for item in selected.responses if str(item.pk) == str(source_id_raw)),
-                None,
-            )
-            if source_reg is None:
-                messages.error(request, "Kies een geldige registratie om uit te kopiëren.")
-                return entry_redirect(selected, None, "lijst")
-
-            registration = new_registration(student_case, selected.module, author=request.user)
-            registration.status = ModuleResponse.Status.CONCEPT
-            registration.data = deepcopy(source_reg.data)
-            registration.save(update_fields=["status", "data", "updated_at"])
-            audit(request, "module_response.copied_to_new", registration, source_id=source_reg.id)
-            messages.success(request, f"Nieuw concept aangemaakt op basis van {source_reg.display_name}.")
-            return entry_redirect(selected, registration)
-
-        form_result = parse_module_form(request.POST, target.schema, target.data)
-        if not form_result.errors:
-            target.data = form_result.data
-            if action == "publish":
-                target.status = ModuleResponse.Status.PUBLISHED
-                target.save(update_fields=["data", "status", "updated_at"])
-                messages.success(request, "Registratie gepubliceerd. Een gepubliceerde registratie kun je niet meer bewerken.")
-                audit(request, "module_response.published", target, observations_added=len(form_result.added_observations))
-            else:
-                target.save(update_fields=["data", "updated_at"])
-                messages.success(request, "Registratie en observaties bewaard." if form_result.added_observations else "Registratie bewaard.")
-                audit(request, "module_response.updated", target, observations_added=len(form_result.added_observations))
-            return entry_redirect(selected, target)
+            return redirect(registration_url(request, selected, None, "lijst", query))
+        redirect_url, failed_form, target = handle_registration_post(
+            request, case, selected, registrations, query=query
+        )
+        if redirect_url:
+            return redirect(redirect_url)
         messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
         view_mode = "invoer"
-        registrations = selected.registrations
-        failed_form = form_result
-        target.display_values = prepare_schema_fields(target.schema, form_result.display_data)
-        registrations_by_id = {item.pk: item for item in registrations}
-        selected_registration = registrations_by_id.get(target.pk, target)
-
+        selected_registration = target
     else:
         view_mode = request.GET.get("weergave", "lijst")
         if view_mode not in ("lijst", "invoer"):
             view_mode = "lijst"
         if request.GET.get("validate") == "1":
             view_mode = "invoer"
+        wanted = request.GET.get("registratie", "")
+        selected_registration = next(
+            (item for item in registrations if str(item.pk) == wanted),
+            registrations[0] if registrations else None,
+        )
 
-        registrations = selected.registrations if selected else []
-        selected_id = request.GET.get("registratie")
-        selected_registration = next((item for item in registrations if str(item.id) == selected_id), None)
-        if selected_registration is None:
-            selected_registration = registrations[0] if registrations else None
-        failed_form = None
-
-    for response in responses:
-        if not hasattr(response, "display_values"):
-            response.display_values = prepare_schema_fields(response.schema, response.data)
+    for registration in registrations:
+        registration.display_values = prepare_schema_fields(registration.schema, registration.data)
+    if failed_form:
+        selected_registration.display_values = prepare_schema_fields(
+            selected_registration.schema, failed_form.display_data
+        )
 
     errors = {}
     if failed_form is None and selected_registration and request.GET.get("validate") == "1":
-        errors = validate_module_data(selected_registration.schema, selected_registration.data, require_complete=True)
+        errors = validate_module_data(
+            selected_registration.schema, selected_registration.data, require_complete=True
+        )
 
     fields = []
-    if selected and view_mode == "invoer" and selected_registration:
+    if selected_registration and view_mode == "invoer":
         fields = prepare_schema_fields(
             selected_registration.schema,
             failed_form.display_data if failed_form else selected_registration.data,
@@ -524,26 +537,16 @@ def dossier(request, case_id):
             pending_observations=failed_form.pending_observations if failed_form else None,
         )
 
-    previous_registration_data = None
-    if selected and selected_registration and selected_registration.status != ModuleResponse.Status.PUBLISHED:
-        idx = next((i for i, item in enumerate(selected.responses) if item.pk == selected_registration.pk), 0)
-        if idx > 0:
-            previous_registration_data = selected.responses[idx - 1].data
-
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": visible_modules,
         "selected": selected, "query": query,
         "registrations": registrations,
         "selected_registration": selected_registration,
-        "previous_registration_data": previous_registration_data,
         "view_mode": view_mode,
         "fields": fields,
-        "form_locked": bool(student_case.locked or (
-            selected_registration is not None
-            and selected_registration.status == ModuleResponse.Status.PUBLISHED
-        )),
+        "can_create": not student_case.locked,
+        "form_locked": not (selected_registration and selected_registration.can_edit),
     })
-
 
 @login_required
 @transaction.atomic
@@ -560,21 +563,24 @@ def submit_student_case(request, case_id):
     ).exists()
     if incomplete:
         messages.error(request, "Dien eerst alle opdrachten in.")
-    invalid_modules = []
-    for module in student_case.module_responses.all():
-        if registration_is_empty(module):
-            continue
-        errors = validate_module_data(module.schema, module.data, require_complete=True)
-        if errors:
-            invalid_modules.append(module)
-            labels = ", ".join(field["label"] for field in module.schema if field["key"] in errors)
-            messages.error(request, f"Controleer {module.display_name} ({module.title}): {labels}.")
-    if invalid_modules:
-        url = redirect("dossier:dossier", case_id=case_id).url
-        first = invalid_modules[0]
-        params = {"validate": "1", "registratie": first.id}
-        params["module"] = str(first.module_id) if first.module_id is not None else f"los-{first.id}"
-        return redirect(f"{url}?{urlencode(params)}")
+        invalid_modules = []
+        own_registrations = Registration.objects.filter(
+            case_id=student_case.case_id, author=request.user,
+            author_role=Registration.AuthorRole.STUDENT,
+        ).exclude(module=None).select_related("module")
+        for registration in own_registrations:
+            if registration_is_empty(registration):
+                continue
+            errors = validate_module_data(registration.schema, registration.data, require_complete=True)
+            if errors:
+                invalid_modules.append(registration)
+                labels = ", ".join(f["label"] for f in registration.schema if f["key"] in errors)
+                messages.error(request, f"Controleer {registration.display_name} ({registration.title}): {labels}.")
+        if invalid_modules:
+            url = redirect("dossier:dossier", case_id=case_id).url
+            first = invalid_modules[0]
+            params = {"validate": "1", "registratie": first.id, "module": first.module_id}
+            return redirect(f"{url}?{urlencode(params)}")
     if incomplete:
         return redirect("dossier:case_detail", case_id=case_id)
     student_case.status = StudentCase.Status.SUBMITTED
@@ -1104,30 +1110,61 @@ def teacher_module_create(request, case_id):
 def teacher_module(request, case_id, module_id):
     require_teacher(request.user)
     case = editable_case(request.user, case_id)
-    module = get_object_or_404(case.modules.prefetch_related("fields"), id=module_id)
-    if request.method == "POST":
-        module = Module.objects.select_for_update().get(pk=module.pk)
-    schema = module_schema(module)
-    form_result = None
-    if request.method == "POST":
-        form_result = parse_module_form(request.POST, schema, module.base_data, edit_readonly=True)
-        if form_result.errors:
-            messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
-        else:
-            module.base_data = form_result.data
-            module.save(update_fields=["base_data"])
-            audit(request, "base_dossier.updated", module, observations_added=len(form_result.added_observations))
-            messages.success(request, "Basisdossier bijgewerkt. Nieuwe studenten starten met deze gegevens.")
-            return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
-    return render(request, "dossier/teacher_base_module.html", {
-        "case": case, "module": module,
-        "fields": prepare_schema_fields(
-            schema, form_result.display_data if form_result else module.base_data, edit_readonly=True,
-            errors=form_result.errors if form_result else None,
-            pending_observations=form_result.pending_observations if form_result else None,
-        ),
-    })
+    module = get_object_or_404(case.modules.all(), id=module_id)
+    registrations = list(
+        visible_registrations(request.user, case)
+        .filter(module=module).order_by("-created_at", "-id")
+    )
+    annotate_permissions(request.user, case.id, registrations)
 
+    failed_form = None
+    selected_registration = None
+    if request.method == "POST":
+        redirect_url, failed_form, target = handle_registration_post(
+            request, case, module, registrations
+        )
+        if redirect_url:
+            return redirect(redirect_url)
+        messages.error(request, "Controleer de gemarkeerde velden. Je wijzigingen zijn nog niet bewaard.")
+        view_mode = "invoer"
+        scope = ""
+        shown = registrations
+        selected_registration = target
+    else:
+        view_mode = request.GET.get("weergave", "lijst")
+        if view_mode not in ("lijst", "invoer"):
+            view_mode = "lijst"
+        scope = request.GET.get("wie", "")
+        shown = [r for r in registrations if not scope or r.author_role == scope]
+        wanted = request.GET.get("registratie", "")
+        selected_registration = next(
+            (r for r in shown if str(r.pk) == wanted), shown[0] if shown else None
+        )
+
+    for registration in registrations:
+        registration.display_values = prepare_schema_fields(
+            registration.schema, registration.data, edit_readonly=True
+        )
+    if failed_form:
+        selected_registration.display_values = prepare_schema_fields(
+            selected_registration.schema, failed_form.display_data, edit_readonly=True
+        )
+
+    fields = []
+    if selected_registration and view_mode == "invoer":
+        fields = prepare_schema_fields(
+            selected_registration.schema,
+            failed_form.display_data if failed_form else selected_registration.data,
+            edit_readonly=True,
+            errors=failed_form.errors if failed_form else None,
+            pending_observations=failed_form.pending_observations if failed_form else None,
+        )
+    return render(request, "dossier/teacher_base_module.html", {
+        "case": case, "module": module, "registrations": shown,
+        "selected_registration": selected_registration, "view_mode": view_mode,
+        "fields": fields, "scope": scope,
+        "form_locked": not (selected_registration and selected_registration.can_edit),
+    })
 
 @login_required
 @require_POST
@@ -1290,20 +1327,26 @@ def teacher_student_case(request, student_case_id):
     student_case = get_object_or_404(
         StudentCase.objects.select_related("case", "student").prefetch_related(
             "assignment_submissions",
-            Prefetch("module_responses", queryset=ModuleResponse.objects.select_related("module", "created_by")),
-        ), id=student_case_id
+        ), id=student_case_id,
     )
     editable_case(request.user, student_case.case_id)
     for response in student_case.module_responses.all():
         response.display_values = prepare_schema_fields(response.schema, response.data)
     grouped = {}
     module_groups = []
-    for response in student_case.module_responses.all():
-        key = str(response.module_id) if response.module_id is not None else f"los-{response.id}"
+    registrations = list(
+        Registration.objects.filter(case_id=student_case.case_id, author_id=student_case.student_id)
+        .select_related("author", "module").order_by("position", "created_at", "id")
+    )
+    grouped = {}
+    module_groups = []
+    for registration in registrations:
+        registration.display_values = prepare_schema_fields(registration.schema, registration.data)
+        key = registration.module_id if registration.module_id is not None else f"los-{registration.id}"
         if key not in grouped:
-            grouped[key] = {"title": response.title, "registrations": []}
+            grouped[key] = {"title": registration.title, "registrations": []}
             module_groups.append(grouped[key])
-        grouped[key]["registrations"].append(response)
+        grouped[key]["registrations"].append(registration)
     for group in module_groups:
         group["registrations"] = list(reversed(group["registrations"]))
     for submission in student_case.assignment_submissions.all():

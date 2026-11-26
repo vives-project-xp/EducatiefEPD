@@ -596,6 +596,43 @@ class ModuleResponse(models.Model):
             self.position = self.module.position
             self.schema = [field.as_schema() for field in self.module.fields.all()]
 
+class Registration(models.Model):
+    class Status(models.TextChoices):
+        CONCEPT = "concept", "Concept"
+        PUBLISHED = "published", "Gepubliceerd"
+
+    class AuthorRole(models.TextChoices):
+        STAFF = "staff", "Docent/beheerder"
+        STUDENT = "student", "Student"
+
+    case = models.ForeignKey(Case, on_delete=models.CASCADE, related_name="registrations")
+    module = models.ForeignKey(Module, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="registrations")
+    # snapshot, so later library changes never alter existing registrations
+    title = models.CharField(max_length=180, blank=True)
+    kind = models.CharField(max_length=24, choices=Module.Kind.choices, default=Module.Kind.FORM)
+    instructions = models.TextField(blank=True)
+    position = models.PositiveIntegerField(default=0)
+    schema = models.JSONField(default=list, blank=True)
+    data = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONCEPT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name="registrations")
+    author_role = models.CharField(max_length=16, choices=AuthorRole.choices)  # fixed at creation
+    copied_from = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name="copies")
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "created_at", "id"]
+        indexes = [models.Index(fields=["case", "module"]), models.Index(fields=["case", "author"])]
+
+    @property
+    def display_name(self):
+        who = (self.author.get_full_name() or self.author.get_username()) if self.author else "Onbekend"
+        return f"{who} – {timezone.localtime(self.created_at):%d-%m-%Y %H:%M}"
 
 class AuditEvent(models.Model):
     actor = models.ForeignKey(
@@ -617,3 +654,4 @@ class AuditEvent(models.Model):
 
     def __str__(self):
         return f"{self.created_at}: {self.action}"
+    

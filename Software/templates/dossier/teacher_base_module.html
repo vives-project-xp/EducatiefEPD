@@ -1,9 +1,79 @@
 {% extends 'base.html' %}
+{% load epd_filters %}
 {% block title %}{{ module.title }} | Basisdossier{% endblock %}
 {% block content %}
-<main class="teacher-shell narrow"><header class="page-bar"><div><p class="eyebrow">Basisdossier · {{ case.patient.name }}</p><h1>{{ module.title }}</h1></div><a class="back" href="{% url 'dossier:teacher_case' case.id %}">← Casus</a></header>
+<main class="teacher-shell narrow">
+  <header class="page-bar">
+    <div><p class="eyebrow">Basisdossier · {{ case.patient.name }}</p><h1>{{ module.title }}</h1></div>
+    <a class="back" href="{% url 'dossier:teacher_case' case.id %}">← Casus</a>
+  </header>
   {% if module.instructions %}<div class="module-instructions">{{ module.instructions|linebreaks }}</div>{% endif %}
-  <p class="muted">Voorinvullen is optioneel. Je mag velden en volledige modules leeg laten, ook bij publicatie. Een * geeft een verplicht veld voor studenten aan.</p>
-  <form method="post" class="module-form base-dossier-form">{% csrf_token %}{% include 'dossier/_dynamic_fields.html' with locked=False %}{% if module.kind != 'information' %}<button class="primary button" type="submit" name="action" value="save">Basisdossier bewaren</button>{% endif %}</form>
+  <p class="muted">Registraties horen bij het dossier van de patiënt. Gepubliceerde docentregistraties zijn zichtbaar voor alle studenten van deze casus (alleen-lezen). Studenten zien hun eigen registraties; als docent zie je alles.</p>
+
+  <div class="registration-bar">
+    <div class="view-toggle">
+      <a class="button {% if view_mode == 'lijst' %}primary{% else %}secundary{% endif %}" href="?weergave=lijst{% if scope %}&amp;wie={{ scope }}{% endif %}">Lijst</a>
+      <a class="button {% if view_mode == 'invoer' %}primary{% else %}secundary{% endif %}" href="?weergave=invoer{% if selected_registration %}&amp;registratie={{ selected_registration.id }}{% endif %}{% if scope %}&amp;wie={{ scope }}{% endif %}">Invoer</a>
+    </div>
+    <form method="post" class="registration-actions">
+      {% csrf_token %}
+      <input type="hidden" name="module" value="{{ module.id }}">
+      {% if selected_registration %}<input type="hidden" name="registratie" value="{{ selected_registration.id }}">{% endif %}
+      {% if view_mode == 'invoer' and selected_registration %}
+        <button class="secundary button" type="submit" name="action" value="copy_to_new">Nieuw concept uit registratie</button>
+      {% endif %}
+      <button class="primary button" type="submit" name="action" value="new">＋ Nieuwe registratie</button>
+    </form>
+  </div>
+
+  <form method="get" class="registration-select-form">
+    <input type="hidden" name="weergave" value="{{ view_mode }}">
+    <label for="id_wie">Tonen: </label>
+    <select id="id_wie" name="wie" onchange="this.form.submit()">
+      <option value="" {% if not scope %}selected{% endif %}>Alle registraties</option>
+      <option value="staff" {% if scope == 'staff' %}selected{% endif %}>Docent/beheerder</option>
+      <option value="student" {% if scope == 'student' %}selected{% endif %}>Studenten</option>
+    </select>
+  </form>
+
+  {% if view_mode == 'lijst' %}
+    {% for registration in registrations %}
+      {% include 'dossier/_registratie_card.html' %}
+    {% empty %}
+      <p class="empty-state">Nog geen registraties. Maak er een aan met “＋ Nieuwe registratie”.</p>
+    {% endfor %}
+  {% elif selected_registration %}
+    <form method="get" class="registration-select-form">
+      <input type="hidden" name="weergave" value="invoer">
+      {% if scope %}<input type="hidden" name="wie" value="{{ scope }}">{% endif %}
+      <label for="id_registratie_select">Registraties: </label>
+      <select id="id_registratie_select" name="registratie" onchange="this.form.submit()">
+        {% for registration in registrations %}
+          <option value="{{ registration.id }}" {% if registration.id == selected_registration.id %}selected{% endif %}>{{ registration.display_name }} – {{ registration.get_status_display }}{% if registration.author_role == 'student' %} (student){% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <form method="post" class="module-form base-dossier-form">{% csrf_token %}
+      <input type="hidden" name="module" value="{{ module.id }}">
+      <input type="hidden" name="registratie" value="{{ selected_registration.id }}">
+      {% include 'dossier/_dynamic_fields.html' with locked=form_locked %}
+      {% if selected_registration.kind != 'information' %}
+        <div class="registration-actions">
+          {% if selected_registration.can_edit %}
+            <button class="primary button" type="submit" name="action" value="save">Concept opslaan</button>
+            <button class="secundary button" type="submit" name="action" value="publish">Definitief publiceren</button>
+            <button class="outline button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
+          {% elif selected_registration.can_unpublish %}
+            <p class="muted">Gepubliceerd: studenten zien deze registratie. Zet terug naar concept om te wijzigen.</p>
+            <button class="button" type="submit" name="action" value="unpublish">Terug naar concept</button>
+          {% else %}
+            <p class="muted">Dit is een registratie van een student. Je kunt die bekijken of er een eigen concept van maken.</p>
+          {% endif %}
+        </div>
+      {% endif %}
+    </form>
+  {% else %}
+    <p class="empty-state">Nog geen registraties.</p>
+  {% endif %}
 </main>
 {% endblock %}

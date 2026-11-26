@@ -161,7 +161,7 @@
             <span>{{ forloop.counter }}</span>
             <div>
               <small>{{ module.get_kind_display }}</small><strong>{{ module.title }}</strong>
-              <em>{% if module.base_data %}Ingevuld{% else %}Nog in te vullen{% endif %}</em>
+              <em>{{ module.registrations.count }} registratie(s)</em>
             </div>
             <b>›</b>
           </a>

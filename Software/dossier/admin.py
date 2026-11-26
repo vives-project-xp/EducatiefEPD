@@ -12,6 +12,7 @@ from .models import (
     Module,
     ModuleField,
     ModuleResponse,
+    Registration,
     Patient,
     Profile,
     StudentCase,
@@ -76,3 +77,4 @@ admin.site.register(Assignment)
 admin.site.register(StudentCase)
 admin.site.register(AssignmentSubmission)
 admin.site.register(ModuleResponse)
+admin.site.register(Registration)

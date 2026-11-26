@@ -3,13 +3,6 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "uploads")))
-MEDIA_URL = "/uploads/"
-
-
 def env_bool(name, default=False):
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
@@ -17,6 +10,10 @@ def env_bool(name, default=False):
 def env_list(name, default=""):
     return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", str(BASE_DIR / "uploads")))
+MEDIA_URL = "/uploads/"
 
 DEBUG = env_bool("DJANGO_DEBUG", False)
 SECRET_KEY = os.getenv("SECRET_KEY", "")

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from urllib.parse import urlparse
+from .registration import role_of
 
 from django.db import transaction
 
@@ -11,8 +12,11 @@ from .models import (
     Case,
     LibraryDossier,
     LibraryTemplate,
+    Profile,
     Module,
     ModuleField,
+    ModuleResponse,
+    Registration,
     StudentCase,
 )
 
@@ -77,6 +81,21 @@ def new_registration(student_case, module, *, author):
         response.save()
     return response
 
+def create_registration(case, module, *, author, source=None):
+    """Registratie op dossierniveau. Met `source` wordt een bestaande registratie gekopieerd."""
+    author_role = (
+        Registration.AuthorRole.STUDENT
+        if role_of(author) == Profile.Role.STUDENT
+        else Registration.AuthorRole.STAFF
+    )
+    return Registration.objects.create(
+        case=case, module=module, author=author, author_role=author_role,
+        title=module.title, kind=module.kind, instructions=module.instructions,
+        position=module.position,
+        schema=deepcopy(source.schema) if source else module_schema(module),
+        data=deepcopy(source.data) if source else deepcopy(module.base_data),
+        copied_from=source,
+    )
 
 def _filled(value):
     if isinstance(value, dict):
@@ -92,7 +111,7 @@ def registration_is_empty(response):
 
 
 @transaction.atomic
-def synchronize_student_case(student_case):
+def synchronize_student_case(student_case, *, base_data_module_ids=None):
     if student_case.locked:
         return False
 
@@ -117,31 +136,6 @@ def synchronize_student_case(student_case):
             submission.hydrate_from_source()
             submission.save(update_fields=["phase", "title", "content", "position", "updated_at"])
             changed = True
-
-    modules = list(student_case.case.modules.prefetch_related("fields").all())
-    responses_by_module = {}
-    for response in student_case.module_responses.all():
-        if response.module_id is not None:
-            responses_by_module.setdefault(response.module_id, []).append(response)
-    for module in modules:
-        schema = module_schema(module)
-        module_responses = responses_by_module.get(module.id, [])
-        if not module_responses:
-            new_registration(student_case, module, author=student_case.student)
-            changed = True
-            continue
-        source_values = (module.title, module.kind, module.instructions, module.position, schema)
-        for response in module_responses:
-            current_values = (
-                response.title, response.kind, response.instructions, response.position, response.schema
-            )
-            if source_values != current_values:
-                response.hydrate_from_source()
-                response.schema = schema
-                response.save(update_fields=[
-                    "title", "kind", "instructions", "position", "schema", "updated_at"
-                ])
-                changed = True
     return changed
 
 
@@ -166,8 +160,6 @@ def start_student_case(case, student):
             submission.hydrate_from_source()
             submission.save()
 
-        for module in case.modules.prefetch_related("fields").all():
-            new_registration(student_case, module, author=student)
     else:
         synchronize_student_case(student_case)
     return student_case, created
@@ -347,7 +339,6 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
             module.save(update_fields=["source_template_version"])
             added_modules += 1
     return added_modules
-
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
