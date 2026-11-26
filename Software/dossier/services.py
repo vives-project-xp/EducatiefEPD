@@ -1,13 +1,12 @@
 from copy import deepcopy
 import re
-
-from django.db import transaction
-from django.utils.html import linebreaks
-from django.utils.safestring import mark_safe
 from urllib.parse import urlparse
 
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
+from django.utils.html import linebreaks
+from django.utils.safestring import mark_safe
 
 import nh3
 
@@ -551,7 +550,17 @@ ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h
 ALLOWED_STYLE_PROPERTIES = {"color", "background-color"}
 ALLOWED_ATTRIBUTES = {"a": {"href"}, "img": {"src", "alt"}, "span": {"style"}}
 ALLOWED_URL_SCHEMES = {"http", "https", "mailto", "data"}
+# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
+_UNSAFE_LINK_SCHEMES = {"data", "javascript"}
 _HTML_TAG = re.compile(r"<[a-zA-Z/!]")
+
+
+def _reject_unsafe_link(tag, attr, value):
+    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
+    if attr == "href" and value:
+        if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
+            return None
+    return value
 
 
 def clean_html(value):
@@ -561,6 +570,7 @@ def clean_html(value):
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         url_schemes=ALLOWED_URL_SCHEMES,
+        attribute_filter=_reject_unsafe_link,
         filter_style_properties=ALLOWED_STYLE_PROPERTIES,
     )
 
@@ -578,6 +588,7 @@ def render_rich_text(value):
         cleaned = linebreaks(cleaned, autoescape=False)
     return mark_safe(cleaned)
 
+
 def update_student_case_review_state(student_case, *, require_submitted=False):
     """Leid de status van een studentversie af uit de beoordelingen.
 
@@ -588,8 +599,6 @@ def update_student_case_review_state(student_case, *, require_submitted=False):
       student het dossier (opnieuw) heeft ingediend, zodat modulefeedback geen
       onafgewerkt dossier afsluit.
     """
-    from django.utils import timezone
-
     pending = (
         student_case.assignment_submissions.filter(status=AssignmentSubmission.Status.RESUBMIT).exists()
         or student_case.module_responses.filter(revision_requested=True).exists()
@@ -604,23 +613,3 @@ def update_student_case_review_state(student_case, *, require_submitted=False):
     else:
         return
     student_case.save(update_fields=["status", "reviewed_at", "updated_at"])
-# data: mag alleen in afbeeldingen (TinyMCE base64), nooit in een hyperlink.
-_UNSAFE_LINK_SCHEMES = {"data", "javascript"}
-
-
-def _reject_unsafe_link(tag, attr, value):
-    # Stript data:/javascript: uit <a href>; None laat het attribuut weg.
-    if attr == "href" and value:
-        if urlparse(value).scheme.lower() in _UNSAFE_LINK_SCHEMES:
-            return None
-    return value
-
-
-def clean_html(value):
-    return nh3.clean(
-        value,
-        tags=ALLOWED_TAGS,
-        attributes={"a": {"href"}, "img": {"src", "alt"}},
-        url_schemes={"http", "https", "mailto", "data"},
-        attribute_filter=_reject_unsafe_link,
-    )

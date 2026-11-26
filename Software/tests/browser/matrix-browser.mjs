@@ -107,7 +107,8 @@ try {
     }
 
     const student = await session('matrix-student');
-    await student.goto(`${base}/dossier/${ids.case}/`); await student.locator('.sheet-grid').waitFor();
+    // Sinds registraties opent een module standaard in de lijstweergave (alleen-lezen); invullen gebeurt in de invoerweergave.
+    await student.goto(`${base}/dossier/${ids.case}/?module=${ids.module}&weergave=invoer`); await student.locator('.sheet-grid').waitFor();
     assert.equal(await cell(student, 0, 0).getAttribute('aria-readonly'), 'true');
     await cell(student, 0, 0).click(); await paste(student, 'Geen overschrijving');
     assert.match(await student.locator('.sheet-status').innerText(), /alleen-lezen/);

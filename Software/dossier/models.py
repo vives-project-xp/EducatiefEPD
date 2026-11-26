@@ -616,7 +616,7 @@ class ModuleResponse(models.Model):
         null=True,
         blank=True,
     )
-    # Docent vraagt de student dit onderdeel aan te passen; heropent de
+    # Docent vraagt de student deze registratie aan te passen; heropent de
     # studentversie en wordt gewist zodra de student het dossier opnieuw indient.
     revision_requested = models.BooleanField(default=False)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.CONCEPT)
@@ -642,6 +642,12 @@ class ModuleResponse(models.Model):
     @property
     def display_name(self):
         return f"{self.author_name} – {timezone.localtime(self.created_at):%d-%m-%Y %H:%M}"
+
+    @property
+    def module_key(self):
+        """Sleutel van de dossiermodule in URL's (?module=...); een losgekoppelde
+        registratie (module verwijderd) is een eigen onderdeel."""
+        return str(self.module_id) if self.module_id is not None else f"los-{self.id}"
 
     def hydrate_from_source(self):
         if self.module:

@@ -1,0 +1,8 @@
+{% load epd_filters %}
+{% if registration.feedback or registration.revision_requested %}
+  <div class="feedback module-feedback">
+    <strong>{% if registration.revision_requested %}Je docent vraagt deze registratie aan te passen{% else %}Feedback docent{% endif %}</strong>
+    {% if registration.feedback %}{{ registration.feedback|rich_html }}{% endif %}
+    {% if registration.feedback_at %}<small class="muted">{{ registration.feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
+  </div>
+{% endif %}

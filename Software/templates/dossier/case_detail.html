@@ -109,8 +109,8 @@
         <div class="revision-notice">
           <strong>Aanpassing gevraagd in het patiëntendossier</strong>
           <ul>
-            {% for module in revision_modules %}
-              <li><a href="{% url 'dossier:dossier' case.id %}?module={{ module.id }}">{{ module.title }}</a></li>
+            {% for registration in revision_modules %}
+              <li><a href="{% url 'dossier:dossier' case.id %}?module={{ registration.module_key }}&amp;weergave=invoer&amp;registratie={{ registration.id }}">{{ registration.title }}</a> <small class="muted">registratie {{ registration.display_name }}</small></li>
             {% endfor %}
           </ul>
           <small>Pas deze onderdelen aan en dien daarna het volledige dossier opnieuw in.</small>

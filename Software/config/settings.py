@@ -1,8 +1,14 @@
+import mimetypes
 import os
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
+
+# ES-modules (matrix-core.mjs) moeten als JavaScript geserveerd worden, anders weigert
+# de browser ze. Het Windows-register koppelt .mjs vaak aan text/plain, waardoor de
+# matrixeditor bij lokaal runserver niet laadt. WhiteNoise (productie) doet dit al juist.
+mimetypes.add_type("text/javascript", ".mjs", strict=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

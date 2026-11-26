@@ -44,10 +44,6 @@
             <div class="student-answer" data-current-answer>{{ submission.answer|default:'Nog niet ingevuld'|rich_html }}</div>
           {% endif %}
           {% if submission.has_review %}
-          <div class="student-answer">
-            {{ submission.answer|default:'Nog niet ingevuld'|safe_clean }}
-          </div>
-          {% if submission.status in 'approved,resubmit' %}
             <div class="previous-review">
               <strong>
                 Vorige beoordeling{% if submission.latest_review %}: {{ submission.latest_review.get_status_display }}{% elif submission.status in 'approved,resubmit' %}: {{ submission.get_status_display }}{% endif %}
@@ -56,7 +52,7 @@
                 <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}{% if submission.latest_review.reviewer %} · {{ submission.latest_review.reviewer.get_full_name|default:submission.latest_review.reviewer.username }}{% endif %}</small>
               {% endif %}
               {% if submission.feedback %}
-                <div class="previous-review-feedback">{{ submission.feedback|safe_clean }}</div>
+                <div class="previous-review-feedback">{{ submission.feedback|rich_html }}</div>
               {% endif %}
             </div>
           {% endif %}
@@ -110,71 +106,58 @@
     <section class="editor-section">
       <div class="section-heading">
         <h2>Ingevuld patiëntendossier</h2>
-        {% if student_case.module_responses.all %}
+        {% if module_groups %}
           <button type="button" class="outline button" data-toggle-modules>Alles openklappen</button>
         {% endif %}
       </div>
-      {% for module in student_case.module_responses.all %}
-      <details class="response-detail" id="module-{{ module.id }}" {% if module.feedback_form.is_bound %}open{% endif %}>
+      {% for group in module_groups %}
+      <h3 class="module-group-title">{{ group.title }}</h3>
+      {% for registration in group.registrations %}
+      <details class="response-detail" id="registratie-{{ registration.id }}" {% if registration.feedback_form.is_bound %}open{% endif %}>
         <summary>
-          {{ module.title }}
-          {% if module.revision_requested %}<span class="state status-resubmit">Aanpassing gevraagd</span>{% elif module.feedback %}<span class="feedback-badge">Feedback</span>{% endif %}
+          Registratie van {{ registration.display_name }}
+          <span class="badge {% if registration.status == 'published' %}badge-published{% else %}badge-concept{% endif %}">{{ registration.get_status_display }}</span>
+          {% if registration.revision_requested %}<span class="state status-resubmit">Aanpassing gevraagd</span>{% elif registration.feedback %}<span class="feedback-badge">Feedback</span>{% endif %}
         </summary>
         <div class="response-body">
           <div class="response-values">
-            {% for field in module.display_values %}
+            {% for field in registration.display_values %}
               <div class="response-value"><strong>{{ field.label }}</strong>
                 {% if field.matrix_payload %}
                   {% include 'dossier/_matrix.html' with locked=True %}
                 {% elif field.type == 'matrix' %}
                   <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+                {% elif field.type == 'observation' %}{{ field.value|render_observations }}
                 {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
-                {% else %}<pre>{{ field.value }}</pre>{% endif %}
+                {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
               </div>
             {% empty %}
-            <p>Dit onderdeel bevat geen invulvelden.</p>
+            <p>Deze registratie is nog leeg.</p>
             {% endfor %}
           </div>
-          <form method="post" class="review-form module-feedback-form" action="{% url 'dossier:teacher_module_feedback' student_case.id module.id %}">
+          <form method="post" class="review-form module-feedback-form" action="{% url 'dossier:teacher_module_feedback' student_case.id registration.id %}">
             {% csrf_token %}
             <div class="review-field">
-              {{ module.feedback_form.feedback.label_tag }}
-              {{ module.feedback_form.feedback }}
-              {{ module.feedback_form.feedback.errors }}
+              {{ registration.feedback_form.feedback.label_tag }}
+              {{ registration.feedback_form.feedback }}
+              {{ registration.feedback_form.feedback.errors }}
             </div>
-            <label class="checkbox-inline" for="{{ module.feedback_form.revision_requested.id_for_label }}">
-              {{ module.feedback_form.revision_requested }}
-              {{ module.feedback_form.revision_requested.label }}
+            <label class="checkbox-inline" for="{{ registration.feedback_form.revision_requested.id_for_label }}">
+              {{ registration.feedback_form.revision_requested }}
+              {{ registration.feedback_form.revision_requested.label }}
             </label>
-            {% if module.feedback_at %}
-              <small class="muted">Laatst bewaard {{ module.feedback_at|date:"d-m-Y H:i" }}{% if module.feedback_by %} · {{ module.feedback_by.get_full_name|default:module.feedback_by.username }}{% endif %}</small>
+            {% if registration.feedback_at %}
+              <small class="muted">Laatst bewaard {{ registration.feedback_at|date:"d-m-Y H:i" }}{% if registration.feedback_by %} · {{ registration.feedback_by.get_full_name|default:registration.feedback_by.username }}{% endif %}</small>
             {% endif %}
             <div class="review-actions">
               <button class="outline button">Feedback bewaren</button>
             </div>
           </form>
         </div>
-      <h2>Ingevuld patiëntendossier</h2>
-      {% for group in module_groups %}
-      <h3 class="module-group-title">{{ group.title }}</h3>
-      {% for module in group.registrations %}
-      <details class="response-detail">
-        <summary>Registratie van {{ module.display_name }}</summary>
-        {% for field in module.display_values %}
-          <div class="response-value"><strong>{{ field.label }}</strong>
-            {% if field.matrix_payload %}
-              {% include 'dossier/_matrix.html' with locked=True %}
-            {% elif field.type == 'matrix' %}
-              <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
-            {% elif field.type == 'observation' %}{{ field.value|render_observations }}
-            {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
-            {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
-          </div>
-        {% empty %}
-        <p>Deze registratie is nog leeg.</p>
-        {% endfor %}
       </details>
       {% endfor %}
+      {% empty %}
+      <p class="muted">Dit dossier bevat nog geen registraties.</p>
       {% endfor %}
     </section>
     <section class="editor-section final-feedback" id="algemene-feedback">
