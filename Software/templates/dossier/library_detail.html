@@ -34,8 +34,13 @@
       </div>
     </div>
     {% empty %}<p class="empty-state">Er zijn nog geen functies gekoppeld aan dit onderdeel.</p>{% endfor %}
+    <div class="library-function-actions">
+      <a class="outline button" href="{% url 'dossier:library_list' %}?manage_functions=1#function-management">Ga naar Functie beheer</a>
+      {% if can_manage_functions %}
+      <button class="outline button" type="button" data-open-function-picker>Functie toevoegen</button>
+      {% endif %}
+    </div>
     {% if can_manage_functions %}
-    <button class="outline button" type="button" data-open-function-picker>Functie toevoegen</button>
     <dialog class="function-dialog library-function-picker" data-function-picker aria-labelledby="function-picker-title">
       <form method="post">
         {% csrf_token %}

@@ -2124,6 +2124,7 @@ def teacher_review_assignment(request, student_case_id, submission_id):
 
 
 @login_required
+@ensure_csrf_cookie
 def library_list(request):
     require_teacher(request.user)
     query = request.GET.get("q", "").strip()
@@ -2165,7 +2166,7 @@ def library_list(request):
         available_templates = available_templates.filter(education__name__icontains=education)
     if theme:
         available_templates = available_templates.filter(theme__icontains=theme)
-    return render(request, "dossier/library_list.html", {
+    context = {
         "dossier_query": dossier_query, "dossier_education_filter": dossier_education,
         "dossiers": ordered_dossiers,
         "dossier_educations": dossier_educations,
@@ -2174,7 +2175,19 @@ def library_list(request):
         "education_filter": education, "theme_filter": theme,
         "categories": LibraryTemplate.Category.choices, "is_admin": is_admin(request.user),
         "component_filters_active": bool(query or category or education or theme),
-    })
+        "expand_function_management": request.GET.get("manage_functions") == "1",
+        "functions_embedded": True,
+        "function_query_param": "function_q",
+        "function_sort_param": "function_sort",
+        "function_page_size_param": "function_per_page",
+        "function_page_param": "function_page",
+    }
+    context.update(function_management_context(
+        request,
+        embedded=True,
+        purge=request.GET.get("manage_functions") == "1",
+    ))
+    return render(request, "dossier/library_list.html", context)
 
 
 def purge_expired_functions():
@@ -2184,13 +2197,12 @@ def purge_expired_functions():
     ).delete()
 
 
-@login_required
-@ensure_csrf_cookie
-def function_management(request):
-    require_teacher(request.user)
-    purge_expired_functions()
-    query = request.GET.get("q", "").strip()
-    sort = request.GET.get("sort", "az")
+def function_management_context(request, embedded=False, purge=True):
+    prefix = "function_" if embedded else ""
+    if purge:
+        purge_expired_functions()
+    query = request.GET.get(f"{prefix}q", "").strip()
+    sort = request.GET.get(f"{prefix}sort", "az")
     functions = FunctionDefinition.objects.filter(deleted_at__isnull=True)
     if query:
         functions = functions.filter(title__icontains=query)
@@ -2201,7 +2213,7 @@ def function_management(request):
     else:
         sort = "az"
         functions = functions.order_by("title", "id")
-    page_size = request.GET.get("per_page", "10")
+    page_size = request.GET.get(f"{prefix}per_page", "10")
     try:
         page_size = int(page_size)
     except (TypeError, ValueError):
@@ -2209,9 +2221,8 @@ def function_management(request):
     if page_size not in {10, 25, 50, 100}:
         page_size = 10
     paginator = Paginator(functions, page_size)
-    page_number = request.GET.get("page")
-    page = paginator.get_page(page_number)
-    return render(request, "dossier/function_management.html", {
+    page = paginator.get_page(request.GET.get(f"{prefix}page"))
+    return {
         "functions": page,
         "page": page,
         "paginator": paginator,
@@ -2223,6 +2234,23 @@ def function_management(request):
         "deleted_count": FunctionDefinition.objects.filter(
             deleted_at__isnull=False, std=False
         ).count(),
+    }
+
+
+@login_required
+@ensure_csrf_cookie
+def function_management(request):
+    require_teacher(request.user)
+    context = function_management_context(request)
+    context.update({
+        "functions_embedded": False,
+        "function_query_param": "q",
+        "function_sort_param": "sort",
+        "function_page_size_param": "per_page",
+        "function_page_param": "page",
+    })
+    return render(request, "dossier/function_management.html", {
+        **context,
     })
 
 

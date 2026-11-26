@@ -90,7 +90,8 @@ try {
   await command('Network.setCookie', { name: 'sessionid', value: fixture.session, url: base, httpOnly: true });
   await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await navigate('/bibliotheek/');
-  assert.equal(await evaluate(`Boolean(document.querySelector('a[href="/bibliotheek/functies-beheer/"]'))`), true);
+  assert.equal(await evaluate(`Boolean(document.querySelector('a[href="/bibliotheek/functies-beheer/"]'))`), false);
+  assert.equal(await evaluate(`Boolean(document.querySelector('#function-management > summary'))`), true);
   assert.equal(await evaluate(`document.querySelector('.library-component-management-details').open`), false);
   await screenshot('library-desktop.png');
   await click('.library-component-management-details > summary');
@@ -127,7 +128,7 @@ try {
   await click('[data-editor-back]');
   await waitFor(`document.querySelector('[data-function-dialog]').open`, 'discard dialog');
   await click('[data-dialog-confirm]');
-  await waitFor(`location.pathname === '/bibliotheek/functies-beheer/'`, 'confirmed navigation');
+  await waitFor(`location.pathname === '/bibliotheek/' && new URLSearchParams(location.search).get('manage_functions') === '1' && location.hash === '#function-management'`, 'confirmed navigation');
   await navigate(editorPath);
   await waitFor(`document.querySelector('.managed-form-fields input')?.value === 'Bewaard formulier'`, 'discard preserved saved data');
   assert.deepEqual(errors, []);

@@ -354,6 +354,10 @@ class EpdWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Functies")
         self.assertContains(response, "Functie toevoegen")
+        self.assertContains(
+            response,
+            f'{reverse("dossier:library_list")}?manage_functions=1#function-management',
+        )
 
         response = self.client.post(url, {
             "action": "add_function", "function_ids": [str(function.id)],
@@ -363,6 +367,10 @@ class EpdWorkflowTests(TestCase):
             LibraryTemplateFunction.objects.filter(
                 template=template, function=function
             ).exists()
+        )
+        self.assertContains(
+            self.client.get(url),
+            "Ga naar Functie beheer",
         )
 
     def test_function_manager_is_teacher_accessible_and_sorts_search_results(self):
@@ -382,11 +390,60 @@ class EpdWorkflowTests(TestCase):
         response = self.client.get(reverse("dossier:function_management"), {"sort": "oldest"})
         self.assertEqual([item.title for item in response.context["functions"]], ["Zorg", "Alpha", "Zwangerschap"])
 
+    def test_function_management_is_embedded_and_opens_for_function_links(self):
+        self.client.login(username="teacher", password="testpass")
+        FunctionDefinition.objects.create(title="Zorg", kind=FunctionDefinition.Kind.GROUP)
+        FunctionDefinition.objects.create(title="Zwangerschap", kind=FunctionDefinition.Kind.FORM)
+
+        collapsed = self.client.get(reverse("dossier:library_list"))
+        self.assertContains(
+            collapsed,
+            'id="function-management" class="library-component-management-details"',
+        )
+        self.assertNotContains(
+            collapsed,
+            'href="/bibliotheek/functies-beheer/">Functie beheer',
+        )
+        self.assertNotContains(collapsed, 'id="function-management" class="library-component-management-details" open')
+
+        opened = self.client.get(reverse("dossier:library_list"), {
+            "manage_functions": "1",
+            "function_q": "zorg",
+            "function_sort": "za",
+        })
+        self.assertContains(opened, 'id="function-management" class="library-component-management-details" open')
+        self.assertEqual([item.title for item in opened.context["functions"]], ["Zorg"])
+        self.assertContains(opened, 'name="function_q" value="zorg"')
+        self.assertContains(opened, 'data-function-page="list"')
+        self.assertContains(opened, "Recent verwijderd")
+        self.assertContains(opened, 'aria-label="Nieuwe functie"')
+
+    def test_function_management_subpages_return_to_expanded_library_section(self):
+        self.client.force_login(self.teacher)
+        function = FunctionDefinition.objects.create(
+            title="Teruglinkfunctie", kind=FunctionDefinition.Kind.GROUP
+        )
+        return_link = (
+            f'href="{reverse("dossier:library_list")}'
+            '?manage_functions=1#function-management'
+        )
+        paths = (
+            reverse("dossier:function_management"),
+            reverse("dossier:function_type"),
+            reverse("dossier:function_deleted"),
+            reverse("dossier:function_detail", args=[function.id]),
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertContains(self.client.get(path), return_link)
+
     def test_teacher_entry_and_creation_wizard_create_empty_records(self):
         self.client.login(username="teacher", password="testpass")
         library = self.client.get(reverse("dossier:library_list"))
-        self.assertContains(library, reverse("dossier:function_management"))
-        self.assertContains(library, "Functie beheer")
+        self.assertContains(library, "Functies beheren")
+        self.assertNotContains(library, "Functie beheer</a>")
+        self.assertNotContains(library, 'href="/bibliotheek/functies-beheer/">')
         self.assertEqual(FunctionDefinition.objects.count(), 0)
 
         response = self.client.post(reverse("dossier:function_type"), {"kind": "formulier"})

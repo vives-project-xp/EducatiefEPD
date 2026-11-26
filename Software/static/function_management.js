@@ -100,7 +100,11 @@
       const sequence = ["az", "za", "oldest"];
       const next = sequence[(sequence.indexOf(sortButton.dataset.sort) + 1) % sequence.length];
       const url = new URL(window.location.href);
-      url.searchParams.set("sort", next);
+      url.searchParams.set(root.dataset.sortParam || "sort", next);
+      if (root.dataset.embeddedFunctions === "true") {
+        url.searchParams.set("manage_functions", "1");
+        url.hash = "function-management";
+      }
       window.location.assign(url);
     });
     root.querySelectorAll("[data-standard-warning]").forEach((button) => {

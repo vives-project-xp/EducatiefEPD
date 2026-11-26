@@ -3531,7 +3531,7 @@ summary {
 
 .library-editor {
   display: grid;
-  gap: 24px;
+  gap: 30px;
 }
 
 .library-editor > .page-bar {
@@ -3552,6 +3552,18 @@ summary {
   color: var(--red);
 }
 
+.library-function-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.library-function-actions [data-open-function-picker] {
+  margin-left: auto;
+}
+
 @media (max-width: 580px) {
   .library-field-row {
     grid-template-columns: 24px minmax(0, 1fr);
@@ -3559,6 +3571,15 @@ summary {
 
   .library-field-row .row-actions {
     grid-column: 2;
+  }
+
+  .library-function-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .library-function-actions [data-open-function-picker] {
+    align-self: flex-end;
   }
 }
 
@@ -3982,11 +4003,22 @@ summary {
   margin-top: 0;
 }
 
+.library-management-eyebrow {
+  margin-bottom: 12px;
+}
+
+.library-component-management-details + .library-component-management-details {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 .library-component-management-details>summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 8px 0;
   list-style: none;
 }
 

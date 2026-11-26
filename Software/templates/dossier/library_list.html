@@ -15,7 +15,6 @@
       <a class="back library-dashboard-link" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
       <div class="header-actions">
         <a class="primary" href="{% url 'dossier:library_dossier_create' %}">Dossier maken</a>
-        <a class="outline function-entry" href="{% url 'dossier:function_management' %}">Functie beheer</a>
       </div>
     </div>
   </header>
@@ -87,9 +86,10 @@
     </div>
   </section>
   <section class="editor-section library-component-management">
+    <p class="eyebrow library-management-eyebrow">Bibliotheekbeheer</p>
     <details class="library-component-management-details" {% if component_filters_active %}open{% endif %}>
       <summary>
-        <span><span class="eyebrow">Bibliotheekbeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
+        <span><strong>Beschikbare onderdelen beheren</strong></span>
         <span class="library-toggle-arrow" aria-hidden="true">↓</span>
       </summary>
       <div class="section-heading">
@@ -130,6 +130,16 @@
         {% empty %}
         <p class="empty-state">Er zijn geen actieve onderdelen.</p>
         {% endfor %}
+      </div>
+    </details>
+    <details id="function-management" class="library-component-management-details" {% if expand_function_management %}open{% endif %}>
+      <summary>
+        <span><strong>Functies beheren</strong></span>
+        <span class="library-toggle-arrow" aria-hidden="true">↓</span>
+      </summary>
+      <div class="function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}" data-embedded-functions="true">
+        {% include "dossier/_function_management_toolbar.html" %}
+        {% include "dossier/_function_management_list.html" %}
       </div>
     </details>
   </section>
