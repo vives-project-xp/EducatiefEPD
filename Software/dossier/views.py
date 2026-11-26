@@ -63,7 +63,7 @@ from .models import (
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case,
     module_schema, start_student_case, clean_html,
-    remove_module_from_students, synchronize_module_to_students,
+    detach_module_responses, synchronize_module_to_students,
     synchronize_template_module, synchronize_dossier_additions_to_cases,
 )
 
@@ -540,72 +540,43 @@ def teacher_case(request, case_id):
             and module.source_template.status == LibraryTemplate.Status.ARCHIVED
         ) or str(source_dossier_id) in archived_dossier_ids
 
-    draft_module_change = next((
-        module for module in case_modules
-        if (
-            case.status in {Case.Status.DRAFT, Case.Status.ARCHIVED}
-            and module.source_template
-            and (
-                (
-                    module_source_removed(module)
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.configuration.get("library_dossier_module_removed")
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.source_template.status == LibraryTemplate.Status.ACTIVE
-                    and module.source_template_version != module.source_template.version
-                    and module.configuration.get("library_change_handled_version")
-                    != module.source_template.version
-                )
-            )
+    def module_has_unhandled_change(module):
+        configuration = module.configuration
+        removal_unhandled = not configuration.get("library_removal_handled")
+        return (
+            (module_source_removed(module) or configuration.get("library_dossier_module_removed"))
+            and removal_unhandled
+        ) or (
+            module.source_template.status == LibraryTemplate.Status.ACTIVE
+            and module.source_template_version != module.source_template.version
+            and configuration.get("library_change_handled_version")
+            != module.source_template.version
         )
-    ), None)
-    published_module_change = next((
-        module for module in case_modules
-        if (
-            case.status == Case.Status.PUBLISHED
-            and module.source_template
-            and (
-                (
-                    module_source_removed(module)
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.configuration.get("library_dossier_module_removed")
-                    and not module.configuration.get("library_removal_handled")
-                )
-                or (
-                    module.source_template.status == LibraryTemplate.Status.ACTIVE
-                    and module.source_template_version != module.source_template.version
-                    and module.configuration.get("library_change_handled_version")
-                    != module.source_template.version
-                )
-            )
-        )
-    ), None)
+
     def module_change_is_removal(module):
         return (
             module_source_removed(module)
             or module.configuration.get("library_dossier_module_removed")
         )
 
+    module_changes = [
+        {
+            "module": module,
+            "is_removal": module_change_is_removal(module),
+        }
+        for module in case_modules
+        if (
+            case.status in {Case.Status.DRAFT, Case.Status.ARCHIVED, Case.Status.PUBLISHED}
+            and module.source_template
+            and module_has_unhandled_change(module)
+        )
+    ]
+
     return render(request, "dossier/teacher_case.html", {
         "case": case, "students": student_rows,
         "available_groups": groups, "available_templates": templates,
         "available_dossiers": dossiers,
-        "draft_module_change": draft_module_change,
-        "published_module_change": published_module_change,
-        "draft_change_is_removal": (
-            draft_module_change is not None
-            and module_change_is_removal(draft_module_change)
-        ),
-        "published_change_is_removal": (
-            published_module_change is not None
-            and module_change_is_removal(published_module_change)
-        ),
+        "module_changes": module_changes,
         "case_modules": case_modules,
         "assignment_form": AssignmentForm(prefix="assignment"),
     })
@@ -993,12 +964,6 @@ def teacher_removed_module_resolve(request, case_id, module_id):
         synchronize_template_module(template, module)
         messages.success(request, "De bibliotheekwijziging is toegepast op de casus.")
         return redirect("dossier:teacher_case", case_id=case.id)
-    if case.student_cases.exists():
-        messages.error(
-            request,
-            "Deze module kan niet worden verwijderd omdat de casus al studentversies bevat.",
-        )
-        return redirect("dossier:teacher_case", case_id=case.id)
     audit(request, "module.deleted", module, title=module.title)
     module.delete()
     messages.success(request, "De verwijderde bibliotheekmodule is uit de casus verwijderd.")
@@ -1047,7 +1012,7 @@ def teacher_published_module_resolve(request, case_id, module_id):
         raise PermissionDenied
     if template_removed or dossier_removed or dossier_module_removed:
         if action == "sync_students":
-            remove_module_from_students(module)
+            detach_module_responses(module)
         audit(request, "module.deleted", module, title=module.title)
         module.delete()
         messages.success(request, "De verwijderde module is uit de gepubliceerde casus verwijderd.")

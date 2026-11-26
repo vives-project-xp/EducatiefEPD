@@ -8,10 +8,14 @@ from django.urls import reverse
 
 from .models import (
     Assignment, Case, Education, LibraryDossier, LibraryDossierModule,
-    LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase,
-    TeachingGroup,
+    LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile,
+    StudentCase, TeachingGroup,
 )
-from .services import copy_library_dossier_to_case, start_student_case
+from .services import (
+    copy_library_dossier_to_case,
+    start_student_case,
+    synchronize_dossier_additions_to_cases,
+)
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -108,6 +112,182 @@ class DynamicCaseTests(TestCase):
         again, created = start_student_case(existing, student)
         self.assertFalse(created)
         self.assertEqual(again.pk, first.pk)
+
+    def test_multiple_library_changes_are_shown_in_one_popup(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-CHANGES")
+        copy_library_dossier_to_case(dossier, case)
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+
+        self.assertEqual(len(page.context["module_changes"]), 2)
+        self.assertEqual(page.content.count(b'role="dialog"'), 1)
+        self.assertContains(page, "Vorige versie behouden", count=2)
+        self.assertContains(page, "Nieuwe versie gebruiken", count=2)
+        for template in templates:
+            self.assertContains(page, template.title)
+
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        published_page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+
+        self.assertEqual(len(published_page.context["module_changes"]), 2)
+        self.assertEqual(published_page.content.count(b'role="dialog"'), 1)
+        self.assertContains(published_page, "Vorige versie behouden", count=2)
+        self.assertContains(published_page, "Nieuwe versie gebruiken", count=2)
+
+    def test_readded_dossier_module_can_be_removed_again_after_being_kept(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-READD")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        module.source_template_version = templates[0].version
+        module.save(update_fields=["source_template_version"])
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        synchronize_dossier_additions_to_cases(dossier, {templates[0].pk})
+        resolve_url = reverse(
+            "dossier:teacher_removed_module_resolve", args=[case.pk, module.pk]
+        )
+        self.client.post(resolve_url, {"action": "keep"})
+
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=templates[0], position=0
+        )
+        synchronize_dossier_additions_to_cases(dossier, set())
+        module.refresh_from_db()
+        self.assertNotIn("library_removal_handled", module.configuration)
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+        self.assertContains(page, "Wijzigingen in dossieronderdelen")
+        self.assertContains(page, templates[0].title)
+
+        self.client.post(resolve_url, {"action": "remove"})
+        module.refresh_from_db()
+        self.assertEqual(module.source_template_version, templates[0].version)
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        synchronize_dossier_additions_to_cases(dossier, {templates[0].pk})
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+
+        self.assertContains(page, "Wijzigingen in dossieronderdelen")
+        self.assertContains(page, templates[0].title)
+
+    def test_removed_dossier_modules_are_detected_for_string_source_ids(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-STRING-SOURCE")
+        modules = copy_library_dossier_to_case(dossier, case)
+        for module, template in zip(modules, templates):
+            configuration = dict(module.configuration)
+            configuration["source_library_dossier_id"] = str(dossier.pk)
+            configuration["library_change_handled_version"] = template.version
+            module.configuration = configuration
+            module.source_template_version = template.version - 1
+            module.save(update_fields=["configuration", "source_template_version"])
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        synchronize_dossier_additions_to_cases(dossier, {template.pk for template in templates})
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+
+        self.assertEqual(len(page.context["module_changes"]), 1)
+        self.assertEqual(
+            [change["module"].pk for change in page.context["module_changes"]],
+            [modules[0].pk],
+        )
+        self.assertContains(page, templates[0].title)
+
+    def test_new_dossier_revision_reopens_previously_kept_removals(self):
+        dossier, templates = self.new_bundle()
+        case = self.new_case("DYNAMIC-REVISION")
+        modules = copy_library_dossier_to_case(dossier, case)
+        for module, template in zip(modules, templates):
+            configuration = dict(module.configuration)
+            configuration["library_change_handled_version"] = template.version
+            module.configuration = configuration
+            module.save(update_fields=["configuration"])
+
+        dossier.module_entries.filter(template=templates[0]).delete()
+        synchronize_dossier_additions_to_cases(dossier, {template.pk for template in templates})
+        module = modules[0]
+        module.refresh_from_db()
+        module.configuration["library_removal_handled"] = True
+        module.save(update_fields=["configuration"])
+
+        added_template = LibraryTemplate.objects.create(
+            title="Nieuw dossieronderdeel",
+            education=self.education,
+            category=LibraryTemplate.Category.QUESTIONNAIRE,
+        )
+        LibraryDossierModule.objects.create(
+            dossier=dossier, template=added_template, position=2
+        )
+        synchronize_dossier_additions_to_cases(dossier, {templates[1].pk})
+        added_module = case.modules.get(source_template=added_template)
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+
+        self.assertEqual(len(page.context["module_changes"]), 2)
+        changed_module_ids = {
+            change["module"].pk for change in page.context["module_changes"]
+        }
+        self.assertEqual(changed_module_ids, {modules[0].pk, added_module.pk})
+
+    def test_removing_published_module_preserves_student_answers(self):
+        dossier, _ = self.new_bundle()
+        case = self.new_case("DYNAMIC-ANSWERS")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        student = get_user_model().objects.create_user("answer-preservation-student")
+        student_case, _ = start_student_case(case, student)
+        student_response = student_case.module_responses.get(module=module)
+        student_response.data = {"notitie": "Bestaand antwoord"}
+        student_response.save(update_fields=["data"])
+
+        module.configuration["library_dossier_module_removed"] = True
+        module.save(update_fields=["configuration"])
+        response = self.client.post(
+            reverse("dossier:teacher_published_module_resolve", args=[case.pk, module.pk]),
+            {"action": "sync_students"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        student_response.refresh_from_db()
+        self.assertIsNone(student_response.module_id)
+        self.assertEqual(student_response.data, {"notitie": "Bestaand antwoord"})
+
+    def test_returned_draft_can_resolve_removed_module_with_student_cases(self):
+        dossier, _ = self.new_bundle()
+        case = self.new_case("DYNAMIC-DRAFT-REMOVAL")
+        module = copy_library_dossier_to_case(dossier, case)[0]
+        case.status = Case.Status.PUBLISHED
+        case.save(update_fields=["status"])
+        student = get_user_model().objects.create_user("draft-removal-student")
+        student_case, _ = start_student_case(case, student)
+        student_response = student_case.module_responses.get(module=module)
+        student_response.data = {"notitie": "Antwoord behouden"}
+        student_response.save(update_fields=["data"])
+
+        module.configuration["library_dossier_module_removed"] = True
+        module.save(update_fields=["configuration"])
+        transition = self.client.post(
+            reverse("dossier:teacher_case_transition", args=[case.pk]),
+            {"action": "draft"},
+        )
+        self.assertEqual(transition.status_code, 302)
+
+        page = self.client.get(reverse("dossier:teacher_case", args=[case.pk]))
+        self.assertContains(page, "Wijzigingen in dossieronderdelen")
+        self.assertContains(page, "Vorige versie behouden")
+        resolve = self.client.post(
+            reverse("dossier:teacher_removed_module_resolve", args=[case.pk, module.pk]),
+            {"action": "remove"},
+        )
+
+        self.assertEqual(resolve.status_code, 302)
+        self.assertFalse(case.modules.filter(pk=module.pk).exists())
+        student_response.refresh_from_db()
+        self.assertIsNone(student_response.module_id)
+        self.assertEqual(student_response.data, {"notitie": "Antwoord behouden"})
 
     def test_active_student_cases_receive_source_updates_without_losing_answers(self):
         case = self.new_case("DYNAMIC-SYNC")

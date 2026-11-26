@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from django.db import transaction
+from django.db.models import Q
 
 import nh3
 
@@ -219,8 +220,8 @@ def synchronize_module_to_students(module):
 
 
 @transaction.atomic
-def remove_module_from_students(module):
-    ModuleResponse.objects.filter(module=module).delete()
+def detach_module_responses(module):
+    ModuleResponse.objects.filter(module=module).update(module=None)
 
 
 @transaction.atomic
@@ -304,9 +305,11 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
         entry for entry in entries if entry.template_id not in previous_template_ids
     ]
     current_template_ids = {entry.template_id for entry in entries}
+    membership_changed = previous_template_ids != current_template_ids
 
     case_ids = Module.objects.filter(
-        configuration__source_library_dossier_id=dossier.pk,
+        Q(configuration__source_library_dossier_id=dossier.pk)
+        | Q(configuration__source_library_dossier_id=str(dossier.pk))
     ).values_list("case_id", flat=True).distinct()
     cases = Case.objects.filter(id__in=case_ids)
     added_modules = 0
@@ -316,12 +319,26 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
             if str(configuration.get("source_library_dossier_id")) == str(dossier.pk):
                 if module.source_template_id not in current_template_ids:
                     configuration["library_dossier_module_removed"] = True
+                    if membership_changed:
+                        configuration.pop("library_removal_handled", None)
                 else:
                     configuration.pop("library_dossier_module_removed", None)
+                    configuration.pop("library_removal_handled", None)
                 module.configuration = configuration
                 module.save(update_fields=["configuration"])
         for entry in added_entries:
-            if case.modules.filter(source_template=entry.template).exists():
+            existing_module = case.modules.filter(source_template=entry.template).first()
+            if existing_module:
+                configuration = dict(existing_module.configuration or {})
+                if str(configuration.get("source_library_dossier_id")) == str(dossier.pk):
+                    configuration.pop("library_dossier_module_removed", None)
+                    configuration.pop("library_removal_handled", None)
+                    configuration.pop("library_change_handled_version", None)
+                    existing_module.configuration = configuration
+                    existing_module.source_template_version = max(entry.template.version - 1, 0)
+                    existing_module.save(update_fields=[
+                        "configuration", "source_template_version"
+                    ])
                 continue
             module = copy_template_to_case(entry.template, case, source_dossier=dossier)
             module.source_template_version = max(entry.template.version - 1, 0)
