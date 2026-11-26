@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load rich_text %}
 {% block title %}{{ student_case.patient_name }} | Dossier{% endblock %}
 {% block content %}
 <div class="app">
@@ -15,7 +16,9 @@
     <nav>
       {% for module in modules %}
         <a href="?module={{ module.id }}" class="nav-item {% if selected.id == module.id %}selected{% endif %}">
-          <span>{{ module.title }}</span><b>›</b>
+          <span>{{ module.title }}</span>
+          {% if module.revision_requested %}<i class="nav-flag nav-flag-revision" title="Aanpassing gevraagd">!</i>{% elif module.feedback %}<i class="nav-flag" title="Feedback van je docent">✎</i>{% endif %}
+          <b>›</b>
         </a>
       {% empty %}
         <p class="empty">Geen functies gevonden.</p>
@@ -40,6 +43,13 @@
           </div>
           <span>{{ student_case.get_status_display }}</span>
         </div>
+      {% if selected.feedback or selected.revision_requested %}
+        <div class="feedback module-feedback">
+          <strong>{% if selected.revision_requested %}Je docent vraagt dit onderdeel aan te passen{% else %}Feedback docent{% endif %}</strong>
+          {% if selected.feedback %}{{ selected.feedback|rich_html }}{% endif %}
+          {% if selected.feedback_at %}<small class="muted">{{ selected.feedback_at|date:"d-m-Y H:i" }}</small>{% endif %}
+        </div>
+      {% endif %}
       {% if selected.instructions %}
         <div class="module-instructions">{{ selected.instructions|linebreaks }}</div>
       {% endif %}

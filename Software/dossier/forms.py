@@ -461,12 +461,37 @@ class LibraryFieldForm(FieldConfigurationForm):
 
 
 class ReviewForm(forms.Form):
-    field_order = ["feedback", "status"]
-
+    # Lege eerste keuze: een beoordeling moet bewust gekozen worden, zodat
+    # niemand per ongeluk "Goedgekeurd" bewaart.
     status = forms.ChoiceField(
         label="Beoordeling",
-        choices=[("approved", "Goedgekeurd"), ("resubmit", "Opnieuw inleveren")],
+        choices=[
+            ("", "— Kies beoordeling —"),
+            ("approved", "Goedgekeurd"),
+            ("resubmit", "Opnieuw inleveren"),
+        ],
+        error_messages={"required": "Kies een beoordeling."},
     )
     feedback = forms.CharField(
         label="Feedback", required=False, widget=forms.Textarea(attrs={"rows": 3, "class": "js-tinymce"})
+    )
+
+
+class ModuleFeedbackForm(forms.Form):
+    feedback = forms.CharField(
+        label="Feedback bij dit onderdeel",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3, "class": "js-tinymce"}),
+    )
+    revision_requested = forms.BooleanField(
+        label="Student moet dit onderdeel aanpassen",
+        required=False,
+    )
+
+
+class FinalFeedbackForm(forms.Form):
+    final_feedback = forms.CharField(
+        label="Algemene feedback",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 4, "class": "js-tinymce"}),
     )

@@ -23,7 +23,6 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import get_valid_filename, slugify
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
@@ -36,6 +35,8 @@ from .forms import (
     LibraryTemplateForm,
     ModuleFieldForm,
     ModuleForm,
+    FinalFeedbackForm,
+    ModuleFeedbackForm,
     PatientForm,
     ReviewForm,
     TeachingGroupForm,
@@ -44,6 +45,7 @@ from .auth import EmergencyAdminAuthenticationForm, oidc_end_session_url
 from .module_data import parse_module_form, validate_module_data
 from .models import (
     Assignment,
+    AssignmentReview,
     AssignmentSubmission,
     Case,
     Education,
@@ -56,13 +58,15 @@ from .models import (
     Module,
     ManagedForm,
     ManagedQuestion,
+    ModuleResponse,
     Profile,
     StudentCase,
     TeachingGroup,
 )
 from .services import (
     audit, copy_library_dossier_to_case, copy_template_to_case,
-    module_schema, start_student_case, clean_html,
+    module_schema, start_student_case, clean_html, render_rich_text,
+    update_student_case_review_state,
     remove_module_from_students, synchronize_module_to_students,
     synchronize_template_module, synchronize_dossier_additions_to_cases,
 )
@@ -214,7 +218,7 @@ def case_detail(request, case_id):
     if is_teacher(request.user):
         return redirect("dossier:teacher_case", case_id=case_id)
     case, student_case = get_student_case(request, case_id)
-    assignments = list(student_case.assignment_submissions.all())
+    assignments = list(student_case.assignment_submissions.prefetch_related("reviews"))
     selected_id = request.POST.get("assignment") or request.GET.get("assignment")
     selected = next((item for item in assignments if str(item.id) == selected_id), None)
 
@@ -224,7 +228,7 @@ def case_detail(request, case_id):
         }:
             messages.error(request, "Dit dossier is ingediend en kan niet meer worden gewijzigd.")
         else:
-            selected.answer = request.POST.get("answer", "").strip()
+            selected.answer = clean_html(request.POST.get("answer", "").strip()).strip()
             if request.POST.get("action") == "submit":
                 if not selected.answer:
                     messages.error(request, "Vul eerst een antwoord in.")
@@ -240,6 +244,11 @@ def case_detail(request, case_id):
             audit(request, "assignment.updated", selected, status=selected.status)
         return redirect(f"{request.path}?assignment={selected.id}")
 
+    if selected:
+        attach_review_history(selected)
+    revision_modules = list(
+        student_case.module_responses.filter(revision_requested=True).only("id", "title")
+    )
     selected_index = assignments.index(selected) if selected in assignments else None
     previous_assignment = (
         assignments[selected_index - 1]
@@ -255,6 +264,7 @@ def case_detail(request, case_id):
         "case": case, "student_case": student_case, "assignments": assignments,
         "selected": selected, "submission": selected,
         "previous_assignment": previous_assignment, "next_assignment": next_assignment,
+        "revision_modules": revision_modules,
     })
 
 
@@ -267,7 +277,7 @@ def prepare_schema_fields(schema, data, *, errors=None, pending_observations=Non
         item["value"] = value
         if item["type"] in {"long_text", "rich_text"} and isinstance(value, str):
             item["render_as_html"] = True
-            item["rendered_value"] = mark_safe(clean_html(value))
+            item["rendered_value"] = render_rich_text(value)
         item["errors"] = (errors or {}).get(key, [])
         item["pending_observation"] = (pending_observations or {}).get(key, {})
         # Native number/date controls hide malformed values; use text on error
@@ -397,6 +407,8 @@ def submit_student_case(request, case_id):
     student_case.status = StudentCase.Status.SUBMITTED
     student_case.submitted_at = timezone.now()
     student_case.save(update_fields=["status", "submitted_at", "updated_at"])
+    # Gevraagde aanpassingen zijn met deze nieuwe indiening afgehandeld.
+    student_case.module_responses.filter(revision_requested=True).update(revision_requested=False)
     audit(request, "student_case.submitted", student_case)
     messages.success(request, "Je volledige dossier is ingediend.")
     return redirect("dossier:case_detail", case_id=case_id)
@@ -1101,34 +1113,80 @@ def teacher_module_field_delete(request, case_id, module_id, field_id):
     return redirect("dossier:teacher_module", case_id=case.id, module_id=module.id)
 
 
-@login_required
-def teacher_student_case(request, student_case_id):
+def _student_case_for_teacher(request, student_case_id):
     require_teacher(request.user)
     student_case = get_object_or_404(
-        StudentCase.objects.select_related("case", "student").prefetch_related(
-            "assignment_submissions", "module_responses"
+        StudentCase.objects.select_related("case", "student", "final_feedback_by").prefetch_related(
+            Prefetch(
+                "assignment_submissions",
+                queryset=AssignmentSubmission.objects.prefetch_related(
+                    Prefetch("reviews", queryset=AssignmentReview.objects.select_related("reviewer"))
+                ),
+            ),
+            Prefetch("module_responses", queryset=ModuleResponse.objects.select_related("feedback_by")),
         ), id=student_case_id
     )
     editable_case(request.user, student_case.case_id)
+    return student_case
+
+
+def attach_review_history(submission):
+    """Zet beoordelingsgeschiedenis klaar voor docent- en studentweergave."""
+    history = list(submission.reviews.all())
+    submission.latest_review = history[-1] if history else None
+    submission.earlier_reviews = list(reversed(history[:-1]))
+    submission.answer_changed_since_review = bool(
+        submission.latest_review and submission.latest_review.answer != submission.answer
+    )
+    submission.has_review = bool(submission.reviewed_at or submission.latest_review)
+
+
+def render_teacher_student_case(request, student_case, *, bound_forms=None):
+    """Beoordelingspagina; bound_forms houdt een ongeldig ingediend formulier
+    (met getypte feedback en foutmeldingen) vast in plaats van een stille redirect."""
+    bound_forms = bound_forms or {}
     for module in student_case.module_responses.all():
         module.display_values = prepare_schema_fields(module.schema, module.data)
+        module.feedback_form = bound_forms.get(("module", module.id)) or ModuleFeedbackForm(
+            initial={"feedback": module.feedback, "revision_requested": module.revision_requested},
+            auto_id=f"id_module_%s_{module.id}",
+        )
     for submission in student_case.assignment_submissions.all():
-        submission.review_form = ReviewForm(
-            # Vóór het eerst is de tekst leeg; bij een herbeoordeling bevat
-            # het veld de eerdere feedback zodat de docent hem kan aanpassen.
-            initial={"feedback": submission.feedback},
+        attach_review_history(submission)
+        # Bij een herbeoordeling staan de huidige status en eerdere feedback al
+        # ingevuld; bij een eerste beoordeling is de status bewust leeg.
+        current_status = submission.status if submission.status in {
+            AssignmentSubmission.Status.APPROVED, AssignmentSubmission.Status.RESUBMIT,
+        } else ""
+        submission.review_form = bound_forms.get(("assignment", submission.id)) or ReviewForm(
+            initial={"feedback": submission.feedback, "status": current_status},
             auto_id=f"id_%s_{submission.id}",  # unique ids per submission
         )
+    final_form = bound_forms.get(("final", student_case.id)) or FinalFeedbackForm(
+        initial={"final_feedback": student_case.final_feedback},
+        auto_id="id_final_%s",
+    )
+    status = 400 if bound_forms else 200
     return render(request, "dossier/teacher_student_case.html", {
         "student_case": student_case,
-    })
+        "final_feedback_form": final_form,
+    }, status=status)
 
 
 @login_required
+def teacher_student_case(request, student_case_id):
+    student_case = _student_case_for_teacher(request, student_case_id)
+    return render_teacher_student_case(request, student_case)
+
+
+@login_required
+@transaction.atomic
 def teacher_review_assignment(request, student_case_id, submission_id):
     require_teacher(request.user)
     require_post(request)
-    student_case = get_object_or_404(StudentCase.objects.select_related("case"), id=student_case_id)
+    student_case = get_object_or_404(
+        StudentCase.objects.select_for_update().select_related("case"), id=student_case_id
+    )
     editable_case(request.user, student_case.case_id)
     submission = get_object_or_404(student_case.assignment_submissions, id=submission_id)
     # Ook al beoordeelde opdrachten blijven herbeoordeelbaar (bijv.
@@ -1139,23 +1197,85 @@ def teacher_review_assignment(request, student_case_id, submission_id):
         AssignmentSubmission.Status.RESUBMIT,
     }:
         raise PermissionDenied
-    form = ReviewForm(request.POST)
-    if form.is_valid():
-        submission.status = form.cleaned_data["status"]
-        submission.feedback = form.cleaned_data["feedback"]
-        submission.reviewed_at = timezone.now()
-        submission.save()
-        if submission.status == AssignmentSubmission.Status.RESUBMIT:
-            student_case.status = StudentCase.Status.ACTIVE
-        elif not student_case.assignment_submissions.exclude(
-            status=AssignmentSubmission.Status.APPROVED
-        ).exists():
-            student_case.status = StudentCase.Status.REVIEWED
-            student_case.reviewed_at = timezone.now()
-        student_case.save()
-        audit(request, "assignment.reviewed", submission, status=submission.status)
-        messages.success(request, "Beoordeling opgeslagen.")
+    form = ReviewForm(request.POST, auto_id=f"id_%s_{submission.id}")
+    if not form.is_valid():
+        messages.error(request, f"Beoordeling van “{submission.title}” is niet bewaard. Kies een beoordeling.")
+        student_case = _student_case_for_teacher(request, student_case_id)
+        return render_teacher_student_case(
+            request, student_case, bound_forms={("assignment", submission.id): form}
+        )
+    submission.status = form.cleaned_data["status"]
+    submission.feedback = clean_html(form.cleaned_data["feedback"]).strip()
+    submission.reviewed_at = timezone.now()
+    submission.save()
+    review = AssignmentReview.objects.create(
+        submission=submission,
+        round=submission.reviews.count() + 1,
+        answer=submission.answer,
+        status=submission.status,
+        feedback=submission.feedback,
+        reviewer=request.user,
+    )
+    update_student_case_review_state(student_case)
+    audit(request, "assignment.reviewed", submission, status=submission.status, round=review.round)
+    messages.success(request, "Beoordeling opgeslagen.")
     return redirect("dossier:teacher_student_case", student_case_id=student_case.id)
+
+
+@login_required
+@transaction.atomic
+def teacher_module_feedback(request, student_case_id, response_id):
+    require_teacher(request.user)
+    require_post(request)
+    student_case = get_object_or_404(
+        StudentCase.objects.select_for_update().select_related("case"), id=student_case_id
+    )
+    editable_case(request.user, student_case.case_id)
+    module = get_object_or_404(student_case.module_responses, id=response_id)
+    form = ModuleFeedbackForm(request.POST, auto_id=f"id_module_%s_{module.id}")
+    if not form.is_valid():
+        messages.error(request, f"Feedback bij “{module.title}” is niet bewaard.")
+        student_case = _student_case_for_teacher(request, student_case_id)
+        return render_teacher_student_case(request, student_case, bound_forms={("module", module.id): form})
+    feedback = clean_html(form.cleaned_data["feedback"]).strip()
+    module.feedback = feedback
+    module.feedback_at = timezone.now() if feedback else None
+    module.feedback_by = request.user if feedback else None
+    module.revision_requested = form.cleaned_data["revision_requested"]
+    module.save(update_fields=["feedback", "feedback_at", "feedback_by", "revision_requested", "updated_at"])
+    update_student_case_review_state(student_case, require_submitted=True)
+    audit(
+        request, "module_response.feedback", module,
+        revision_requested=module.revision_requested, has_feedback=bool(feedback),
+    )
+    if module.revision_requested:
+        messages.success(request, "Feedback bewaard. De student kan het dossier opnieuw aanpassen.")
+    else:
+        messages.success(request, "Feedback bewaard.")
+    return redirect(
+        f"{reverse('dossier:teacher_student_case', args=[student_case.id])}#module-{module.id}"
+    )
+
+
+@login_required
+def teacher_final_feedback(request, student_case_id):
+    require_teacher(request.user)
+    require_post(request)
+    student_case = get_object_or_404(StudentCase.objects.select_related("case"), id=student_case_id)
+    editable_case(request.user, student_case.case_id)
+    form = FinalFeedbackForm(request.POST, auto_id="id_final_%s")
+    if not form.is_valid():
+        messages.error(request, "Algemene feedback is niet bewaard.")
+        student_case = _student_case_for_teacher(request, student_case_id)
+        return render_teacher_student_case(request, student_case, bound_forms={("final", student_case.id): form})
+    feedback = clean_html(form.cleaned_data["final_feedback"]).strip()
+    student_case.final_feedback = feedback
+    student_case.final_feedback_at = timezone.now() if feedback else None
+    student_case.final_feedback_by = request.user if feedback else None
+    student_case.save(update_fields=["final_feedback", "final_feedback_at", "final_feedback_by", "updated_at"])
+    audit(request, "student_case.final_feedback", student_case, has_feedback=bool(feedback))
+    messages.success(request, "Algemene feedback bewaard.")
+    return redirect(f"{reverse('dossier:teacher_student_case', args=[student_case.id])}#algemene-feedback")
 
 
 @login_required

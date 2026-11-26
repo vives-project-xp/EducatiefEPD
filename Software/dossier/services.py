@@ -1,6 +1,9 @@
 from copy import deepcopy
+import re
 
 from django.db import transaction
+from django.utils.html import linebreaks
+from django.utils.safestring import mark_safe
 
 import nh3
 
@@ -331,7 +334,64 @@ def synchronize_dossier_additions_to_cases(dossier, previous_template_ids):
 
 
 ALLOWED_TAGS = {"p", "br", "strong", "em", "u", "ul", "ol", "li", "h1", "h2", "h3",
+                "h4", "h5", "h6", "pre", "span",
                 "table", "thead", "tbody", "tr", "th", "td", "a", "blockquote", "img"}
+# Alleen tekst- en markeerkleur uit TinyMCE (forecolor/backcolor) blijven
+# behouden, zodat docenten correcties kunnen kleuren. Andere CSS (position,
+# url(...), ...) wordt verwijderd.
+ALLOWED_STYLE_PROPERTIES = {"color", "background-color"}
+ALLOWED_ATTRIBUTES = {"a": {"href"}, "img": {"src", "alt"}, "span": {"style"}}
+ALLOWED_URL_SCHEMES = {"http", "https", "mailto", "data"}
+_HTML_TAG = re.compile(r"<[a-zA-Z/!]")
+
 
 def clean_html(value):
-    return nh3.clean(value, tags=ALLOWED_TAGS, attributes={"a": {"href"}, "img": {"src", "alt"}}, url_schemes={"http", "https", "mailto", "data"})
+    """Saneer HTML van gebruikers (studentantwoorden, feedback, rich text)."""
+    return nh3.clean(
+        value or "",
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRIBUTES,
+        url_schemes=ALLOWED_URL_SCHEMES,
+        filter_style_properties=ALLOWED_STYLE_PROPERTIES,
+    )
+
+
+def render_rich_text(value):
+    """Gesaneerde, veilig te tonen HTML voor opgeslagen tekst.
+
+    Oude of gewone tekst zonder HTML-tags krijgt alinea's en regeleindes;
+    HTML uit de editor wordt alleen gesaneerd (geen extra <p>/<br>). nh3
+    escapet losse tekens zoals '<' en '&', dus linebreaks hoeft niet opnieuw
+    te escapen.
+    """
+    cleaned = clean_html(value)
+    if not _HTML_TAG.search(cleaned):
+        cleaned = linebreaks(cleaned, autoescape=False)
+    return mark_safe(cleaned)
+
+def update_student_case_review_state(student_case, *, require_submitted=False):
+    """Leid de status van een studentversie af uit de beoordelingen.
+
+    - Een opdracht op 'Opnieuw inleveren' of een module waarvoor de docent een
+      aanpassing vraagt, heropent de studentversie (Bezig).
+    - Zijn alle opdrachten goedgekeurd en staat er niets meer open, dan is de
+      studentversie Beoordeeld. Met require_submitted gebeurt dat alleen als de
+      student het dossier (opnieuw) heeft ingediend, zodat modulefeedback geen
+      onafgewerkt dossier afsluit.
+    """
+    from django.utils import timezone
+
+    pending = (
+        student_case.assignment_submissions.filter(status=AssignmentSubmission.Status.RESUBMIT).exists()
+        or student_case.module_responses.filter(revision_requested=True).exists()
+    )
+    if pending:
+        student_case.status = StudentCase.Status.ACTIVE
+    elif not student_case.assignment_submissions.exclude(
+        status=AssignmentSubmission.Status.APPROVED
+    ).exists() and (not require_submitted or student_case.status == StudentCase.Status.SUBMITTED):
+        student_case.status = StudentCase.Status.REVIEWED
+        student_case.reviewed_at = timezone.now()
+    else:
+        return
+    student_case.save(update_fields=["status", "reviewed_at", "updated_at"])
