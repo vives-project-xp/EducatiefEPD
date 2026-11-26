@@ -865,6 +865,8 @@ select {
 .button {
   border: 0;
   cursor: pointer;
+  padding: 9px 12px;
+  border-radius: 5px;
 }
 
 .outline.button {
@@ -2721,7 +2723,14 @@ summary {
   overflow-wrap: anywhere;
 }
 
-.view-toggle .secundary{
+.secundary {
+  min-width: 0;
+  padding: 9px 12px;
+  border-radius: 5px;
+  font-weight: 700;
+  text-decoration: none;
+  text-align: center;
+  overflow-wrap: anywhere;
   background: #fff;
   color: var(--blue);
   box-shadow: 0 1px 4px #405e8b55;

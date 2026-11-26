@@ -1,5 +1,6 @@
 import base64
 import binascii
+from copy import deepcopy
 from datetime import timedelta
 import io
 import json
@@ -448,6 +449,22 @@ def dossier(request, case_id):
         if is_published:
             messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar eerst terug naar concept.")
             return entry_redirect(selected, target)
+        if action == "copy_previous":
+            if is_published:
+                messages.error(request, "Deze registratie is gepubliceerd en kan niet meer worden bewerkt.")
+                return entry_redirect(selected, target)
+            # selected.responses is ordered by id ascending; find the item right before target
+            idx = next((i for i, item in enumerate(selected.responses) if item.pk == target.pk), 0)
+            previous = selected.responses[idx - 1] if idx > 0 else None
+            if previous is None:
+                messages.error(request, "Geen vorige registratie beschikbaar om te kopiëren.")
+                return entry_redirect(selected, target)
+
+            target.data = deepcopy(previous.data)
+            target.save(update_fields=["data", "updated_at"])
+            audit(request, "module_response.copied_previous", target, source_id=previous.id)
+            messages.success(request, f"Gegevens gekopieerd uit {previous.display_name}.")
+            return entry_redirect(selected, target)
 
         form_result = parse_module_form(request.POST, target.schema, target.data)
         if not form_result.errors:
@@ -501,11 +518,18 @@ def dossier(request, case_id):
             pending_observations=failed_form.pending_observations if failed_form else None,
         )
 
+    previous_registration_data = None
+    if selected and selected_registration and selected_registration.status != ModuleResponse.Status.PUBLISHED:
+        idx = next((i for i, item in enumerate(selected.responses) if item.pk == selected_registration.pk), 0)
+        if idx > 0:
+            previous_registration_data = selected.responses[idx - 1].data
+
     return render(request, "dossier/dossier.html", {
         "case": case, "student_case": student_case, "modules": visible_modules,
         "selected": selected, "query": query,
         "registrations": registrations,
         "selected_registration": selected_registration,
+        "previous_registration_data": previous_registration_data,
         "view_mode": view_mode,
         "fields": fields,
         "form_locked": bool(student_case.locked or (

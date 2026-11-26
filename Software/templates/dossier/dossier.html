@@ -50,8 +50,18 @@
             <form method="post" class="registration-actions">
               {% csrf_token %}
               <input type="hidden" name="module" value="{{ selected.meta_key }}">
-              <input type="hidden" name="action" value="new">
-              <button class="primary button" type="submit">＋ Nieuwe registratie</button>
+              {% if selected_registration and selected_registration.status != "published" and previous_registration_data %}
+                <input type="hidden" name="registratie" value="{{ selected_registration.id }}">
+                <button
+                  class="secundary button"
+                  type="submit"
+                  name="action"
+                  value="copy_previous"
+                >
+                  Kopieer vorige registratie
+                </button>
+              {% endif %}
+              <button class="primary button" type="submit" name="action" value="new">＋ Nieuwe registratie</button>
             </form>
           </div>
         {% endif %}
@@ -87,9 +97,10 @@
                 {% if selected_registration.status == 'published' %}
                   <p class="muted">Deze registratie is gepubliceerd en kan niet meer worden bewerkt. Zet haar terug naar concept om alsnog te wijzigen.</p>
                   <button class="button" type="submit" name="action" value="unpublish">Terug naar concept</button>
+                  <button class="outline button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
                 {% else %}
-                  <button class="primary button" type="submit" name="action" value="save">Bewaren</button>
-                  <button class="button" type="submit" name="action" value="publish">Publiceren</button>
+                  <button class="primary button" type="submit" name="action" value="save">Concept opslaan</button>
+                  <button class="secundary button" type="submit" name="action" value="publish">Definitief publiceren</button>
                   <button class="outline button danger" type="submit" name="action" value="delete" onclick="return confirm('Deze registratie definitief verwijderen?')">Verwijderen</button>
                 {% endif %}
               </div>
