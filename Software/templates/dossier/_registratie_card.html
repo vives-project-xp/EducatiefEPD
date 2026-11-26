@@ -1,0 +1,52 @@
+{% load epd_filters %}
+<article class="registration-card">
+  <header class="registration-card-head">
+    <div>
+      <p class="eyebrow">{{ registration.get_kind_display }}</p>
+      <h3>{{ registration.title }}</h3>
+      <p class="muted">Door {{ registration.display_name }}</p>
+    </div>
+    <div class="registration-head-actions">
+      <span class="badge {% if registration.status == 'published' %}badge-published{% else %}badge-concept{% endif %}">{{ registration.get_status_display }}</span>
+      {% if not student_case.locked and registration.kind != 'information' %}
+        {% if registration.status == 'published' %}
+          <form method="post" class="registration-actions">
+            {% csrf_token %}
+            <input type="hidden" name="module" value="{{ selected.meta_key }}">
+            <input type="hidden" name="registratie" value="{{ registration.id }}">
+            <input type="hidden" name="action" value="unpublish">
+            <button class="button" type="submit">Terug naar concept</button>
+          </form>
+        {% else %}
+          <form method="post" class="registration-actions">
+            {% csrf_token %}
+            <input type="hidden" name="module" value="{{ selected.meta_key }}">
+            <input type="hidden" name="registratie" value="{{ registration.id }}">
+            <input type="hidden" name="action" value="edit">
+            <button class="button" type="submit">Bewerken</button>
+          </form>
+          <form method="post" class="registration-actions">
+            {% csrf_token %}
+            <input type="hidden" name="module" value="{{ selected.meta_key }}">
+            <input type="hidden" name="registratie" value="{{ registration.id }}">
+            <input type="hidden" name="action" value="publish">
+            <button class="primary button" type="submit">Publiceren</button>
+          </form>
+        {% endif %}
+      {% endif %}
+    </div>
+  </header>
+  {% for field in registration.display_values %}
+    <div class="response-value"><strong>{{ field.label }}</strong>
+      {% if field.matrix_payload %}
+        {% include 'dossier/_matrix.html' with locked=True %}
+      {% elif field.type == 'matrix' %}
+        <div class="matrix-wrap"><table><thead><tr><th></th>{% for column in field.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead><tbody>{% for row in field.prepared_rows %}<tr><th>{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.value }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div>
+      {% elif field.type == 'observation' %}{{ field.value|render_observations }}
+      {% elif field.render_as_html %}<div class="rich-response">{{ field.rendered_value }}</div>
+      {% else %}<div class="plain-response">{{ field.value|format_field_value:field.type|default:"–" }}</div>{% endif %}
+    </div>
+  {% empty %}
+    <p class="muted">Deze registratie is nog leeg.</p>
+  {% endfor %}
+</article>
