@@ -1,0 +1,19 @@
+{% if selection_type == 'functions' %}
+  <nav class="selection-list function-selection" aria-label="Functies" data-selection-list>
+    <p class="eyebrow">Functies</p>
+    <ul class="managed-form-list">
+      {% for item in selection_items %}
+        <li><button type="button" class="form-navigation-item" data-function-nav="{{ item.id }}" aria-current="{% if item.active %}true{% else %}false{% endif %}">{{ item.title }}</button></li>
+      {% endfor %}
+    </ul>
+  </nav>
+{% else %}
+  <nav class="selection-list function-form-navigation" aria-label="Formulieren" data-selection-list>
+    <p class="eyebrow">Formulieren</p>
+    <ul class="managed-form-list">
+      {% for item in selection_items %}
+        <li><button type="button" class="form-navigation-item" data-viewer-nav="{{ item.key }}" aria-current="{% if item.active %}true{% else %}false{% endif %}">{{ item.title|default:"Naamloos formulier" }}</button></li>
+      {% endfor %}
+    </ul>
+  </nav>
+{% endif %}

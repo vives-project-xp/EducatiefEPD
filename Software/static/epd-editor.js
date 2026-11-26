@@ -1,50 +1,100 @@
 document.addEventListener('DOMContentLoaded', () => {
-  tinymce.init({
-    selector: '.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
-    license_key: 'gpl',
-    base_url: '/static/tinymce',
-    suffix: '.min',
-    // language: 'nl',            // needs the nl language file in static/tinymce/langs/
-    menubar: false,
-    statusbar: false,
-    plugins: 'lists link table image autoresize',
-    toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | image importdocx exportdocx',
-    color_cols: 5,
-    setup(editor) {
-      editor.ui.registry.addButton('uploadimage', {
-      text: 'Upload image',
-      icon: 'image',
-      onAction: () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
+  const browser = document.defaultView;
+  const navigation = document.querySelector('.form-navigation');
 
-        input.onchange = () => {
-          const file = input.files?.[0];
-          if (!file) return;
+  if (navigation) {
+    const selectForm = (key) => {
+      const buttons = [...navigation.querySelectorAll('[data-form-nav]')];
+      if (!buttons.some((item) => item.dataset.formNav === key)) return;
+      buttons.forEach((item) => {
+        item.classList.toggle('is-active', item.dataset.formNav === key);
+        item.setAttribute('aria-pressed', item.dataset.formNav === key ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-function-form]').forEach((form) => {
+        form.hidden = form.dataset.functionForm !== key;
+      });
+      document.querySelectorAll('[name="form"]').forEach((input) => {
+        input.value = key;
+      });
+    };
 
-          const reader = new FileReader();
+    navigation.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-form-nav]');
+      if (!button) return;
+      const key = button.dataset.formNav;
+      const url = new URL(browser.location.href);
+      url.searchParams.set('form', key);
+      browser.history.pushState({}, '', url);
+      selectForm(key);
+    });
 
-          reader.onload = () => {
-            editor.insertContent(
-              `<img src="${reader.result}" alt="">`
-            );
-          };
+    browser.addEventListener('popstate', () => {
+      const firstForm = navigation.querySelector('[data-form-nav]');
+      const key = new URL(browser.location.href).searchParams.get('form')
+        || (firstForm && firstForm.dataset.formNav);
+      if (key) selectForm(key);
+    });
+  }
 
-          reader.readAsDataURL(file);
-        };
-
-        input.click();
+  if (typeof tinymce !== 'undefined') {
+    tinymce.init({
+      selector: 'textarea.rich, .dynamic-field textarea, .answer-form textarea, .js-tinymce',
+      license_key: 'gpl',
+      base_url: '/static/tinymce',
+      suffix: '.min',
+      menubar: false,
+      plugins: 'lists link table image',
+      toolbar: 'undo redo | blocks bold italic forecolor backcolor bullist numlist newdocument | image uploadimage | importdocx exportdocx',
+      color_cols: 5,
+      setup(editor) {
+        editor.on('change input', () => {
+          const target = editor.getElement();
+          target?.dispatchEvent(new Event('epd:dirty', {bubbles: true}));
+        });
+        editor.ui.registry.addButton('uploadimage', {
+          text: 'Upload image',
+          icon: 'image',
+          onAction: () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                editor.insertContent(`<img src="${reader.result}" alt="">`);
+              };
+              reader.readAsDataURL(file);
+            };
+            input.click();
+          },
+        });
+        editor.ui.registry.addButton('importdocx', {
+          text: 'Import Word', onAction: () => importDocx(editor),
+        });
+        editor.ui.registry.addButton('exportdocx', {
+          text: 'Export Word', onAction: () => exportDocx(editor),
+        });
       },
     });
-      editor.ui.registry.addButton('importdocx', {
-        text: 'Import Word', onAction: () => importDocx(editor),
+  }
+
+  document.querySelectorAll('[data-nav-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (button.dataset.navUrl) {
+        browser.location.href = button.dataset.navUrl;
+        return;
+      }
+      const expanded = button.getAttribute('aria-expanded') === 'true';
+      document.querySelectorAll('[data-nav-toggle]').forEach((item) => {
+        item.setAttribute('aria-expanded', item === button && !expanded ? 'true' : 'false');
+        const panel = document.getElementById(item.getAttribute('aria-controls'));
+        if (panel) panel.hidden = item !== button || expanded;
       });
-      editor.ui.registry.addButton('exportdocx', {
-        text: 'Export Word', onAction: () => exportDocx(editor),
-      });
-    },
+    });
   });
+
 });
 
 document.addEventListener("click", function (event) {

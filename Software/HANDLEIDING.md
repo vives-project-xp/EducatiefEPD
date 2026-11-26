@@ -120,12 +120,13 @@ beschikbare modules op naam/beschrijving, opleiding, thema en categorie. Open da
 open. Een dossiersjabloon bundelt bestaande onderdelen en kan naar een casus worden
 gekopieerd; reeds gestarte studentdossiers blijven zelfstandige kopieën.
 
-Via **Functie beheer** maak en bewerk je herbruikbare formulieren en formuliergroepen.
-Bewaar je wijzigingen vóór je het voorbeeld opent; het voorbeeld toont de opgeslagen
-versie. Bij teruggaan met onbewaarde wijzigingen kun je annuleren of de wijzigingen
-weggooien. Verwijderde functies kunnen 30 dagen vanuit **Recent verwijderd** worden
-hersteld. Dit functiebeheer is een afzonderlijke editor; de formulieren worden nog
-niet automatisch als dossieronderdeel gekoppeld. EPD-beheerders kunnen daarnaast
+Open **Functies beheren** onder Bibliotheekbeheer om herbruikbare formulieren en
+formuliergroepen te beheren. Vanuit een onderdeelpagina kun je dezelfde lijst openen
+via de link bij de functies. Bewaar je wijzigingen vóór je het voorbeeld opent; het
+voorbeeld toont de opgeslagen versie. Bij teruggaan met onbewaarde wijzigingen kun je
+annuleren of de wijzigingen weggooien. Verwijderde functies kunnen 30 dagen vanuit
+**Recent verwijderd** worden hersteld. De formulieren worden nog niet automatisch als
+dossieronderdeel gekoppeld. EPD-beheerders kunnen daarnaast
 de bestaande functienamen van een bibliotheekonderdeel beheren.
 
 Een docent kan een eigen gearchiveerde casus verwijderen als er geen studentdossiers

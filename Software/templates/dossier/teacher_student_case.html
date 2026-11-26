@@ -48,14 +48,17 @@
               <strong>
                 Vorige beoordeling{% if submission.latest_review %}: {{ submission.latest_review.get_status_display }}{% elif submission.status in 'approved,resubmit' %}: {{ submission.get_status_display }}{% endif %}
               </strong>
-              {% if submission.reviewed_at %}
-                <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}{% if submission.latest_review.reviewer %} · {{ submission.latest_review.reviewer.get_full_name|default:submission.latest_review.reviewer.username }}{% endif %}</small>
+              {% if submission.latest_review %}
+                <small>{{ submission.latest_review.created_at|date:"d-m-Y H:i" }}{% if submission.latest_review.reviewer %} · {{ submission.latest_review.reviewer.get_full_name|default:submission.latest_review.reviewer.username }}{% endif %}</small>
+              {% elif submission.reviewed_at %}
+                <small>{{ submission.reviewed_at|date:"d-m-Y H:i" }}</small>
               {% endif %}
-              {% if submission.feedback %}
+              {% if submission.latest_review and submission.latest_review.feedback %}
+                <div class="previous-review-feedback">{{ submission.latest_review.feedback|rich_html }}</div>
+              {% elif submission.feedback %}
                 <div class="previous-review-feedback">{{ submission.feedback|rich_html }}</div>
               {% endif %}
             </div>
-          {% endif %}
           {% if submission.earlier_reviews %}
             <details class="review-history">
               <summary>Eerdere beoordelingen ({{ submission.earlier_reviews|length }})</summary>
@@ -72,6 +75,7 @@
                 </div>
               {% endfor %}
             </details>
+          {% endif %}
           {% endif %}
           {% if submission.status in 'submitted,approved,resubmit' %}
             <form method="post" class="review-form" action="{% url 'dossier:teacher_review_assignment' student_case.id submission.id %}">

@@ -1,6 +1,6 @@
-from copy import deepcopy
 import re
-from urllib.parse import urlparse
+from copy import deepcopy
+from urllib.parse import urlencode, urlparse
 
 from django.db import transaction
 from django.db.models import Q
@@ -16,11 +16,14 @@ from .models import (
     Case,
     LibraryDossier,
     LibraryTemplate,
+    CaseFunctionSnapshot,
+    ManagedForm,
     Module,
     ModuleField,
     ModuleResponse,
     StudentCase,
 )
+from .matrix import legacy_definition
 
 STUDENT_BASE_DATA_VERSION = "student_base_data_version"
 STUDENT_BASE_DATA_HANDLED_VERSION = "student_base_data_handled_version"
@@ -75,6 +78,252 @@ def module_schema(module):
     return [field.as_schema() for field in fields] if fields else legacy_schema(module)
 
 
+def sync_student_module_response(response):
+    """Refresh a student's structure from the case while preserving their edits."""
+    module = response.module
+    if module is None or response.status == ModuleResponse.Status.PUBLISHED:
+        return False
+    live_schema = module_schema(module)
+    current_data = deepcopy(response.data if isinstance(response.data, dict) else {})
+    source_data = deepcopy(response.source_data if isinstance(response.source_data, dict) else {})
+    base_data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
+    if isinstance(current_data, dict) and not current_data.get("_functions"):
+        current_data.pop("_functions", None)
+    for key, default in base_data.items():
+        if key not in current_data or current_data.get(key) == source_data.get(key):
+            current_data[key] = deepcopy(default)
+    changed = (
+        response.schema != live_schema
+        or response.data != current_data
+        or response.source_data != base_data
+    )
+    if changed:
+        response.schema = live_schema
+        response.data = current_data
+        response.source_data = base_data
+        response.save(update_fields=["schema", "data", "source_data", "updated_at"])
+    return changed
+
+
+def build_function_hierarchy(functions):
+    return [{
+        "id": function["id"],
+        "title": function["title"],
+        "kind": function["kind"],
+        "forms": [
+            {"id": form["id"], "title": form["title"] or "Naamloos formulier"}
+            for form in function.get("forms", [])
+        ],
+    } for function in functions]
+
+
+def build_library_structure(module_entries):
+    structure = []
+    for entry in module_entries:
+        functions = build_function_hierarchy([{
+            "id": link.function_id,
+            "title": link.function.title,
+            "kind": "Formulierengroep" if link.function.kind == "groep" else "Formulier",
+            "forms": [
+                {"id": form.id, "title": form.title}
+                for form in link.function.forms.all()
+            ],
+        } for link in entry.template.function_links.all()
+          if link.function.deleted_at is None])
+        structure.append({
+            "title": entry.template.title,
+            "template_id": entry.template_id,
+            "kind": entry.template.get_category_display(),
+            "functions": functions,
+        })
+    return structure
+
+
+def build_sidebar_structure(module_responses, query=""):
+    query = query.casefold()
+    structure = []
+    for item in module_responses:
+        entry = item if hasattr(item, "meta_key") else None
+        response = entry.representative if entry else item
+        module = entry.module if entry else response.module
+        snapshots = (
+            [snapshot for snapshot in module.function_snapshots.all() if snapshot.active]
+            if module else []
+        )
+        functions = []
+        for snapshot in snapshots:
+            definition = snapshot.definition or {}
+            functions.append({
+                "id": snapshot.id, "title": snapshot.title,
+                "kind": "Formulierengroep" if snapshot.kind == "groep" else "Formulier",
+                "forms": [
+                    {"id": form.get("id", form.get("position", 0)), "title": form.get("title", "")}
+                    for form in definition.get("forms", [])
+                ],
+            })
+        functions = build_function_hierarchy(functions)
+        module_key = entry.meta_key if entry else str(response.id)
+        registration_id = entry.registrations[0].id if entry else response.id
+        for function in functions:
+            params = {
+                "module": module_key,
+                "function": function["id"],
+                "weergave": "invoer",
+                "registratie": registration_id,
+            }
+            if query:
+                params["q"] = query
+            function["url"] = f"?{urlencode(params)}"
+        searchable = " ".join(
+            [response.title, *(item["title"] for item in functions)]
+        ).casefold()
+        if not query or query in searchable:
+            registrations = entry.responses if entry else [response]
+            structure.append({
+                "id": module_key,
+                "title": response.title,
+                "kind": response.kind,
+                "registration_id": registration_id,
+                "functions": functions,
+                "revision_requested": any(
+                    registration.revision_requested for registration in registrations
+                ),
+                "feedback": any(registration.feedback for registration in registrations),
+            })
+    return structure
+
+
+DEFAULT_DOSSIER = [
+    {
+        "title": "Dashboard", "category": "module", "theme": "Algemeen",
+        "description": "Samenvatting van de fictieve patiënt.", "fields": [],
+    },
+    {
+        "title": "Anamnese", "category": "questionnaire", "theme": "Opname",
+        "description": "Klachten, symptomen en relevante voorgeschiedenis.",
+        "fields": [
+            ("Reden van opname", "long_text"), ("Huidige klachten en symptomen", "long_text"),
+            ("Medische voorgeschiedenis", "long_text"), ("Allergieën", "long_text"),
+            ("Medicatie", "long_text"), ("Obstetrische voorgeschiedenis", "long_text"),
+        ],
+    },
+    {
+        "title": "Zwangerschapsdossier", "category": "module", "theme": "Zwangerschap",
+        "description": "Basisgegevens van de zwangerschap.",
+        "fields": [
+            ("Zwangerschapsduur (weken)", "number"), ("Uitgerekende datum", "date"),
+            ("Gravida", "number"), ("Para", "number"), ("Risicofactoren", "long_text"),
+        ],
+    },
+    {
+        "title": "Partusdossier", "category": "module", "theme": "Partus",
+        "description": "Registratie van arbeid en bevalling.",
+        "fields": [
+            ("Start contracties", "datetime"), ("Vliezen gebroken", "datetime"),
+            ("Ontsluiting (cm)", "number"), ("Foetale hartfrequentie", "number"),
+            ("Klinische observaties", "observation"),
+        ],
+    },
+    {
+        "title": "MIC dossier", "category": "module", "theme": "Risicozorg",
+        "description": "Maternal intensive care registratie.",
+        "fields": [("Indicatie", "long_text"), ("Opnamedatum", "date"), ("Observaties", "observation")],
+    },
+    {
+        "title": "Postpartumdossier", "category": "module", "theme": "Postpartum",
+        "description": "Opvolging na de bevalling.",
+        "fields": [("Bloedverlies (ml)", "number"), ("Toestand moeder en kind", "long_text"), ("Observaties", "observation")],
+    },
+    {
+        "title": "Kort verslag graviditeit, partus en postpartum", "category": "module", "theme": "Verslag",
+        "description": "Beknopt klinisch verslag.", "fields": [("Verslag", "long_text")],
+    },
+    {
+        "title": "NICU / N*-dossier", "category": "module", "theme": "Neonatologie",
+        "description": "Registratie voor neonatale opvolging.",
+        "fields": [("Indicatie", "long_text"), ("Neonatale observaties", "observation")],
+    },
+    {
+        "title": "Screening emotioneel welzijn", "category": "questionnaire", "theme": "Welzijn",
+        "description": "Screening van het emotioneel welzijn.",
+        "fields": [("Actuele beleving", "long_text"), ("Signalen of aandachtspunten", "long_text")],
+    },
+    {
+        "title": "Klinisch redeneerplan", "category": "matrix", "theme": "Klinisch redeneren",
+        "description": "Gestructureerd zorg- en redeneerplan.",
+        "matrix": {
+            "label": "Klinisch redeneerplan",
+            "rows": ["Probleem of diagnose", "Gewenst resultaat", "Interventie", "Evaluatie"],
+            "columns": ["Beschrijving", "Motivatie"],
+        },
+    },
+    {
+        "title": "Uitwerking opdracht", "category": "module", "theme": "Opdrachten",
+        "description": "Vrije uitwerking van de onderwijsopdracht.", "fields": [("Uitwerking", "long_text")],
+    },
+]
+
+
+@transaction.atomic
+def ensure_default_templates():
+    education, _ = Education.objects.get_or_create(
+        slug="vroedkunde", defaults={"name": "Vroedkunde"}
+    )
+    for blueprint in DEFAULT_DOSSIER:
+        template, created = LibraryTemplate.objects.get_or_create(
+            seed_key=f"vroedkunde-{slugify(blueprint['title'])}",
+            defaults={
+                "title": blueprint["title"],
+                "education": education,
+                "description": blueprint["description"],
+                "category": blueprint["category"],
+                "theme": blueprint["theme"],
+                "is_fixed": True,
+            },
+        )
+        if not created:
+            continue
+        for position, (label, field_type) in enumerate(blueprint.get("fields", [])):
+            LibraryField.objects.create(
+                template=template, label=label, key=f"veld-{position + 1}",
+                field_type=field_type, position=position,
+            )
+        matrix = blueprint.get("matrix")
+        if matrix:
+            LibraryField.objects.create(
+                template=template, label=matrix["label"], key="matrix-1",
+                field_type=FieldDefinition.FieldType.MATRIX,
+                rows=matrix["rows"], columns=matrix["columns"], position=0,
+            )
+
+
+@transaction.atomic
+def create_case_structure(case):
+    ensure_default_templates()
+    for template in LibraryTemplate.objects.filter(
+        status=LibraryTemplate.Status.ACTIVE, is_fixed=True
+    ).filter(Q(education=case.education) | Q(education__isnull=True)).order_by("id"):
+        copied = case.modules.filter(source_template=template).first()
+        if copied:
+            continue
+        existing = case.modules.filter(title=template.title).first()
+        if existing:
+            existing.source_template = template
+            existing.source_template_version = template.version
+            existing.save(update_fields=["source_template", "source_template_version"])
+            if not existing.fields.exists():
+                ModuleField.objects.bulk_create([
+                    ModuleField(
+                        module=existing, label=field.label, key=field.key,
+                        field_type=field.field_type, help_text=field.help_text,
+                        required=field.required, position=field.position,
+                        options=field.options, rows=field.rows, columns=field.columns,
+                    )
+                    for field in template.fields.all()
+                ])
+            snapshot_template_functions(existing, template)
+        else:
+            copy_template_to_case(template, case)
 def pending_student_base_data_version(configuration):
     version = configuration.get(STUDENT_BASE_DATA_VERSION)
     if type(version) is int and version > 0 and configuration.get(
@@ -103,14 +352,17 @@ def new_registration(student_case, module, *, author):
     if student_case.locked:
         raise ValueError("Een ingeleverd dossier kan niet bewerkt worden.")
     with transaction.atomic():
+
         response = student_case.module_responses.create(
             module=module,
+            created_by=author,
             source_template_id_snapshot=module.source_template_id,
         )
+
         response.hydrate_from_source()
         response.schema = module_schema(module)
-        response.data = deepcopy(module.base_data)
-        response.created_by = author
+        response.data = deepcopy(module.base_data if isinstance(module.base_data, dict) else {})
+        response.source_data = deepcopy(response.data)
         response.save()
     return response
 
@@ -124,8 +376,13 @@ def _filled(value):
 
 
 def registration_is_empty(response):
-    """True als de registratie bij geen enkel schema-veld een waarde bevat."""
-    return not any(_filled(response.data.get(field.get("key"))) for field in response.schema)
+    """Check both module fields and function answers for submitted content."""
+    module_values = any(
+        _filled(response.data.get(field.get("key")))
+        for field in response.schema
+    )
+    function_values = response.data.get("_functions", {})
+    return not module_values and not bool(function_values)
 
 
 @transaction.atomic
@@ -199,7 +456,6 @@ def synchronize_student_case(student_case, *, base_data_module_ids=None):
             new_registration(student_case, module, author=student_case.student)
             changed = True
             continue
-
         if legacy_responses:
             response = max(module_responses, key=lambda item: item.updated_at)
             data_sources = sorted(
@@ -249,6 +505,8 @@ def synchronize_student_case(student_case, *, base_data_module_ids=None):
                     "module", "source_template_id_snapshot", "title", "kind",
                     "instructions", "position", "schema", "data", "updated_at",
                 ])
+                changed = True
+            if sync_student_module_response(response):
                 changed = True
     return changed
 
@@ -339,6 +597,58 @@ def synchronize_template_module(template, module):
     return _synchronize_template_module(template, module)
 
 
+def _function_snapshot_values(link):
+    return {
+        "source_function_id": link.function_id,
+        "title": link.function.title,
+        "kind": link.function.kind,
+        "position": link.position,
+        "definition": {
+            "title": link.function.title,
+            "kind": link.function.kind,
+            "forms": [
+                {
+                    "id": form.id,
+                    "title": form.title,
+                    "position": form.position,
+                    "questions": [
+                        {
+                            "id": question.id,
+                            "fieldType": question.field_type,
+                            "question": question.question,
+                            "unit": question.unit,
+                            "required": question.required,
+                            "options": question.options,
+                            "columns": question.columns,
+                            "rows": question.rows,
+                            "matrixDefinition": deepcopy(question.matrix_definition) or (
+                                legacy_definition(question.rows, question.columns)
+                                if question.field_type == "matrix" else {}
+                            ),
+                            "url": question.url,
+                            "buttonText": question.button_text,
+                            "image": question.image,
+                            "caption": question.caption,
+                            "explanation": question.explanation,
+                            "position": question.position,
+                        }
+                        for question in form.questions.all()
+                    ],
+                }
+                for form in link.function.forms.all()
+            ],
+        },
+    }
+
+
+def _template_function_links(template):
+    return list(
+        template.function_links.filter(function__deleted_at__isnull=True)
+        .select_related("function")
+        .prefetch_related("function__forms__questions")
+    )
+
+
 @transaction.atomic
 def synchronize_module_to_students(module, *, apply_base_data=False):
     base_data_module_ids = {module.pk} if apply_base_data else set()
@@ -381,11 +691,6 @@ def copy_template_to_case(template, case, source_dossier=None):
     )
     existing = case.modules.filter(source_template=template).first()
     if existing:
-        if (
-            case.status == Case.Status.DRAFT
-            and existing.source_template_version != template.version
-        ):
-            _synchronize_template_module(template, existing, list(template.fields.all()))
         return existing
     fields = list(template.fields.all())
     last_position = case.modules.order_by("-position").values_list("position", flat=True).first()
@@ -412,7 +717,89 @@ def copy_template_to_case(template, case, source_dossier=None):
         )
         for field in fields
     ])
+    snapshot_template_functions(module, template)
     return module
+
+
+def snapshot_template_functions(module, template):
+    if module.function_snapshots.exists():
+        return
+    CaseFunctionSnapshot.objects.bulk_create([
+        CaseFunctionSnapshot(module=module, **_function_snapshot_values(link))
+        for link in _template_function_links(template)
+    ])
+
+
+@transaction.atomic
+def synchronize_template_function_snapshots(template, module):
+    links = _template_function_links(template)
+    live_function_ids = {link.function_id for link in links}
+    all_snapshots = list(module.function_snapshots.all())
+    active_snapshots = [snapshot for snapshot in all_snapshots if snapshot.active]
+    legacy_form_ids = {
+        int(form["id"])
+        for snapshot in active_snapshots
+        for form in (snapshot.definition or {}).get("forms", [])
+        if isinstance(form, dict) and str(form.get("id", "")).isdigit()
+    }
+    form_owners = dict(
+        ManagedForm.objects.filter(id__in=legacy_form_ids).values_list("id", "function_id")
+    )
+    existing_function_ids = set()
+    inactive_by_function_id = {}
+
+    for snapshot in active_snapshots:
+        source_function_id = snapshot.source_function_id
+        source_id_was_missing = source_function_id is None
+        if source_function_id is None:
+            form_function_ids = {
+                form_owners[int(form["id"])]
+                for form in (snapshot.definition or {}).get("forms", [])
+                if isinstance(form, dict)
+                and str(form.get("id", "")).isdigit()
+                and int(form["id"]) in form_owners
+            }
+            if len(form_function_ids) == 1:
+                source_function_id = form_function_ids.pop()
+                snapshot.source_function_id = source_function_id
+
+        if source_function_id not in live_function_ids:
+            snapshot.active = False
+            snapshot.save(update_fields=["source_function_id", "active"])
+            continue
+
+        existing_function_ids.add(source_function_id)
+        link = next(item for item in links if item.function_id == source_function_id)
+        if snapshot.position != link.position or source_id_was_missing:
+            snapshot.position = link.position
+            snapshot.save(update_fields=["source_function_id", "position"])
+
+    for snapshot in all_snapshots:
+        if not snapshot.active and snapshot.source_function_id is not None:
+            inactive_by_function_id.setdefault(snapshot.source_function_id, []).append(snapshot)
+
+    new_snapshots = []
+    for link in links:
+        if link.function_id in existing_function_ids:
+            continue
+        values = _function_snapshot_values(link)
+        previous = inactive_by_function_id.get(link.function_id, [])
+        reusable = next((
+            snapshot for snapshot in reversed(previous)
+            if (
+                snapshot.title == values["title"]
+                and snapshot.kind == values["kind"]
+                and snapshot.definition == values["definition"]
+            )
+        ), None)
+        if reusable:
+            reusable.active = True
+            reusable.position = link.position
+            reusable.save(update_fields=["active", "position"])
+        else:
+            new_snapshots.append(CaseFunctionSnapshot(module=module, **values))
+
+    CaseFunctionSnapshot.objects.bulk_create(new_snapshots)
 
 
 @transaction.atomic
@@ -570,8 +957,8 @@ def clean_html(value):
         tags=ALLOWED_TAGS,
         attributes=ALLOWED_ATTRIBUTES,
         url_schemes=ALLOWED_URL_SCHEMES,
-        attribute_filter=_reject_unsafe_link,
         filter_style_properties=ALLOWED_STYLE_PROPERTIES,
+        attribute_filter=_reject_unsafe_link,
     )
 
 

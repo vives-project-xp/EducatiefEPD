@@ -5,7 +5,7 @@
 <main class="teacher-shell function-shell" data-function-page="deleted" data-action-url="{% url 'dossier:function_trash_action' %}">
   <header class="page-bar">
     <div><p class="eyebrow">Functies beheer</p><h1>Recent verwijderd</h1><p class="function-hint">Verwijderde functies blijven 30 dagen bewaard en worden daarna definitief gewist.</p></div>
-    <div class="header-actions"><a class="back" href="{% url 'dossier:function_management' %}">← Ga terug</a></div>
+    <div class="header-actions"><a class="back" href="{% url 'dossier:library_list' %}?manage_functions=1#function-management">← Ga terug</a></div>
   </header>
   <section class="function-card" aria-labelledby="deleted-heading">
     <div class="function-card-heading"><h2 id="deleted-heading">Verwijderd</h2><button class="outline button danger-outline" type="button" data-empty-trash {% if not functions %}disabled{% endif %}>Prullenbak legen</button></div>

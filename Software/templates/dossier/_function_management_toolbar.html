@@ -1,0 +1,15 @@
+<div class="function-pagination-toolbar">
+  <label>Per pagina
+    <select name="{{ function_page_size_param }}" form="function-pagination-form" data-page-size>
+      {% for option in page_size_options %}<option value="{{ option }}" {% if option == page_size %}selected{% endif %}>{{ option }}</option>{% endfor %}
+    </select>
+  </label>
+  {% if paginator.count %}
+  <span data-function-count>{{ page.start_index }}–{{ page.end_index }} van {{ paginator.count }}</span>
+  {% endif %}
+</div>
+<form id="function-pagination-form" method="get" hidden>
+  {% if functions_embedded %}<input type="hidden" name="manage_functions" value="1">{% endif %}
+  <input type="hidden" name="{{ function_query_param }}" value="{{ query }}">
+  <input type="hidden" name="{{ function_sort_param }}" value="{{ sort }}">
+</form>

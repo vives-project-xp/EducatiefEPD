@@ -9,11 +9,7 @@
     down: ["m5 8 5 5 5-5"],
     drag: ["M7 5h.01M7 10h.01M7 15h.01M13 5h.01M13 10h.01M13 15h.01"],
     chevron: ["m7 4 6 6-6 6"],
-    lock: ["M4 8h12v9H4z", "M6.5 8V5a3.5 3.5 0 0 1 7 0v3"],
-    eye: ["M1.8 10s3-5.5 8.2-5.5 8.2 5.5 8.2 5.5-3 5.5-8.2 5.5S1.8 10 1.8 10Z", "M12.2 10a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0Z"],
-    edit: ["m12.5 4.5 3 3M4 16l3.2-.7L16 6.5 13 3.5l-8.8 8.8L4 16Z"],
     warning: ["M10 2.5 18 17H2z", "M10 7v4m0 2.5h.01"],
-    plus: ["M10 4v12M4 10h12"],
   };
 
   function node(tag, className = "", text = "") {
@@ -96,24 +92,126 @@
   }
 
   function initList() {
+    function pageUrl(pageNumber) {
+      const url = new URL(window.location.href);
+      url.searchParams.set(root.dataset.pageParam || "page", String(pageNumber));
+      if (root.dataset.embeddedFunctions === "true") {
+        url.searchParams.set("manage_functions", "1");
+        url.hash = "function-management";
+      }
+      return url.href;
+    }
+
+    function updateAfterDelete(button, result) {
+      const row = button.closest("[data-function-row]");
+      if (!row) throw new Error("De functie kon niet uit de lijst worden verwijderd.");
+      row.remove();
+
+      const activeCount = Number(result.activeCount);
+      const deletedCount = Number(result.deletedCount);
+      const pageNumber = Number(root.dataset.pageNumber);
+      const pageSize = Number(root.dataset.pageSize);
+      if (
+        !Number.isInteger(activeCount) || activeCount < 0
+        || !Number.isInteger(deletedCount) || deletedCount < 0
+        || !Number.isInteger(pageNumber) || pageNumber < 1
+        || !Number.isInteger(pageSize) || pageSize < 1
+      ) {
+        throw new Error("De bijgewerkte functielijst kon niet worden weergegeven.");
+      }
+
+      root.dataset.totalCount = String(activeCount);
+      const list = root.querySelector("[data-function-list]");
+      const rows = [...list.querySelectorAll("[data-function-row]")];
+      const totalPages = Math.ceil(activeCount / pageSize);
+      if (!rows.length) {
+        const emptyMessage = activeCount === 0
+          ? (root.dataset.query
+            ? "Geen functies gevonden."
+            : "Er zijn nog geen functies. Maak een functie aan om te beginnen.")
+          : "De laatste functie op deze pagina is verwijderd. Gebruik Vorige om verder te bladeren.";
+        list.replaceChildren(node("p", "empty-state", emptyMessage));
+      }
+
+      const count = root.querySelector("[data-function-count]");
+      if (count) {
+        count.hidden = activeCount === 0 || pageNumber > totalPages;
+        if (!count.hidden) {
+          const firstIndex = (pageNumber - 1) * pageSize + 1;
+          const lastIndex = Math.min(firstIndex + rows.length - 1, activeCount);
+          count.textContent = `${firstIndex}–${lastIndex} van ${activeCount}`;
+        }
+      }
+
+      const deletedCountNode = root.querySelector("[data-deleted-count]");
+      if (deletedCountNode) {
+        deletedCountNode.textContent = deletedCount ? ` (${deletedCount})` : "";
+      }
+
+      const pagination = root.querySelector("[data-function-pagination]");
+      if (pagination) {
+        const previous = pagination.querySelector('[data-function-page-link="previous"]');
+        const next = pagination.querySelector('[data-function-page-link="next"]');
+        const hasPrevious = pageNumber > 1;
+        const hasNext = pageNumber < totalPages;
+        if (previous) {
+          previous.hidden = !hasPrevious;
+          if (hasPrevious) previous.href = pageUrl(pageNumber - 1);
+        }
+        if (next) {
+          next.hidden = !hasNext;
+          if (hasNext) next.href = pageUrl(pageNumber + 1);
+        }
+        const pageInfo = pagination.querySelector("[data-function-page-info]");
+        if (pageInfo) {
+          pageInfo.textContent = pageNumber > totalPages
+            ? "Geen functies op deze pagina"
+            : `Pagina ${pageNumber} van ${totalPages}`;
+        }
+        pagination.hidden = !hasPrevious && !hasNext;
+      }
+    }
+
+    root.querySelector("[data-page-size]")?.addEventListener("change", (event) => {
+      event.currentTarget.form.submit();
+    });
     const sortButton = root.querySelector("[data-sort-control]");
     sortButton?.addEventListener("click", () => {
       const sequence = ["az", "za", "oldest"];
       const next = sequence[(sequence.indexOf(sortButton.dataset.sort) + 1) % sequence.length];
       const url = new URL(window.location.href);
-      url.searchParams.set("sort", next);
+      url.searchParams.set(root.dataset.sortParam || "sort", next);
+      if (root.dataset.embeddedFunctions === "true") {
+        url.searchParams.set("manage_functions", "1");
+        url.hash = "function-management";
+      }
       window.location.assign(url);
     });
     root.querySelectorAll("[data-standard-warning]").forEach((button) => {
       button.addEventListener("click", () => toast("Standaardfuncties mogen niet worden bewerkt.", true));
     });
+    root.querySelectorAll("[data-duplicate-function]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const result = await post(button.dataset.url, { action: "duplicate" });
+          window.location.assign(result.redirect);
+        } catch (error) {
+          button.disabled = false;
+          toast(error.message, error.warning);
+        }
+      });
+    });
     root.querySelectorAll("[data-delete-function]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!await confirm(`Functie \u201c${button.dataset.title}\u201d verwijderen? Je kunt de functie 30 dagen herstellen via Recent verwijderd.`, "Verwijderen")) return;
         try {
-          const result = await post(button.dataset.url, { action: "delete" });
+          const result = await post(button.dataset.url, {
+            action: "delete",
+            query: root.dataset.query,
+          });
+          updateAfterDelete(button, result);
           toast(result.message);
-          window.setTimeout(() => window.location.assign(result.redirect), 1000);
         } catch (error) { toast(error.message, error.warning); }
       });
     });
@@ -153,14 +251,18 @@
     update();
   }
 
-  const fieldTypes = [
-    { label: "Informatief", options: [["image", "Afbeelding weergeven"], ["link", "Hyperlink"], ["info", "Toelichting"]] },
-    { label: "Interactief", options: [["imageUpload", "Afbeelding uploaden"], ["fileUpload", "Bestand uploaden"], ["date", "Datum"], ["dateTime", "Datum en tijd"], ["number", "Getal"], ["matrix", "Matrix (maximaal 2)"], ["multipleChoice", "Meerkeuze"], ["text", "Tekst"], ["time", "Tijd"]] },
-  ];
+  const fieldTypes = (data) => {
+    const groups = new Map();
+    (data.typeRegistry || []).forEach((item) => {
+      if (!groups.has(item.group)) groups.set(item.group, { label: item.group, options: [] });
+      groups.get(item.group).options.push([item.key, item.label]);
+    });
+    return [...groups.values()];
+  };
   const informative = new Set(["image", "link", "info"]);
 
   function blankQuestion() {
-    return { fieldType: "text", question: "", unit: "", required: false, options: [], columns: [], rows: [], url: "", buttonText: "", image: "", caption: "", explanation: "" };
+    return { fieldType: "text", question: "", unit: "", required: false, options: [], columns: [], rows: [], matrixDefinition: {}, url: "", buttonText: "", image: "", caption: "", explanation: "" };
   }
 
   function initEditor() {
@@ -170,37 +272,46 @@
     let state = structuredClone(data);
     let saved = structuredClone(data);
     let selectedFormId = state.forms[0]?.id ?? null;
+    const requestedFormId = Number(new URLSearchParams(window.location.search).get("form"));
+    if (state.forms.some((form) => form.id === requestedFormId)) selectedFormId = requestedFormId;
     let openQuestion = 0;
     let dirty = false;
     const standalone = root.dataset.standalone === "true";
+    const typeGroups = fieldTypes(data);
     let locked = data.locked;
+    let canToggleLock = data.canToggleLock;
+    const isReadOnly = () => locked && !data.isManager;
     const formList = root.querySelector("[data-form-list]");
     const editorPanel = root.querySelector("[data-editor-panel]");
     const editor = root.querySelector("[data-form-editor]");
     const actions = root.querySelector("[data-form-actions]");
     const previewPanel = root.querySelector("[data-preview-panel]");
     const previewContent = root.querySelector("[data-preview-content]");
+    const matrixDialog = root.querySelector("[data-matrix-dialog]");
+    const matrixDialogContent = root.querySelector("[data-matrix-dialog-content]");
     const lockButton = root.querySelector("[data-lock]");
     const renameButton = root.querySelector("[data-rename]");
     const saveButton = node("button", "primary button", "Wijzigingen opslaan");
     saveButton.type = "button";
     saveButton.disabled = true;
+    let matrixQuestion = null;
+    let matrixOriginal = "";
     formList?.addEventListener("dragstart", formDragStart);
     formList?.addEventListener("dragover", formDragOver);
     formList?.addEventListener("drop", formDrop);
 
     const currentForm = () => state.forms.find((form) => form.id === selectedFormId) || null;
-    const isDirty = () => dirty;
+    const isDirty = () => dirty && JSON.stringify(state) !== JSON.stringify(saved);
     function setDirty() {
-      dirty = true;
-      saveButton.disabled = locked || !dirty;
+      dirty = JSON.stringify(state) !== JSON.stringify(saved);
+      saveButton.disabled = isReadOnly() || !dirty;
     }
     async function discardIfNeeded() {
       if (!isDirty()) return true;
       if (!await confirm("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", "Weggooien")) return false;
       state = structuredClone(saved);
       dirty = false;
-      saveButton.disabled = true;
+      saveButton.disabled = isReadOnly() || !dirty;
       return true;
     }
 
@@ -243,7 +354,7 @@
       const label = node("label", "managed-field field-wide");
       label.append(node("span", "managed-label", "Veld type"));
       const select = node("select", "managed-input");
-      fieldTypes.forEach((group) => {
+      typeGroups.forEach((group) => {
         const optgroup = node("optgroup");
         optgroup.label = group.label;
         group.options.forEach(([value, title]) => {
@@ -255,14 +366,6 @@
         select.append(optgroup);
       });
       select.addEventListener("change", () => {
-        if (select.value === "matrix" && question.fieldType !== "matrix") {
-          const matrixCount = currentForm().questions.filter((item) => item.fieldType === "matrix").length;
-          if (matrixCount >= 2) {
-            select.value = question.fieldType;
-            toast("Een formulier mag maximaal 2 matrices bevatten.", true);
-            return;
-          }
-        }
         question.fieldType = select.value;
         renderEditor();
         setDirty();
@@ -307,7 +410,7 @@
         addTextField(body, "Link (https://…)", question.url, (value) => { question.url = value; change(); }, { type: "url" });
         addTextField(body, "Knoptekst", question.buttonText, (value) => { question.buttonText = value; change(); });
       } else if (question.fieldType === "image") {
-        const wrapper = node("label", "managed-field field-wide");
+        const wrapper = node("label", "managed-field field-wide image-question-field");
         wrapper.append(node("span", "managed-label", "Afbeelding"));
         const input = node("input", "managed-input image-picker");
         input.type = "file";
@@ -337,6 +440,12 @@
         }
         body.append(wrapper);
         addTextField(body, "Bijschrift", question.caption, (value) => { question.caption = value; change(); }, { wide: true });
+      } else if (question.fieldType === "observation") {
+        addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
+      } else if (["imageUpload", "fileUpload"].includes(question.fieldType)) {
+        addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
+        checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
       } else if (!informative.has(question.fieldType)) {
         addTextField(body, "Vraag", question.question, (value) => { question.question = value; change(); }, { wide: true });
         checkboxField(body, "Verplicht antwoord", question.required, (value) => { question.required = value; change(); });
@@ -345,10 +454,58 @@
         }
         if (question.fieldType === "multipleChoice") listField(body, "Antwoordopties", question.options, change);
         if (question.fieldType === "matrix") {
-          listField(body, "Kolommen", question.columns, change);
-          listField(body, "Rijen (titel optioneel)", question.rows, change);
+          const definition = question.matrixDefinition || {};
+          const rows = definition.rows || question.rows || [];
+          const columns = definition.columns || question.columns || [];
+          const summary = node("div", "matrix-question-summary");
+          summary.append(node("span", "", `${rows.length} rijen × ${columns.length} kolommen`));
+          const open = node("button", "outline button", definition.version ? "Matrix bewerken" : "Matrix ontwerpen");
+          open.type = "button";
+          open.addEventListener("click", () => openMatrixDesigner(question, open));
+          summary.append(open);
+          body.append(summary);
         }
       }
+    }
+
+    function openMatrixDesigner(question, opener) {
+      if (!matrixDialog || !matrixDialogContent) return;
+      matrixQuestion = question;
+      matrixOriginal = JSON.stringify(question.matrixDefinition || {});
+      matrixDialogContent.replaceChildren();
+      const matrix = node("div", "function-matrix-designer");
+      const input = node("input");
+      input.type = "hidden";
+      input.value = matrixOriginal;
+      matrix.append(input);
+      matrixDialogContent.append(matrix);
+      document.dispatchEvent(new CustomEvent("function-matrix-designer", { detail: { root: matrix, input } }));
+      matrixDialog.showModal();
+      matrixDialog.querySelector("[data-matrix-save]").focus();
+      matrixDialog.querySelector("[data-matrix-save]").onclick = () => {
+        try {
+          matrixQuestion.matrixDefinition = JSON.parse(input.value || "{}");
+        } catch {
+          toast("De matrixindeling is ongeldig.", true);
+          return;
+        }
+        matrixDialog.close("save");
+        renderEditor();
+        setDirty();
+        opener.focus();
+      };
+      matrixDialog.querySelector("[data-matrix-cancel]").onclick = async () => {
+        if (input.value !== matrixOriginal && !await confirm("Er zijn niet-opgeslagen matrixwijzigingen. Wil je die weggooien?", "Weggooien")) return;
+        matrixDialog.close("cancel");
+        opener.focus();
+      };
+      matrixDialog.oncancel = (event) => {
+        event.preventDefault();
+        matrixDialog.querySelector("[data-matrix-cancel]").click();
+      };
+      matrixDialog.onclose = () => {
+        if (matrixDialog.returnValue !== "save") opener.focus();
+      };
     }
 
     function reorderQuestions(from, to) {
@@ -370,8 +527,8 @@
         item.dataset.questionIndex = String(index);
         const header = node("div", "question-heading");
         const drag = iconButton("drag", "Versleep vraag", "drag-handle", null);
-        drag.draggable = !locked;
-        drag.disabled = locked;
+        drag.draggable = !isReadOnly();
+        drag.disabled = isReadOnly();
         drag.setAttribute("aria-label", "Vraag verslepen");
         const title = node("button", `question-title${question.question ? "" : " is-placeholder"}`, question.question || "Nieuwe vraag");
         title.type = "button";
@@ -381,8 +538,8 @@
         const reorder = node("div", "reorder-actions");
         const moveUp = iconButton("up", "Vraag omhoog", "icon-action", () => reorderQuestions(index, index - 1));
         const moveDown = iconButton("down", "Vraag omlaag", "icon-action", () => reorderQuestions(index, index + 1));
-        moveUp.disabled = locked || index === 0;
-        moveDown.disabled = locked || index === form.questions.length - 1;
+        moveUp.disabled = isReadOnly() || index === 0;
+        moveDown.disabled = isReadOnly() || index === form.questions.length - 1;
         reorder.append(moveUp, moveDown);
         actionsGroup.append(reorder);
         actionsGroup.append(iconButton("copy", "Dupliceren", "icon-action", () => {
@@ -415,7 +572,7 @@
       });
       list.addEventListener("dragstart", (event) => {
         const handle = event.target.closest(".drag-handle");
-        if (!handle || locked) { event.preventDefault(); return; }
+        if (!handle || isReadOnly()) { event.preventDefault(); return; }
         event.dataTransfer.setData("text/plain", handle.closest("[data-question-index]").dataset.questionIndex);
         event.dataTransfer.effectAllowed = "move";
       });
@@ -428,7 +585,7 @@
       section.append(list);
       const add = node("button", "new-question", "Nieuwe vraag +");
       add.type = "button";
-      add.disabled = locked;
+      add.disabled = isReadOnly();
       add.addEventListener("click", () => { form.questions.push(blankQuestion()); openQuestion = form.questions.length - 1; renderEditor(); setDirty(); });
       section.append(add);
       return section;
@@ -441,8 +598,8 @@
         const item = node("li", `managed-form-row${form.id === selectedFormId ? " selected" : ""}`);
         item.dataset.formId = String(form.id);
         const drag = iconButton("drag", "Formulier verslepen", "drag-handle", null);
-        drag.draggable = !locked;
-        drag.disabled = locked;
+        drag.draggable = !isReadOnly();
+        drag.disabled = isReadOnly();
         const select = node("button", "managed-form-select", form.title || "Naamloos formulier");
         select.type = "button";
         select.addEventListener("click", async () => {
@@ -454,10 +611,17 @@
         const move = node("div", "reorder-actions");
         const moveUp = iconButton("up", `Formulier omhoog: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, -1));
         const moveDown = iconButton("down", `Formulier omlaag: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, 1));
-        moveUp.disabled = locked || index === 0;
-        moveDown.disabled = locked || index === state.forms.length - 1;
-        select.disabled = locked;
-        move.append(moveUp, moveDown);
+        moveUp.disabled = isReadOnly() || index === 0;
+        moveDown.disabled = isReadOnly() || index === state.forms.length - 1;
+        select.disabled = isReadOnly();
+        const duplicate = iconButton(
+          "copy",
+          `Formulier dupliceren: ${form.title || "Naamloos formulier"}`,
+          "icon-action",
+          () => duplicateForm(form),
+        );
+        duplicate.disabled = isReadOnly();
+        move.append(moveUp, moveDown, duplicate);
         item.append(drag, select, move);
         formList.append(item);
       });
@@ -465,7 +629,7 @@
 
     function formDragStart(event) {
       const handle = event.target.closest(".drag-handle");
-      if (!handle || locked) { event.preventDefault(); return; }
+      if (!handle || isReadOnly()) { event.preventDefault(); return; }
       event.dataTransfer.setData("text/plain", handle.closest("[data-form-id]").dataset.formId);
     }
     function formDragOver(event) { if (event.target.closest("[data-form-id]")) event.preventDefault(); }
@@ -496,6 +660,17 @@
       if (target) await reorderForms(state.forms[index].id, target.id);
     }
 
+    async function duplicateForm(form) {
+      if (isReadOnly() || !await discardIfNeeded()) return;
+      try {
+        const result = await post(root.dataset.actionUrl, {
+          action: "duplicate_form",
+          formId: form.id,
+        });
+        window.location.assign(result.redirect);
+      } catch (error) { toast(error.message, error.warning); }
+    }
+
     function renderEditor() {
       renderFormList();
       editor.replaceChildren();
@@ -508,7 +683,7 @@
       if (!standalone) {
         const removeForm = node("button", "outline button danger-outline", "Verwijderen");
         removeForm.type = "button";
-        removeForm.disabled = locked;
+        removeForm.disabled = isReadOnly();
         removeForm.addEventListener("click", async () => {
           if (!await discardIfNeeded()) return;
           if (!await confirm(`Formulier \u201c${form.title || "Naamloos formulier"}\u201d verwijderen?`, "Verwijderen")) return;
@@ -523,7 +698,17 @@
         });
         actions.append(removeForm);
       }
-      saveButton.disabled = locked || !dirty;
+      if (standalone) {
+        const duplicate = iconButton(
+          "copy",
+          "Formulier dupliceren",
+          "icon-action",
+          () => duplicateForm(form),
+        );
+        duplicate.disabled = isReadOnly();
+        actions.append(duplicate);
+      }
+      saveButton.disabled = isReadOnly() || !dirty;
       actions.append(saveButton);
       const fields = node("div", "managed-form-fields");
       if (!standalone) {
@@ -533,17 +718,23 @@
           if (selected) selected.textContent = value || "Naamloos formulier";
           setDirty();
         }, { wide: true, maxLength: 180 });
-        title.disabled = locked;
+        title.disabled = isReadOnly();
       }
       editor.append(fields, renderQuestions(form));
       editor.querySelectorAll("input,textarea,select,button").forEach((control) => {
-        if (control !== saveButton) control.disabled = locked || control.disabled;
+        if (control !== saveButton) control.disabled = isReadOnly() || control.disabled;
       });
-      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked; });
-      root.querySelector("[data-new-form]")?.toggleAttribute("disabled", locked);
-      renameButton.disabled = locked || data.std;
+      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !isReadOnly(); });
+      root.querySelector("[data-new-form]")?.toggleAttribute("disabled", isReadOnly());
+      renameButton.disabled = isReadOnly() || data.std;
+      lockButton.disabled = data.std || !canToggleLock;
       lockButton.querySelector("span").textContent = locked ? "Ontgrendelen" : "Vergrendelen";
       lockButton.setAttribute("aria-pressed", String(locked));
+      const lockStatus = root.querySelector("[data-lock-status]");
+      lockStatus.hidden = !locked;
+      lockStatus.textContent = locked
+        ? `Vergrendeld door ${data.lockedByName || "onbekende gebruiker"}`
+        : "";
     }
 
     async function saveCurrentForm() {
@@ -584,13 +775,15 @@
         const result = await post(root.dataset.actionUrl, { action: "toggle_lock" });
         locked = result.locked;
         data.locked = locked;
+        data.lockedByName = result.lockedByName;
+        canToggleLock = result.canToggleLock;
         renderEditor();
         toast(result.message);
       } catch (error) { toast(error.message, error.warning); }
     });
 
     renameButton.addEventListener("click", async () => {
-      if (locked || !await discardIfNeeded()) return;
+      if (isReadOnly() || !await discardIfNeeded()) return;
       const result = await dialog("Functienaam wijzigen", "Voer een nieuwe naam in.", { input: true, value: state.title, confirmText: "Opslaan" });
       if (!result.confirmed || !result.value || result.value === state.title) return;
       try {
@@ -612,6 +805,7 @@
       const button = event.currentTarget;
       const showPreview = button.getAttribute("aria-pressed") !== "true";
       button.setAttribute("aria-pressed", String(showPreview));
+      button.querySelector("span").textContent = showPreview ? "Terug naar ontwerp" : "Voorbeeld";
       editorPanel.hidden = showPreview;
       root.querySelector("[data-editor-layout]").hidden = showPreview;
       previewPanel.hidden = !showPreview;
@@ -620,9 +814,38 @@
 
     function renderPreview(snapshot) {
       previewContent.replaceChildren();
-      previewContent.append(node("h2", "", snapshot.title));
-      snapshot.forms.forEach((form) => {
+      const forms = snapshot.forms || [];
+      let activeIndex = 0;
+      const sections = [];
+      const viewer = node("div", "function-viewer");
+      viewer.dataset.functionViewer = "";
+      const body = node("div", "function-viewer-body");
+      const content = node("div", "function-viewer-content");
+      body.append(content);
+      viewer.append(body);
+      previewContent.append(viewer);
+      if (forms.length > 1) {
+        viewer.classList.add("has-function-navigation");
+        const navigation = node("nav", "selection-list function-form-navigation", "Formulieren");
+        navigation.dataset.selectionList = "";
+        navigation.setAttribute("aria-label", "Formulieren");
+        const list = node("ul", "managed-form-list");
+        forms.forEach((form, index) => {
+          const item = node("li");
+          const button = node("button", "form-navigation-item", form.title || "Naamloos formulier");
+          button.type = "button";
+          button.dataset.viewerNav = `preview-${index}`;
+          button.setAttribute("aria-current", String(index === 0));
+          item.append(button);
+          list.append(item);
+        });
+        navigation.append(list);
+        body.insertBefore(navigation, content);
+      }
+      forms.forEach((form, formIndex) => {
         const section = node("section", "preview-form");
+        section.dataset.viewerPanel = `preview-${formIndex}`;
+        section.hidden = formIndex !== activeIndex;
         if (!standalone) section.append(node("h3", "", form.title));
         form.questions.forEach((question) => {
           const questionWrap = node("div", "preview-question");
@@ -647,15 +870,23 @@
               questionWrap.append(link);
             }
           } else {
-            questionWrap.append(node("label", "preview-label", question.question || "Vraag"));
+            const label = node("label", "preview-label", question.question || "Vraag");
+            if (question.required) {
+              label.append(node("span", "required-marker", " *"));
+              label.lastChild.setAttribute("aria-hidden", "true");
+              label.append(node("span", "visually-hidden", " verplicht"));
+            }
+            questionWrap.append(label);
             const control = previewControl(question);
             questionWrap.append(control);
             if (question.unit) questionWrap.append(node("span", "preview-unit", question.unit));
           }
           section.append(questionWrap);
         });
-        previewContent.append(section);
+        content.append(section);
+        sections.push(section);
       });
+      document.dispatchEvent(new CustomEvent("function-viewer:initialize"));
     }
 
     function safeHttpUrl(value) {
@@ -664,37 +895,86 @@
     }
 
     function previewControl(question) {
-      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", time: "time", imageUpload: "file", fileUpload: "file" };
+      const typeMap = { text: "text", number: "number", date: "date", dateTime: "datetime-local", imageUpload: "file", fileUpload: "file" };
       if (question.fieldType === "multipleChoice") {
-        const group = node("fieldset", "preview-options");
-        const groupName = `answer-${question.id ?? "new"}-${Math.random()}`;
-        question.options.forEach((answer, index) => {
-          const label = node("label");
-          const radio = node("input"); radio.type = "radio"; radio.name = groupName; radio.value = answer;
-          label.append(radio, node("span", "", answer)); group.append(label);
-        });
-        return group;
+        const select = node("select", "managed-input");
+        select.disabled = true;
+        select.append(node("option", "", "Maak een keuze"));
+        question.options.forEach((answer) => select.append(node("option", "", answer)));
+        return select;
       }
       if (question.fieldType === "matrix") {
-        const scroll = node("div", "matrix-scroll");
-        const table = node("table", "preview-matrix");
-        const head = node("tr"); head.append(node("th", "", ""));
-        question.columns.forEach((column) => head.append(node("th", "", column)));
-        const thead = node("thead"); thead.append(head); table.append(thead);
-        const body = node("tbody");
-        question.rows.forEach((rowTitle) => {
-          const row = node("tr"); row.append(node("th", "", rowTitle));
-          question.columns.forEach((column, index) => {
-            const cell = node("td"); const input = node("input"); input.type = "text"; input.setAttribute("aria-label", `${rowTitle || "Rij"}, ${column || `kolom ${index + 1}`}`); cell.append(input); row.append(cell);
-          });
-          body.append(row);
-        });
-        table.append(body); scroll.append(table); return scroll;
+        const matrix = node("div", "matrix-wrap");
+        matrix.dataset.matrix = "";
+        matrix.dataset.readonly = "true";
+        const payload = {
+          definition: question.matrixDefinition || {
+            version: 2,
+            rows: (question.rows || []).map((label, index) => ({ id: `row-${index}`, label })),
+            columns: (question.columns || []).map((label, index) => ({ id: `column-${index}`, label })),
+            cells: {},
+          },
+          values: { version: 2, cells: {} },
+          label: question.question || "Matrix",
+        };
+        const script = document.createElement("script");
+        script.type = "application/json";
+        script.textContent = JSON.stringify(payload);
+        matrix.append(script);
+        queueMicrotask(() => document.dispatchEvent(new CustomEvent("function-matrix-preview", { detail: matrix })));
+        return matrix;
       }
-      const input = node("input", "managed-input");
-      input.type = typeMap[question.fieldType] || "text";
+      if (question.fieldType === "observation") {
+        const group = node("div", "function-observation");
+        const list = node("div", "observation-list");
+        list.append(node("p", "muted", "Nog geen observaties."));
+        group.append(list);
+        const entry = node("div", "observation-entry");
+        const timestamp = node("input", "managed-input");
+        timestamp.type = "datetime-local";
+        timestamp.setAttribute("aria-label", "Observaties: tijdstip");
+        entry.append(timestamp);
+        const value = node("input", "managed-input");
+        value.placeholder = "Waarde of observatie";
+        value.setAttribute("aria-label", "Observaties: waarde of observatie");
+        entry.append(value);
+        const note = node("input", "managed-input");
+        note.placeholder = "Toelichting";
+        note.setAttribute("aria-label", "Observaties: toelichting");
+        entry.append(note);
+        const add = node("button", "outline button", "Observatie toevoegen");
+        add.type = "button";
+        add.addEventListener("click", () => {
+          if (!timestamp.value || !value.value.trim()) {
+            value.setCustomValidity("Vul een observatie in voordat je deze toevoegt.");
+            value.reportValidity();
+            value.addEventListener("input", () => value.setCustomValidity(""), {once: true});
+            return;
+          }
+          list.querySelector(".muted")?.remove();
+          const row = node("div", "observation-row");
+          const time = node("time");
+          time.textContent = timestamp.value;
+          const strong = node("strong");
+          strong.textContent = value.value.trim();
+          const span = node("span");
+          span.textContent = note.value.trim();
+          row.append(time, strong, span);
+          list.append(row);
+          timestamp.value = "";
+          value.value = "";
+          note.value = "";
+        });
+        entry.append(add);
+        group.append(entry);
+        return group;
+      }
+      const input = node(question.fieldType === "text" ? "textarea" : "input", "managed-input");
+      if (question.fieldType !== "text") input.type = typeMap[question.fieldType] || "text";
+      if (question.fieldType === "text") input.rows = 5;
+      input.classList.add("js-tinymce");
+      input.disabled = true;
       input.required = Boolean(question.required);
-      if (["imageUpload", "fileUpload"].includes(question.fieldType)) input.accept = question.fieldType === "imageUpload" ? "image/*" : "*/*";
       return input;
     }
 
@@ -705,7 +985,7 @@
       if (await discardIfNeeded()) window.location.assign(destination);
     });
     window.addEventListener("beforeunload", (event) => {
-      if (!dirty) return;
+      if (!isDirty()) return;
       event.preventDefault();
       event.returnValue = "";
     });

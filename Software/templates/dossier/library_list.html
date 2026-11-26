@@ -15,7 +15,6 @@
       <a class="back library-dashboard-link" href="{% url 'dossier:teacher_dashboard' %}">← Dashboard</a>
       <div class="header-actions">
         <a class="primary" href="{% url 'dossier:library_dossier_create' %}">Dossier maken</a>
-        <a class="outline function-entry" href="{% url 'dossier:function_management' %}">Functie beheer</a>
       </div>
     </div>
   </header>
@@ -48,12 +47,22 @@
             <span class="library-card-meta"><span>{{ dossier.education|default:'Alle opleidingen' }}</span><span>Dossiersjabloon</span></span>
           </summary>
           <div class="dossier-module-list">
-            {% for entry in dossier.module_entries.all %}
-            <a class="content-row linked" href="{% url 'dossier:library_detail' entry.template.id %}">
+            {% for module in dossier.structure %}
+            <div class="content-row library-module-hierarchy">
               <span>{{ forloop.counter }}</span>
-              <div><small>{{ entry.template.get_category_display }}</small><strong>{{ entry.template.title }}</strong></div>
-              <b>›</b>
-            </a>
+              <div>
+                <small>{{ module.kind }}</small>
+                <strong>{{ module.title }}</strong>
+                {% for function in module.functions %}
+                <div class="library-structure-function">
+                  <span class="library-card-meta">{{ function.kind }}</span>
+                  <strong>{{ function.title }}</strong>
+                  {% for form in function.forms %}<span class="library-structure-form">{{ form.title }}</span>{% endfor %}
+                </div>
+                {% endfor %}
+              </div>
+              <a href="{% url 'dossier:library_detail' module.template_id %}" aria-label="{{ module.title }} bewerken">›</a>
+            </div>
             {% empty %}
             <p class="empty-state">Nog geen modules in dit dossier.</p>
             {% endfor %}
@@ -76,10 +85,10 @@
       {% endfor %}
     </div>
   </section>
-  <section class="editor-section library-component-management">
+  <section class="library-component-management">
     <details class="library-component-management-details" {% if component_filters_active %}open{% endif %}>
       <summary>
-        <span><span class="eyebrow">Bibliotheekbeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
+        <span><span class="eyebrow">Modulebeheer</span><strong>Beschikbare onderdelen beheren</strong></span>
         <span class="library-toggle-arrow" aria-hidden="true">↓</span>
       </summary>
       <div class="section-heading">
@@ -120,6 +129,16 @@
         {% empty %}
         <p class="empty-state">Er zijn geen actieve onderdelen.</p>
         {% endfor %}
+      </div>
+    </details>
+    <details id="function-management" class="library-component-management-details" {% if expand_function_management %}open{% endif %}>
+      <summary>
+        <span><span class="eyebrow">Functiebeheer</span><strong>Functies beheren</strong></span>
+        <span class="library-toggle-arrow" aria-hidden="true">↓</span>
+      </summary>
+      <div class="function-shell" data-function-page="list" data-sort-param="{{ function_sort_param }}" data-page-param="{{ function_page_param }}" data-page-number="{{ page.number }}" data-page-size="{{ page_size }}" data-total-count="{{ paginator.count }}" data-query="{{ query }}" data-embedded-functions="true">
+        {% include "dossier/_function_management_toolbar.html" %}
+        {% include "dossier/_function_management_list.html" %}
       </div>
     </details>
   </section>

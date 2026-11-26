@@ -9,6 +9,7 @@ urlpatterns = [
     path("casus/<int:case_id>/", views.case_detail, name="case_detail"),
     path("casus/<int:case_id>/indienen/", views.submit_student_case, name="submit_student_case"),
     path("dossier/<int:case_id>/", views.dossier, name="dossier"),
+    path("dossier/save-form/", views.save_form, name="save_form"),
     path("docent/", views.teacher_dashboard, name="teacher_dashboard"),
     path("beheer/opleidingen/", views.education_list, name="education_list"),
     path("beheer/opleidingen/nieuw/", views.education_edit, name="education_create"),

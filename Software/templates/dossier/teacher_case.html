@@ -69,6 +69,12 @@
               <div>
                 <strong>{{ change.module.title }}</strong>
                 <span>{% if change.is_removal %}Verwijderd uit de bibliotheek{% elif change.is_base_data %}Voorinvulling aangepast{% else %}Aangepast in de bibliotheek{% endif %}</span>
+                {% if change.added_functions %}
+                  <p>Functie(s) toegevoegd: {% for title in change.added_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                {% endif %}
+                {% if change.removed_functions %}
+                  <p>Functie(s) verwijderd: {% for title in change.removed_functions %}<strong>{{ title }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                {% endif %}
               </div>
               <div class="library-removal-actions">
                 {% if case.status == 'published' %}
