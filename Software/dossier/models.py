@@ -551,6 +551,9 @@ class ModuleResponse(models.Model):
     student_case = models.ForeignKey(
         StudentCase, on_delete=models.CASCADE, related_name="module_responses"
     )
+    source_template_id_snapshot = models.PositiveIntegerField(
+        null=True, blank=True, editable=False
+    )
     module = models.ForeignKey(
         Module,
         on_delete=models.SET_NULL,

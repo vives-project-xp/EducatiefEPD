@@ -369,9 +369,20 @@ class MatrixWorkflowTests(TestCase):
     def test_empty_required_flexible_matrix_can_be_prefilled_and_published(self):
         self.client.force_login(self.teacher)
         result = self.client.post(self.base_url, self.post_data(empty_values()), follow=True)
-        self.assertContains(result, "Voorinvullen is optioneel.")
+        self.assertContains(
+            result,
+            "Kies in de casus of studentversies de nieuwe voorinvulling krijgen.",
+        )
+        self.assertContains(result, "Voorinvulling aangepast")
         self.module.refresh_from_db()
         self.assertEqual(self.module.base_data["sheet"]["cells"]["r0"]["c1"], "")
+        self.client.post(
+            reverse(
+                "dossier:teacher_published_module_resolve",
+                args=[self.case.pk, self.module.pk],
+            ),
+            {"action": "sync_students"},
+        )
         self.case.move_to_draft()
         self.case.save()
         result = self.client.post(
