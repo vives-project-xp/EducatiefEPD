@@ -18,6 +18,7 @@ from dossier.models import (
     Education,
     ExternalIdentity,
     LibraryDossier,
+    LibraryDossierModule,
     FunctionDefinition,
     LibraryField,
     LibraryTemplate,
@@ -231,8 +232,36 @@ class EpdWorkflowTests(TestCase):
         question = form.questions.get()
         question.question = "Gewijzigd"
         question.save(update_fields=["question"])
+        function.title = "Intakefunctie bijgewerkt"
+        function.save(update_fields=["title"])
         snapshot.refresh_from_db()
         self.assertEqual(snapshot.definition["forms"][0]["questions"][0]["question"], "Vraag")
+        live_page = self.client.get(reverse("dossier:function_detail", args=[function.id]))
+        self.assertEqual(live_page.context["function_data"]["title"], "Intakefunctie bijgewerkt")
+        self.assertEqual(
+            live_page.context["function_data"]["forms"][0]["questions"][0]["question"],
+            "Gewijzigd",
+        )
+        self.assertContains(
+            self.client.get(reverse("dossier:library_detail", args=[template.id])),
+            "Intakefunctie bijgewerkt",
+        )
+        library_dossier = LibraryDossier.objects.create(
+            title="Live structuur", education=self.education
+        )
+        LibraryDossierModule.objects.create(
+            dossier=library_dossier, template=template, position=0
+        )
+        library_page = self.client.get(reverse("dossier:library_list"))
+        live_structure = next(
+            dossier.structure
+            for dossier in library_page.context["dossiers"]
+            if dossier.id == library_dossier.id
+        )
+        self.assertEqual(
+            live_structure[0]["functions"][0]["title"],
+            "Intakefunctie bijgewerkt",
+        )
 
         self.case.status = Case.Status.PUBLISHED
         self.case.save(update_fields=["status"])
@@ -245,6 +274,8 @@ class EpdWorkflowTests(TestCase):
             {"module": response.id},
         )
         self.assertContains(page, "Intakefunctie")
+        self.assertContains(page, "Vraag")
+        self.assertNotContains(page, "Gewijzigd")
         self.assertContains(page, "<title>Intakefunctie | Dossier</title>", html=True)
         self.assertContains(page, "<h1>Intakefunctie</h1>", html=True)
         self.assertNotContains(page, "<h2>Intakefunctie</h2>", html=True)
@@ -454,7 +485,9 @@ class EpdWorkflowTests(TestCase):
         self.assertContains(response, "function_management.js")
         script = (Path(__file__).resolve().parents[2] / "static" / "function_management.js").read_text(encoding="utf-8")
         self.assertIn("saveButton.disabled = true", script)
-        self.assertIn("saveButton.disabled = locked || !dirty", script)
+        self.assertIn("saveButton.disabled = isReadOnly() || !dirty", script)
+        self.assertIn("const isReadOnly = () => locked && !data.isManager", script)
+        self.assertIn('action: "duplicate_form"', script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
     def test_answer_editor_save_guard_and_error_retry_are_present(self):

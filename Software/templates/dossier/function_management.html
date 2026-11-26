@@ -53,14 +53,24 @@
         <button type="button" class="function-row-title is-locked" data-standard-warning aria-label="{{ item.title }}: standaardfunctie">
           <span>{{ item.title }}</span>
         </button>
-        <span class="function-row-remove locked-indicator" aria-label="Standaardfunctie kan niet worden verwijderd">
-          <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg>
-        </span>
+        <div class="function-row-actions">
+          <button type="button" class="icon-action" data-duplicate-function data-url="{% url 'dossier:function_action' item.id %}" aria-label="Dupliceren: {{ item.title }}">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M7 6V3.5h9.5V14H14" fill="none"/><path d="M4 6h10v10H4z"/></svg>
+          </button>
+          <span class="function-row-remove locked-indicator" aria-label="Standaardfunctie kan niet worden verwijderd">
+            <svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg>
+          </span>
+        </div>
         {% else %}
         <a class="function-row-title" href="{% url 'dossier:function_detail' item.id %}"><span>{{ item.title }}</span></a>
-        <button type="button" class="icon-action danger" data-delete-function data-url="{% url 'dossier:function_action' item.id %}" data-title="{{ item.title }}" aria-label="Verwijderen: {{ item.title }}">
-          <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3.5 5.5h13m-11.5 0 .8 11h8.4l.8-11M7 5.5V3h6v2.5m-5 3v5m4-5v5"/></svg>
-        </button>
+        <div class="function-row-actions">
+          <button type="button" class="icon-action" data-duplicate-function data-url="{% url 'dossier:function_action' item.id %}" aria-label="Dupliceren: {{ item.title }}" {% if item.locked and not is_admin %}disabled{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M7 6V3.5h9.5V14H14" fill="none"/><path d="M4 6h10v10H4z"/></svg>
+          </button>
+          <button type="button" class="icon-action danger" data-delete-function data-url="{% url 'dossier:function_action' item.id %}" data-title="{{ item.title }}" aria-label="Verwijderen: {{ item.title }}" {% if item.locked and not is_admin %}disabled{% endif %}>
+            <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M3.5 5.5h13m-11.5 0 .8 11h8.4l.8-11M7 5.5V3h6v2.5m-5 3v5m4-5v5"/></svg>
+          </button>
+        </div>
         {% endif %}
       </div>
       {% empty %}

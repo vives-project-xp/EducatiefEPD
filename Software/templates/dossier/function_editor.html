@@ -5,18 +5,19 @@
 <main class="teacher-shell function-shell function-editor" data-function-page="editor" data-action-url="{% url 'dossier:function_action' function.id %}" data-standalone="{% if function.kind == 'formulier' %}true{% else %}false{% endif %}" data-locked="{{ function.locked|yesno:'true,false' }}">
   <header class="page-bar function-editor-header">
     <div class="editor-title-wrap"><p class="eyebrow">Functies beheer</p><h1 data-function-title>{{ function.title }}</h1>
-      <button class="icon-action rename-action" type="button" data-rename aria-label="Functienaam wijzigen" {% if function.locked or function.std %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m12.5 4.5 3 3M4 16l3.2-.7L16 6.5 13 3.5l-8.8 8.8L4 16Z"/></svg></button>
+      <button class="icon-action rename-action" type="button" data-rename aria-label="Functienaam wijzigen" {% if function.std or function.locked and not is_admin %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><path d="m12.5 4.5 3 3M4 16l3.2-.7L16 6.5 13 3.5l-8.8 8.8L4 16Z"/></svg></button>
     </div>
     <div class="header-actions editor-toolbar">
-      <button class="outline button" type="button" data-lock aria-pressed="{{ function.locked|yesno:'true,false' }}" {% if function.std %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg><span>{% if function.locked %}Ontgrendelen{% else %}Vergrendelen{% endif %}</span></button>
+      <button class="outline button" type="button" data-lock aria-pressed="{{ function.locked|yesno:'true,false' }}" {% if function.std or not can_toggle_lock %}disabled{% endif %}><svg aria-hidden="true" viewBox="0 0 20 20"><rect x="4" y="8" width="12" height="9" rx="1"/><path d="M6.5 8V5a3.5 3.5 0 0 1 7 0v3"/></svg><span>{% if function.locked %}Ontgrendelen{% else %}Vergrendelen{% endif %}</span></button>
       <button class="outline button" type="button" data-preview aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M1.8 10s3-5.5 8.2-5.5 8.2 5.5 8.2 5.5-3 5.5-8.2 5.5S1.8 10 1.8 10Z"/><circle cx="10" cy="10" r="2.2"/></svg><span>Voorbeeld</span></button>
       <a class="back" href="{% url 'dossier:function_management' %}" data-editor-back>← Ga terug</a>
     </div>
   </header>
+  <p class="function-lock-status" data-lock-status {% if not function.locked %}hidden{% endif %}>Vergrendeld door {{ lock_owner_name }}</p>
   <div class="function-editor-grid" data-editor-layout>
     {% if function.kind == 'groep' %}
     <aside class="function-card form-navigation" aria-labelledby="forms-heading">
-      <div class="function-card-heading"><h2 id="forms-heading">Formulieren</h2><button class="text-button" type="button" data-new-form {% if function.locked %}disabled{% endif %}>Nieuw +</button></div>
+      <div class="function-card-heading"><h2 id="forms-heading">Formulieren</h2><button class="text-button" type="button" data-new-form {% if function.locked and not is_admin %}disabled{% endif %}>Nieuw +</button></div>
       <ol class="managed-form-list" data-form-list></ol>
     </aside>
     {% endif %}

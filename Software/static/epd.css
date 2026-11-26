@@ -1887,7 +1887,7 @@ summary {
 .function-list-head,
 .function-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 74px;
+  grid-template-columns: minmax(0, 1fr) 84px;
   gap: 14px;
   align-items: center;
 }
@@ -1980,6 +1980,24 @@ summary {
 
 .function-row-remove {
   justify-self: center;
+}
+
+.function-row-actions {
+  display: flex;
+  align-items: center;
+  justify-self: center;
+  gap: 2px;
+}
+
+.function-row-actions .icon-action {
+  width: 36px;
+  height: 36px;
+}
+
+.function-lock-status {
+  margin: -10px 0 16px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .icon-action {

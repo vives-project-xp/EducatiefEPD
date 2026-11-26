@@ -19,6 +19,9 @@
       <div>
         <small>{{ link.function.get_kind_display }}{% if link.function.std %} · Standaard{% endif %}</small>
         <strong>{{ link.function.title }}</strong>
+        {% if link.function.locked and not link.function.std %}
+        <small>Vergrendeld door {% if link.function.locked_by %}{{ link.function.locked_by.get_full_name|default:link.function.locked_by.username }}{% else %}onbekende gebruiker{% endif %}</small>
+        {% endif %}
       </div>
       <div class="row-actions">
         {% if not link.function.std %}<a href="{% url 'dossier:function_detail' link.function.id %}">Bewerk</a>{% endif %}
@@ -26,7 +29,7 @@
         {% csrf_token %}
         <input type="hidden" name="action" value="remove_function">
         <input type="hidden" name="function_id" value="{{ link.function.id }}">
-        <button class="text-button danger" type="button" data-remove-function data-title="{{ link.function.title }}" aria-label="{{ link.function.title }} verwijderen">Verwijderen</button>
+        <button class="text-button danger" type="button" data-remove-function data-title="{{ link.function.title }}" aria-label="{{ link.function.title }} verwijderen" {% if link.function.locked and not link.function.std and not is_admin %}disabled{% endif %}>Verwijderen</button>
         </form>
       </div>
     </div>

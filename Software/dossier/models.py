@@ -285,6 +285,13 @@ class FunctionDefinition(models.Model):
     kind = models.CharField(max_length=16, choices=Kind.choices)
     std = models.BooleanField(default=False)
     locked = models.BooleanField(default=False)
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="locked_functions",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 

@@ -105,6 +105,17 @@ def can_manage_library_template(user, template):
     return is_teacher(user) and template.status == LibraryTemplate.Status.ACTIVE
 
 
+def function_lock_owner_name(function):
+    if not function.locked_by_id:
+        return "onbekende gebruiker"
+    owner = function.locked_by
+    return owner.get_full_name().strip() or owner.get_username()
+
+
+def function_is_locked_for_user(user, function):
+    return function.locked and not function.std and not is_admin(user)
+
+
 def teacher_cases(user):
     cases = Case.objects.select_related("patient", "created_by").prefetch_related(
         "modules__fields",
@@ -1854,7 +1865,7 @@ def library_list(request):
 def purge_expired_functions():
     cutoff = timezone.now() - timedelta(days=30)
     FunctionDefinition.objects.filter(
-        deleted_at__lt=cutoff, std=False
+        deleted_at__lt=cutoff, std=False, locked=False
     ).delete()
 
 
@@ -1893,6 +1904,7 @@ def function_management(request):
         "page_size_options": (10, 25, 50, 100),
         "query": query,
         "sort": sort,
+        "is_admin": is_admin(request.user),
         "deleted_count": FunctionDefinition.objects.filter(
             deleted_at__isnull=False, std=False
         ).count(),
@@ -1936,7 +1948,7 @@ def function_general(request):
     })
 
 
-def managed_function_payload(function):
+def managed_function_payload(function, user):
     valid_types = set(ManagedQuestion.FieldType.values)
     def image_payload(image):
         if not image:
@@ -1953,6 +1965,13 @@ def managed_function_payload(function):
         "title": function.title,
         "kind": function.kind,
         "locked": function.locked,
+        "lockedByName": function_lock_owner_name(function) if function.locked else "",
+        "canToggleLock": (
+            not function.locked
+            or is_admin(user)
+            or function.locked_by_id == user.pk
+        ),
+        "isManager": is_admin(user),
         "std": function.std,
         "typeRegistry": [
             {"key": item.key, "label": item.label, "group": item.group}
@@ -1990,14 +2009,21 @@ def managed_function_payload(function):
 def function_detail(request, function_id):
     require_teacher(request.user)
     function = get_object_or_404(
-        FunctionDefinition.objects.prefetch_related("forms__questions"),
+        FunctionDefinition.objects.select_related("locked_by").prefetch_related("forms__questions"),
         id=function_id, deleted_at__isnull=True,
     )
     if function.std:
         raise PermissionDenied
     return render(request, "dossier/function_editor.html", {
         "function": function,
-        "function_data": managed_function_payload(function),
+        "function_data": managed_function_payload(function, request.user),
+        "is_admin": is_admin(request.user),
+        "lock_owner_name": function_lock_owner_name(function) if function.locked else "",
+        "can_toggle_lock": (
+            not function.locked
+            or is_admin(request.user)
+            or function.locked_by_id == request.user.pk
+        ),
     })
 
 
@@ -2041,6 +2067,69 @@ def validate_function_image(value):
     return value
 
 
+def unique_copy_title(title, existing_titles, max_length):
+    base = title.strip() or "Naamloos formulier"
+    existing = {value.casefold() for value in existing_titles}
+    number = 1
+    while True:
+        suffix = " (kopie)" if number == 1 else f" (kopie {number})"
+        candidate = f"{base[:max_length - len(suffix)].rstrip()}{suffix}"
+        if candidate.casefold() not in existing:
+            return candidate
+        number += 1
+
+
+def copy_managed_form(source_form, function, title, position):
+    duplicate = ManagedForm.objects.create(
+        function=function,
+        title=title,
+        position=position,
+    )
+    questions = []
+    for question in source_form.questions.all():
+        values = {
+            field.name: deepcopy(getattr(question, field.attname))
+            for field in ManagedQuestion._meta.concrete_fields
+            if not field.primary_key and field.name != "form"
+        }
+        questions.append(ManagedQuestion(form=duplicate, **values))
+    ManagedQuestion.objects.bulk_create(questions)
+    return duplicate
+
+
+def duplicate_function_record(function):
+    existing_titles = FunctionDefinition.objects.filter(
+        deleted_at__isnull=True
+    ).values_list("title", flat=True)
+    duplicate = FunctionDefinition.objects.create(
+        title=unique_copy_title(function.title, existing_titles, 180),
+        kind=function.kind,
+        std=False,
+        locked=False,
+        locked_by=None,
+    )
+    for position, form in enumerate(function.forms.prefetch_related("questions").all()):
+        copy_managed_form(form, duplicate, form.title, position)
+    return duplicate
+
+
+def duplicate_managed_form(function, source_form):
+    forms = list(function.forms.order_by("position", "id"))
+    source_index = next(index for index, form in enumerate(forms) if form.pk == source_form.pk)
+    for index, form in enumerate(forms):
+        position = index if index <= source_index else index + 1
+        if form.position != position:
+            ManagedForm.objects.filter(pk=form.pk).update(position=position)
+
+    existing_titles = (form.title for form in forms)
+    title = unique_copy_title(source_form.title, existing_titles, 180)
+    duplicate = copy_managed_form(source_form, function, title, source_index + 1)
+    if function.kind == FunctionDefinition.Kind.FORM:
+        function.kind = FunctionDefinition.Kind.GROUP
+        function.save(update_fields=["kind"])
+    return duplicate
+
+
 @login_required
 @require_POST
 @transaction.atomic
@@ -2056,14 +2145,54 @@ def function_action(request, function_id):
     if not isinstance(payload, dict):
         return function_api_error("Ongeldige aanvraag.")
     action = payload.get("action")
+    if action == "duplicate":
+        if function_is_locked_for_user(request.user, function):
+            owner = function_lock_owner_name(function)
+            return function_api_error(
+                f"Functie vergrendeld door {owner}. Ontgrendel deze eerst om te dupliceren.",
+                403,
+                warning=True,
+            )
+        duplicate = duplicate_function_record(function)
+        audit(request, "function.duplicated", duplicate, source_function_id=function.id)
+        return JsonResponse({
+            "ok": True,
+            "redirect": reverse("dossier:function_detail", args=[duplicate.id]),
+            "message": f"Functie gekopieerd als '{duplicate.title}'.",
+        })
     if function.std:
         return function_api_error("Standaardfuncties mogen niet worden bewerkt.", 403, warning=True)
 
     if action == "toggle_lock":
-        function.locked = not function.locked
-        function.save(update_fields=["locked"])
+        if function.locked:
+            if not is_admin(request.user) and function.locked_by_id != request.user.pk:
+                owner = function_lock_owner_name(function)
+                return function_api_error(
+                    f"Functie vergrendeld door {owner}; alleen de eigenaar of een beheerder kan ontgrendelen.",
+                    403,
+                    warning=True,
+                )
+            function.locked = False
+            function.locked_by = None
+        else:
+            function.locked = True
+            function.locked_by = request.user
+        function.save(update_fields=["locked", "locked_by"])
         message = "Functie vergrendeld" if function.locked else "Functie ontgrendeld"
-        return JsonResponse({"ok": True, "locked": function.locked, "message": message})
+        return JsonResponse({
+            "ok": True,
+            "locked": function.locked,
+            "lockedByName": function_lock_owner_name(function) if function.locked else "",
+            "canToggleLock": True,
+            "message": message,
+        })
+    if function_is_locked_for_user(request.user, function):
+        owner = function_lock_owner_name(function)
+        return function_api_error(
+            f"Functie vergrendeld door {owner}. Ontgrendel deze eerst om wijzigingen aan te brengen.",
+            403,
+            warning=True,
+        )
     if action == "delete":
         function.deleted_at = timezone.now()
         function.save(update_fields=["deleted_at"])
@@ -2071,8 +2200,6 @@ def function_action(request, function_id):
         audit(request, "function.deleted", function)
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_management"), "message": "Functie verplaatst naar Recent verwijderd"})
     if action == "rename":
-        if function.locked:
-            return function_api_error("Functie vergrendeld.", 423)
         title = payload.get("title", "").strip() if isinstance(payload.get("title"), str) else ""
         if not title or len(title) > 180:
             return function_api_error("Geef een geldige naam van maximaal 180 tekens.")
@@ -2082,17 +2209,38 @@ def function_action(request, function_id):
             function.forms.update(title=title)
         return JsonResponse({"ok": True, "title": title, "message": "Naam gewijzigd"})
     if action == "create_form":
-        if function.locked:
-            return function_api_error("Functie vergrendeld.", 423)
         if function.kind != FunctionDefinition.Kind.GROUP:
             return function_api_error("Een formulier kan alleen aan een formulierengroep worden toegevoegd.")
         form = ManagedForm.objects.create(
             function=function, title="", position=function.forms.count()
         )
         return JsonResponse({"ok": True, "form": {"id": form.id, "title": form.title, "position": form.position, "questions": []}})
+    if action == "duplicate_form":
+        if type(payload.get("formId")) is not int or payload["formId"] < 1:
+            return function_api_error("Ongeldig formulier.")
+        source_form = get_object_or_404(
+            ManagedForm.objects.select_for_update(),
+            id=payload["formId"],
+            function=function,
+        )
+        duplicate = duplicate_managed_form(function, source_form)
+        audit(
+            request,
+            "function.form_duplicated",
+            function,
+            source_form_id=source_form.id,
+            form_id=duplicate.id,
+        )
+        return JsonResponse({
+            "ok": True,
+            "formId": duplicate.id,
+            "redirect": (
+                f"{reverse('dossier:function_detail', args=[function.id])}"
+                f"?form={duplicate.id}"
+            ),
+            "message": f"Formulier gekopieerd als '{duplicate.title}'.",
+        })
     if action == "reorder_forms":
-        if function.locked:
-            return function_api_error("Functie vergrendeld.", 423)
         form_ids = payload.get("formIds")
         forms = list(function.forms.all())
         if (
@@ -2106,8 +2254,6 @@ def function_action(request, function_id):
             ManagedForm.objects.filter(id=form_id, function=function).update(position=position)
         return JsonResponse({"ok": True})
     if action == "delete_form":
-        if function.locked:
-            return function_api_error("Functie vergrendeld.", 423)
         if function.kind != FunctionDefinition.Kind.GROUP:
             return function_api_error("Dit formulier kan niet afzonderlijk worden verwijderd.")
         if type(payload.get("formId")) is not int or payload["formId"] < 1:
@@ -2118,8 +2264,6 @@ def function_action(request, function_id):
             ManagedForm.objects.filter(id=item.id).update(position=position)
         return JsonResponse({"ok": True, "message": "Formulier verwijderd"})
     if action == "save_form":
-        if function.locked:
-            return function_api_error("Functie vergrendeld.", 423)
         if type(payload.get("formId")) is not int or payload["formId"] < 1:
             return function_api_error("Ongeldig formulier.")
         form = get_object_or_404(ManagedForm, id=payload["formId"], function=function)
@@ -2212,7 +2356,16 @@ def function_trash_action(request):
         return function_api_error("Ongeldige aanvraag.")
     action = payload.get("action")
     if action == "empty":
-        FunctionDefinition.objects.filter(deleted_at__isnull=False, std=False).delete()
+        deleted_functions = FunctionDefinition.objects.filter(
+            deleted_at__isnull=False, std=False
+        )
+        if not is_admin(request.user) and deleted_functions.filter(locked=True).exists():
+            return function_api_error(
+                "Ontgrendel vergrendelde functies voordat je de prullenbak leegt.",
+                403,
+                warning=True,
+            )
+        deleted_functions.delete()
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Prullenbak geleegd"})
     if action not in {"restore", "permanent_delete"}:
         return function_api_error("Onbekende actie.")
@@ -2227,6 +2380,13 @@ def function_trash_action(request):
         function.save(update_fields=["deleted_at"])
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie hersteld"})
     if action == "permanent_delete":
+        if function_is_locked_for_user(request.user, function):
+            owner = function_lock_owner_name(function)
+            return function_api_error(
+                f"Functie vergrendeld door {owner}. Ontgrendel deze eerst om te verwijderen.",
+                403,
+                warning=True,
+            )
         function.delete()
         return JsonResponse({"ok": True, "redirect": reverse("dossier:function_deleted"), "message": "Functie definitief verwijderd"})
     return function_api_error("Onbekende actie.")
@@ -2380,7 +2540,9 @@ def library_dossier_archive(request, dossier_id):
 @transaction.atomic
 def library_template(request, template_id=None):
     require_teacher(request.user)
-    templates = LibraryTemplate.objects.filter(status=LibraryTemplate.Status.ACTIVE)
+    templates = LibraryTemplate.objects.filter(
+        status=LibraryTemplate.Status.ACTIVE
+    ).prefetch_related("function_links__function__locked_by")
     if request.method == "POST":
         templates = templates.select_for_update()
     template = get_object_or_404(templates, id=template_id) if template_id else None
@@ -2396,9 +2558,11 @@ def library_template(request, template_id=None):
             except (TypeError, ValueError):
                 function_ids = []
             unique_function_ids = set(function_ids)
-            selected = list(FunctionDefinition.objects.filter(
+            selected = list(FunctionDefinition.objects.select_for_update().filter(
                 id__in=unique_function_ids, deleted_at__isnull=True
             ))
+            if any(function_is_locked_for_user(request.user, function) for function in selected):
+                raise PermissionDenied
             attached_ids = set(
                 template.function_links.values_list("function_id", flat=True)
             )
@@ -2435,8 +2599,12 @@ def library_template(request, template_id=None):
             function_id = request.POST.get("function_id")
             if function_id:
                 link = get_object_or_404(
-                    LibraryTemplateFunction, template=template, function_id=function_id
+                    LibraryTemplateFunction.objects.select_for_update().select_related("function"),
+                    template=template,
+                    function_id=function_id,
                 )
+                if function_is_locked_for_user(request.user, link.function):
+                    raise PermissionDenied
                 link.delete()
                 template.version += 1
                 template.save(update_fields=["version", "updated_at"])
@@ -2470,12 +2638,16 @@ def library_template(request, template_id=None):
         )
         return redirect("dossier:library_detail", template_id=item.id)
     if template:
+        available_functions = FunctionDefinition.objects.filter(
+            deleted_at__isnull=True
+        ).exclude(template_links__template=template)
+        if not is_admin(request.user):
+            available_functions = available_functions.filter(Q(std=True) | Q(locked=False))
         return render(request, "dossier/library_detail.html", {
             "template_item": template, "form": form,
             "can_manage_functions": can_manage_library_template(request.user, template),
-            "available_functions": FunctionDefinition.objects.filter(
-                deleted_at__isnull=True
-            ).exclude(template_links__template=template).order_by("title"),
+            "available_functions": available_functions.order_by("title"),
+            "is_admin": is_admin(request.user),
         })
     return render(request, "dossier/teacher_item_form.html", {
         "form": form, "title": "Nieuw bibliotheektemplate", "library_mode": True,

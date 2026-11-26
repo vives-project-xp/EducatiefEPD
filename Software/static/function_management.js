@@ -106,6 +106,18 @@
     root.querySelectorAll("[data-standard-warning]").forEach((button) => {
       button.addEventListener("click", () => toast("Standaardfuncties mogen niet worden bewerkt.", true));
     });
+    root.querySelectorAll("[data-duplicate-function]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+          const result = await post(button.dataset.url, { action: "duplicate" });
+          window.location.assign(result.redirect);
+        } catch (error) {
+          button.disabled = false;
+          toast(error.message, error.warning);
+        }
+      });
+    });
     root.querySelectorAll("[data-delete-function]").forEach((button) => {
       button.addEventListener("click", async () => {
         if (!await confirm(`Functie \u201c${button.dataset.title}\u201d verwijderen? Je kunt de functie 30 dagen herstellen via Recent verwijderd.`, "Verwijderen")) return;
@@ -173,11 +185,15 @@
     let state = structuredClone(data);
     let saved = structuredClone(data);
     let selectedFormId = state.forms[0]?.id ?? null;
+    const requestedFormId = Number(new URLSearchParams(window.location.search).get("form"));
+    if (state.forms.some((form) => form.id === requestedFormId)) selectedFormId = requestedFormId;
     let openQuestion = 0;
     let dirty = false;
     const standalone = root.dataset.standalone === "true";
     const typeGroups = fieldTypes(data);
     let locked = data.locked;
+    let canToggleLock = data.canToggleLock;
+    const isReadOnly = () => locked && !data.isManager;
     const formList = root.querySelector("[data-form-list]");
     const editorPanel = root.querySelector("[data-editor-panel]");
     const editor = root.querySelector("[data-form-editor]");
@@ -201,14 +217,14 @@
     const isDirty = () => dirty && JSON.stringify(state) !== JSON.stringify(saved);
     function setDirty() {
       dirty = JSON.stringify(state) !== JSON.stringify(saved);
-      saveButton.disabled = locked || !dirty;
+      saveButton.disabled = isReadOnly() || !dirty;
     }
     async function discardIfNeeded() {
       if (!isDirty()) return true;
       if (!await confirm("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", "Weggooien")) return false;
       state = structuredClone(saved);
       dirty = false;
-      saveButton.disabled = true;
+      saveButton.disabled = isReadOnly() || !dirty;
       return true;
     }
 
@@ -424,8 +440,8 @@
         item.dataset.questionIndex = String(index);
         const header = node("div", "question-heading");
         const drag = iconButton("drag", "Versleep vraag", "drag-handle", null);
-        drag.draggable = !locked;
-        drag.disabled = locked;
+        drag.draggable = !isReadOnly();
+        drag.disabled = isReadOnly();
         drag.setAttribute("aria-label", "Vraag verslepen");
         const title = node("button", `question-title${question.question ? "" : " is-placeholder"}`, question.question || "Nieuwe vraag");
         title.type = "button";
@@ -435,8 +451,8 @@
         const reorder = node("div", "reorder-actions");
         const moveUp = iconButton("up", "Vraag omhoog", "icon-action", () => reorderQuestions(index, index - 1));
         const moveDown = iconButton("down", "Vraag omlaag", "icon-action", () => reorderQuestions(index, index + 1));
-        moveUp.disabled = locked || index === 0;
-        moveDown.disabled = locked || index === form.questions.length - 1;
+        moveUp.disabled = isReadOnly() || index === 0;
+        moveDown.disabled = isReadOnly() || index === form.questions.length - 1;
         reorder.append(moveUp, moveDown);
         actionsGroup.append(reorder);
         actionsGroup.append(iconButton("copy", "Dupliceren", "icon-action", () => {
@@ -469,7 +485,7 @@
       });
       list.addEventListener("dragstart", (event) => {
         const handle = event.target.closest(".drag-handle");
-        if (!handle || locked) { event.preventDefault(); return; }
+        if (!handle || isReadOnly()) { event.preventDefault(); return; }
         event.dataTransfer.setData("text/plain", handle.closest("[data-question-index]").dataset.questionIndex);
         event.dataTransfer.effectAllowed = "move";
       });
@@ -482,7 +498,7 @@
       section.append(list);
       const add = node("button", "new-question", "Nieuwe vraag +");
       add.type = "button";
-      add.disabled = locked;
+      add.disabled = isReadOnly();
       add.addEventListener("click", () => { form.questions.push(blankQuestion()); openQuestion = form.questions.length - 1; renderEditor(); setDirty(); });
       section.append(add);
       return section;
@@ -495,8 +511,8 @@
         const item = node("li", `managed-form-row${form.id === selectedFormId ? " selected" : ""}`);
         item.dataset.formId = String(form.id);
         const drag = iconButton("drag", "Formulier verslepen", "drag-handle", null);
-        drag.draggable = !locked;
-        drag.disabled = locked;
+        drag.draggable = !isReadOnly();
+        drag.disabled = isReadOnly();
         const select = node("button", "managed-form-select", form.title || "Naamloos formulier");
         select.type = "button";
         select.addEventListener("click", async () => {
@@ -508,10 +524,17 @@
         const move = node("div", "reorder-actions");
         const moveUp = iconButton("up", `Formulier omhoog: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, -1));
         const moveDown = iconButton("down", `Formulier omlaag: ${form.title || "Naamloos formulier"}`, "icon-action", async () => moveForm(index, 1));
-        moveUp.disabled = locked || index === 0;
-        moveDown.disabled = locked || index === state.forms.length - 1;
-        select.disabled = locked;
-        move.append(moveUp, moveDown);
+        moveUp.disabled = isReadOnly() || index === 0;
+        moveDown.disabled = isReadOnly() || index === state.forms.length - 1;
+        select.disabled = isReadOnly();
+        const duplicate = iconButton(
+          "copy",
+          `Formulier dupliceren: ${form.title || "Naamloos formulier"}`,
+          "icon-action",
+          () => duplicateForm(form),
+        );
+        duplicate.disabled = isReadOnly();
+        move.append(moveUp, moveDown, duplicate);
         item.append(drag, select, move);
         formList.append(item);
       });
@@ -519,7 +542,7 @@
 
     function formDragStart(event) {
       const handle = event.target.closest(".drag-handle");
-      if (!handle || locked) { event.preventDefault(); return; }
+      if (!handle || isReadOnly()) { event.preventDefault(); return; }
       event.dataTransfer.setData("text/plain", handle.closest("[data-form-id]").dataset.formId);
     }
     function formDragOver(event) { if (event.target.closest("[data-form-id]")) event.preventDefault(); }
@@ -550,6 +573,17 @@
       if (target) await reorderForms(state.forms[index].id, target.id);
     }
 
+    async function duplicateForm(form) {
+      if (isReadOnly() || !await discardIfNeeded()) return;
+      try {
+        const result = await post(root.dataset.actionUrl, {
+          action: "duplicate_form",
+          formId: form.id,
+        });
+        window.location.assign(result.redirect);
+      } catch (error) { toast(error.message, error.warning); }
+    }
+
     function renderEditor() {
       renderFormList();
       editor.replaceChildren();
@@ -562,7 +596,7 @@
       if (!standalone) {
         const removeForm = node("button", "outline button danger-outline", "Verwijderen");
         removeForm.type = "button";
-        removeForm.disabled = locked;
+        removeForm.disabled = isReadOnly();
         removeForm.addEventListener("click", async () => {
           if (!await discardIfNeeded()) return;
           if (!await confirm(`Formulier \u201c${form.title || "Naamloos formulier"}\u201d verwijderen?`, "Verwijderen")) return;
@@ -577,7 +611,17 @@
         });
         actions.append(removeForm);
       }
-      saveButton.disabled = locked || !dirty;
+      if (standalone) {
+        const duplicate = iconButton(
+          "copy",
+          "Formulier dupliceren",
+          "icon-action",
+          () => duplicateForm(form),
+        );
+        duplicate.disabled = isReadOnly();
+        actions.append(duplicate);
+      }
+      saveButton.disabled = isReadOnly() || !dirty;
       actions.append(saveButton);
       const fields = node("div", "managed-form-fields");
       if (!standalone) {
@@ -587,17 +631,23 @@
           if (selected) selected.textContent = value || "Naamloos formulier";
           setDirty();
         }, { wide: true, maxLength: 180 });
-        title.disabled = locked;
+        title.disabled = isReadOnly();
       }
       editor.append(fields, renderQuestions(form));
       editor.querySelectorAll("input,textarea,select,button").forEach((control) => {
-        if (control !== saveButton) control.disabled = locked || control.disabled;
+        if (control !== saveButton) control.disabled = isReadOnly() || control.disabled;
       });
-      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !locked; });
-      root.querySelector("[data-new-form]")?.toggleAttribute("disabled", locked);
-      renameButton.disabled = locked || data.std;
+      root.querySelectorAll(".drag-handle").forEach((handle) => { handle.draggable = !isReadOnly(); });
+      root.querySelector("[data-new-form]")?.toggleAttribute("disabled", isReadOnly());
+      renameButton.disabled = isReadOnly() || data.std;
+      lockButton.disabled = data.std || !canToggleLock;
       lockButton.querySelector("span").textContent = locked ? "Ontgrendelen" : "Vergrendelen";
       lockButton.setAttribute("aria-pressed", String(locked));
+      const lockStatus = root.querySelector("[data-lock-status]");
+      lockStatus.hidden = !locked;
+      lockStatus.textContent = locked
+        ? `Vergrendeld door ${data.lockedByName || "onbekende gebruiker"}`
+        : "";
     }
 
     async function saveCurrentForm() {
@@ -638,13 +688,15 @@
         const result = await post(root.dataset.actionUrl, { action: "toggle_lock" });
         locked = result.locked;
         data.locked = locked;
+        data.lockedByName = result.lockedByName;
+        canToggleLock = result.canToggleLock;
         renderEditor();
         toast(result.message);
       } catch (error) { toast(error.message, error.warning); }
     });
 
     renameButton.addEventListener("click", async () => {
-      if (locked || !await discardIfNeeded()) return;
+      if (isReadOnly() || !await discardIfNeeded()) return;
       const result = await dialog("Functienaam wijzigen", "Voer een nieuwe naam in.", { input: true, value: state.title, confirmText: "Opslaan" });
       if (!result.confirmed || !result.value || result.value === state.title) return;
       try {
