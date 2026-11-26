@@ -6,12 +6,12 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import (
+from dossier.models import (
     Assignment, Case, Education, LibraryDossier, LibraryDossierModule,
     LibraryField, LibraryTemplate, Module, ModuleField, Patient, Profile, StudentCase,
     TeachingGroup,
 )
-from .services import copy_library_dossier_to_case, start_student_case
+from dossier.services import copy_library_dossier_to_case, start_student_case
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

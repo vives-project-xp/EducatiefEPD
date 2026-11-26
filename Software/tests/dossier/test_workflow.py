@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from .models import (
+from dossier.models import (
     Assignment,
     AssignmentSubmission,
     Case,
@@ -29,13 +29,13 @@ from .models import (
     StudentCase,
     TeachingGroup,
 )
-from .auth import EpdOIDCAuthenticationBackend
-from .services import (
+from dossier.auth import EpdOIDCAuthenticationBackend
+from dossier.services import (
     build_sidebar_structure, copy_template_to_case, create_case_structure,
     ensure_default_templates, start_student_case,
 )
-from .matrix import legacy_definition
-from .test_fixtures import create_library_fixtures
+from dossier.matrix import legacy_definition
+from .fixtures import create_library_fixtures
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)
@@ -452,13 +452,13 @@ class EpdWorkflowTests(TestCase):
         response = self.client.get(reverse("dossier:function_detail", args=[function.id]))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "function_management.js")
-        script = (Path(__file__).resolve().parents[1] / "static" / "function_management.js").read_text(encoding="utf-8")
+        script = (Path(__file__).resolve().parents[2] / "static" / "function_management.js").read_text(encoding="utf-8")
         self.assertIn("saveButton.disabled = true", script)
         self.assertIn("saveButton.disabled = locked || !dirty", script)
         self.assertIn("Er zijn niet-opgeslagen wijzigingen. Wil je die weggooien?", script)
 
     def test_answer_editor_save_guard_and_error_retry_are_present(self):
-        script = (Path(__file__).resolve().parents[1] / "static" / "epd-save.js").read_text(encoding="utf-8")
+        script = (Path(__file__).resolve().parents[2] / "static" / "epd-save.js").read_text(encoding="utf-8")
         self.assertIn("const states = new WeakMap()", script)
         self.assertIn("button.disabled = !dirty || state.saving", script)
         self.assertIn("event.target.closest('[data-form-save]')", script)
@@ -712,7 +712,7 @@ class EpdWorkflowTests(TestCase):
             title="Extra", category=LibraryTemplate.Category.MODULE,
             education=self.education, created_by=self.teacher,
         )
-        from .services import copy_template_to_case
+        from dossier.services import copy_template_to_case
         added_module = copy_template_to_case(template, self.case)
         for _ in range(2):
             reopened, created = start_student_case(self.case, self.student)

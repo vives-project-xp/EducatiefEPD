@@ -6,7 +6,7 @@ import json
 import os
 
 from django.conf import settings
-from dossier.test_matrix import MatrixWorkflowTests
+from tests.dossier.test_matrix import MatrixWorkflowTests
 from dossier.matrix import legacy_definition
 from dossier.models import LibraryField
 

@@ -10,7 +10,7 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location("epd_health", Path(__file__).parents[2] / "healthcheck.py")
 health = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(health)
-SPEC = importlib.util.spec_from_file_location("epd_deploy", Path(__file__).parents[1] / "deploy.py")
+SPEC = importlib.util.spec_from_file_location("epd_deploy", Path(__file__).parents[2] / "deploy" / "deploy.py")
 deploy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(deploy)
 
